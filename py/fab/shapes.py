@@ -1504,4 +1504,33 @@ shape |= circle(0.275, 0.075, 0.075)
 _widths['?'] = 0.55
 _glyphs['?'] = shape
 
+
+shape = rectangle(0.5, 0.6, 0, 0.8)
+shape |= rectangle(0, 0.1, 0, 0.8)
+shape |= rectangle(0.1, 0.6, 0, 0.1)
+shape |= rectangle(0.1, 0.6, 0.4, 0.5)
+shape = shear_x_y(shape, 0, 0.8, 0, 0.1)
+_widths['#'] = 0.75
+_glyphs['#'] = shape
+
+
+shapeA = circle(0.25, 0.275, 0.275)
+shapeA &= ~circle(0.25, 0.275, 0.175)
+shapeA = shear_x_y(shapeA, 0, 0.35, 0, 0.1)
+shapeA |= rectangle(0.51, 0.61, 0, 0.35)
+shapeA = move(shapeA, -0.1, 0)
+shapeA = scale_x(shapeA, 0, 0.8)
+shapeE = circle(0.275, 0.275, 0.275)
+shapeE &= ~circle(0.275, 0.275, 0.175)
+shapeE &= ~triangle(0.1, 0.275, 0.75, 0.275, 0.6, 0)
+shapeE |= rectangle(0.05, 0.55, 0.225, 0.315)
+shapeE &=  circle(0.275, 0.275, 0.275)
+shapeE = scale_x(shapeE, 0, 0.9)
+shapeE = move(shapeE, 0.32, 0)
+_widths['æ'] = 1
+_glyphs['æ'] = shapeA | shapeE
+
+
+del shapeA
+del shapeE
 del shape
