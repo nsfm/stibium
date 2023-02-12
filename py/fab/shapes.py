@@ -957,7 +957,7 @@ _glyphs['b'] = shape
 shape = circle(0.3, 0.7, 0.3) & ~circle(0.3, 0.7, 0.2)
 shape |= circle(0.3, 0.3, 0.3) & ~circle(0.3, 0.3, 0.2)
 shape &= ~rectangle(0, 0.6, 0.3, 0.7)
-shape &= ~triangle(0.3, 0.5, 1, 1.5, 1, -0.5)
+shape &= ~triangle(0.3, 0.5, 1.5, 1.5, 1.5, -0.5)
 shape &= ~rectangle(0.3, 0.6, 0.2, 0.8)
 shape |= rectangle(0, 0.1, 0.3, 0.7)
 _widths['C'] = 0.57
@@ -966,7 +966,7 @@ _glyphs['C'] = shape
 
 shape = circle(0.275, 0.275, 0.275)
 shape &= ~circle(0.275, 0.275, 0.175)
-shape &= ~triangle(0.275, 0.275, 0.55, 0.55, 0.55, 0)
+shape &= ~triangle(0.275, 0.275, 1, 1, 1, -0.55)
 _widths['c'] = 0.48
 _glyphs['c'] = shape
 
