@@ -21,8 +21,8 @@ std::pair<std::string, int> getPyError()
         error_lineno = PyLong_AsLong(lineno);
         Py_DECREF(lineno);
     } else {
-        error_lineno = PyLong_AsLong(PyTuple_GetItem(
-                                     PyTuple_GetItem(pvalue, 1), 1));
+        error_lineno = 0; //PyLong_AsLong(PyTuple_GetItem(
+                           //          PyTuple_GetItem(pvalue, 1), 1));
     }
 
     // Call traceback.format_exception on the traceback.
