@@ -1243,6 +1243,14 @@ shape |= rectangle(0.15, 0.25, 0.25, 1)
 _widths['t'] = 0.4
 _glyphs['t'] = shape
 
+# Fix kerning for lowercase t
+shape = circle(0.4, 0.25, 0.25) & ~circle(0.4, 0.25, 0.15)
+shape &= rectangle(0, 0.4, 0, 0.25)
+shape |= rectangle(0, 0.4, 0.55, 0.65)
+shape |= rectangle(0.15, 0.25, 0.25, 1)
+shape = translate(shape, -.125, 0, 0)
+_widths['𝑡'] = 0.275
+_glyphs['𝑡'] = shape
 
 shape = circle(0.3, 0.3, 0.3) & ~circle(0.3, 0.3, 0.2)
 shape &= rectangle(0, 0.6, 0, 0.3)
