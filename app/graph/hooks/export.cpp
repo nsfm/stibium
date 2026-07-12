@@ -71,9 +71,11 @@ object ScriptExportHooks::stl(tuple args, dict kwargs)
             get_object("filename", kwargs, ""));
     const float resolution = get_object("resolution", kwargs, -1);
     const bool detect_features = get_object("detect_features", kwargs, false);
+    const float simplify = get_object("simplify", kwargs, 0.0f);
 
     self->proxy->setExportWorker(new ExportMeshWorker(
-                shape, bounds, filename, resolution, detect_features));
+                shape, bounds, filename, resolution, detect_features,
+                simplify));
     return object();
 }
 

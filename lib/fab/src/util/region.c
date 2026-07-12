@@ -28,8 +28,11 @@ void build_arrays(Region* const R,
                         : 0;
 
     R->L = malloc((R->nk+1)*sizeof(uint16_t));
+    // A thin model can round to nk == 0 voxels (bounded z, but
+    // extent * resolution < 1); guard the division so that case
+    // renders flat instead of crashing with SIGFPE.
     for (unsigned h = 0; h <= R->nk; ++h)
-        R->L[h] = has_z ? (65535 * h) / (R->nk) : 65535;
+        R->L[h] = (has_z && R->nk) ? (65535 * h) / (R->nk) : 65535;
 }
 
 void free_arrays(Region* const R)

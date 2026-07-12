@@ -77,9 +77,52 @@
    <item>
     <widget class="QRadioButton" name="detect_features">
      <property name="text">
-      <string>Detect features (experimental)</string>
+      <string>Detect features</string>
+     </property>
+     <property name="checked">
+      <bool>true</bool>
      </property>
     </widget>
+   </item>
+   <item>
+    <widget class="QCheckBox" name="simplify_mesh">
+     <property name="text">
+      <string>Simplify mesh</string>
+     </property>
+     <property name="checked">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="simplify_layout">
+     <item>
+      <widget class="QLabel" name="max_deviation_label">
+       <property name="text">
+        <string>Max deviation (units):</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QDoubleSpinBox" name="max_deviation">
+       <property name="decimals">
+        <number>3</number>
+       </property>
+       <property name="minimum">
+        <double>0.001000000000000</double>
+       </property>
+       <property name="maximum">
+        <double>100.000000000000000</double>
+       </property>
+       <property name="singleStep">
+        <double>0.010000000000000</double>
+       </property>
+       <property name="value">
+        <double>0.010000000000000</double>
+       </property>
+      </widget>
+     </item>
+    </layout>
    </item>
    <item>
     <widget class="QDialogButtonBox" name="buttonBox">

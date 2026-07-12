@@ -85,6 +85,10 @@ set(SRC_FILES
     viewport/render/instance.cpp
     viewport/render/task.cpp
 
+    vendor/meshoptimizer/allocator.cpp
+    vendor/meshoptimizer/indexgenerator.cpp
+    vendor/meshoptimizer/simplifier.cpp
+
     gl/gl.qrc
 )
 

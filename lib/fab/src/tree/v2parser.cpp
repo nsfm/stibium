@@ -81,7 +81,7 @@ bool v2parse(Node **result, const char* input, Node* X, Node* Y, Node *Z, NodeCa
     yy_delete_buffer(bufferState, scanner);
     yylex_destroy(scanner);
     v2ParseFree(parser, free);
-    free(locals->nodestack);
+    delete locals->nodestack;
     free(locals);
 
     return true;

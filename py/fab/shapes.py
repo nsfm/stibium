@@ -557,6 +557,68 @@ def blend(a, b, amount):
                    joint.bounds)
     return joint | fillet
 
+def chamfer_union(a, b, r):
+    """ Union with a 45-degree chamfer of width r along the seam.
+        Assumes distance-like fields near the surfaces.
+    """
+    if r <= 0:
+        return a | b
+    # min(min(a, b), (a + b - r) * sqrt(1/2))
+    s = 'ii%s%s*f0.7071067811865476+%s-%sf%g' % (a.math, b.math,
+                                                  a.math, b.math, r)
+    return Shape(s, (a | b).bounds)
+
+def chamfer_intersection(a, b, r):
+    """ Intersection with a 45-degree chamfer of width r along the seam.
+    """
+    if r <= 0:
+        return a & b
+    # max(max(a, b), (a + b + r) * sqrt(1/2))
+    s = 'aa%s%s*f0.7071067811865476++%s%sf%g' % (a.math, b.math,
+                                                  a.math, b.math, r)
+    return Shape(s, (a & b).bounds)
+
+def chamfer_difference(a, b, r):
+    """ Difference with a 45-degree chamfer of width r along the cut edge.
+    """
+    if r <= 0:
+        return a & ~b
+    # max(max(a, -b), (a - b + r) * sqrt(1/2))
+    s = 'aa%sn%s*f0.7071067811865476++%sn%sf%g' % (a.math, b.math,
+                                                    a.math, b.math, r)
+    return Shape(s, (a & ~b).bounds)
+
+def fillet_union(a, b, r):
+    """ Union with a rounded fillet of radius r along the seam.
+        Assumes distance-like fields near the surfaces.
+    """
+    if r <= 0:
+        return a | b
+    # min(a, b) - max(r - |a - b|, 0)^2 / (4*r)
+    s = '-i%s%s/qaf0-f%gb-%s%sf%g' % (a.math, b.math, r,
+                                      a.math, b.math, 4*r)
+    return Shape(s, (a | b).bounds)
+
+def fillet_intersection(a, b, r):
+    """ Intersection with a rounded fillet of radius r along the seam.
+    """
+    if r <= 0:
+        return a & b
+    # max(a, b) + max(r - |a - b|, 0)^2 / (4*r)
+    s = '+a%s%s/qaf0-f%gb-%s%sf%g' % (a.math, b.math, r,
+                                      a.math, b.math, 4*r)
+    return Shape(s, (a & b).bounds)
+
+def fillet_difference(a, b, r):
+    """ Difference with a rounded fillet of radius r along the cut edge.
+    """
+    if r <= 0:
+        return a & ~b
+    # max(a, -b) + max(r - |a + b|, 0)^2 / (4*r)
+    s = '+a%sn%s/qaf0-f%gb+%s%sf%g' % (a.math, b.math, r,
+                                       a.math, b.math, 4*r)
+    return Shape(s, (a & ~b).bounds)
+
 def morph(a, b, weight):
     """ Morphs between two shapes.
     """

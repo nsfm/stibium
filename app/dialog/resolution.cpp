@@ -19,7 +19,17 @@ ResolutionDialog::ResolutionDialog(Bounds bounds, bool dimensions, bool has_unit
     }
 
     if (dimensions == RESOLUTION_DIALOG_2D)
+    {
         ui->detect_features->hide();
+        ui->simplify_mesh->hide();
+        ui->max_deviation_label->hide();
+        ui->max_deviation->hide();
+    }
+
+    connect(ui->simplify_mesh, &QCheckBox::toggled,
+            ui->max_deviation, &QDoubleSpinBox::setEnabled);
+    connect(ui->simplify_mesh, &QCheckBox::toggled,
+            ui->max_deviation_label, &QLabel::setEnabled);
 
     // Re-do the layout, since things may have just been hidden
     layout()->invalidate();
@@ -76,4 +86,9 @@ float ResolutionDialog::getMMperUnit() const
 bool ResolutionDialog::getDetectFeatures() const
 {
     return ui->detect_features->isChecked();
+}
+
+float ResolutionDialog::getSimplifyDeviation() const
+{
+    return ui->simplify_mesh->isChecked() ? ui->max_deviation->value() : 0;
 }
