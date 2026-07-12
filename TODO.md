@@ -43,6 +43,11 @@ were named for the element symbol all along).
 - **Node editor QoL.** Fuzzy-search add menu (type "cyl"), minimap for big
   graphs, canvas annotations (sticky notes + named zones behind nodes,
   persisted in the .sb JSON like node positions).
+- **UI glow-up.** Full prioritized plan in
+  [doc/UI-MODERNIZATION.md](doc/UI-MODERNIZATION.md): palette refresh,
+  app-wide dark theme, wire/port/node facelift, viewport shader
+  modernization, zoom LOD, icons/fonts — with the Qt6 port as its own
+  later milestone (framework verdict: keep Qt, reject QML rewrite).
 - **Autosave v2.** Rotating timestamped backups instead of
   overwrite-in-place; crash-recovery prompt on next launch; interval and
   retention in a real preferences dialog (the fork's founding feature,
