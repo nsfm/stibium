@@ -17,6 +17,7 @@
 
 #include "graph/graph.h"
 #include "app/theme.h"
+#include "app/settings.h"
 
 App::App(int& argc, char** argv)
     : QApplication(argc, argv),
@@ -32,6 +33,11 @@ App::App(int& argc, char** argv)
 
     setApplicationName("Stibium");
     setOrganizationDomain("github.com/nsfm/stibium");
+
+    Settings::init();
+    autosave_interval = Settings::get(
+            "autosave/interval_ms", autosave_interval).toInt();
+
     Theme::apply(this);
 }
 
