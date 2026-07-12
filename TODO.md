@@ -1,65 +1,174 @@
-# TODO — potential upgrades
+# TODO — the campaign
 
-Running list of improvements considered for this fork. Larger items first.
+Running list of upgrades for this fork. If it goes far enough: upstream the
+good parts to Keeter, or first-class the fork as **Stibium** (the .sb files
+were named for the element symbol all along).
 
-## Meshing / export
+## Tier 1 — would die on these hills
 
-- **Indexed mesh storage in the mesher.** `Mesher` holds the whole mesh as
-  `std::list<Triangle>`, and with feature detection on, `remove_dupes()` /
-  `prune_flags()` build a `std::map` + `std::set` over every vertex and
-  triangle on top of it (~275 bytes/triangle measured, ~2.2x the
-  detect-off path; 43M triangles ≈ 12 GB). Moving to flat vectors with an
-  indexed vertex buffer would roughly halve memory, remove the OOM crash
-  on large exports, and speed up meshing considerably (pointer-chasing a
-  list dominates cache behavior). `4x5_ground_glass_holder` takes ~2 min
-  to mesh today.
-- **Parallel meshing.** `triangulate_region()` recursively subdivides into
-  independent sub-regions — a natural fork/join. The mesher is currently
-  single-threaded; the machine has cores to spare during export.
-- **Adaptive meshing (libfive-style dual contouring).** The uniform grid
-  is why raw exports are enormous. libfive (same author, MPL-2.0 core) does
-  manifold dual contouring over an adaptive octree — fewer, feature-aligned
-  triangles at the source instead of decimating after the fact. Big
-  engineering; the meshoptimizer post-pass covers most of the value.
-- **Report simplification stats after export** ("2.1M → 48k triangles,
-  max deviation 0.009") — the numbers exist, there's just no UI channel.
-- **Batch shrink tool for existing STLs** (weld + error-bounded simplify,
-  mirrors the export pipeline). Working prototype exists; needs a decision
-  on where it lives (antimony-models/scripts/?) and overwrite-vs-suffix.
+- **SVG + DXF export for 2D shapes.** Marching squares over the field →
+  paths → SVG/DXF. Serves the vector-graphics workflow (currently
+  massive-resolution PNGs for photolithography) and laser cutting.
+  Resolution-independent litho masks.
+- **3MF export.** Zipped + indexed + units; every modern slicer reads it.
+  The simplifier already produces an indexed mesh in memory, so most of
+  the work is done. Default format; STL stays for compatibility.
+- **Cross-section preview.** Draggable slice plane in the viewport showing
+  part interiors (walls, voids, clearances). Nearly free in f-rep — render
+  the field on one plane. Formalizes the accidental z-clip slicing the 2D
+  view path already does (see task.cpp screen-space z clipping).
+- **Mesh import as a distance field.** STL/3MF in → sampled voxel SDF node
+  (trilinear interpolation). Design around existing parts: PCB models,
+  scans, vendor STEP-derived meshes. Upstream's most-requested feature
+  (mkeeter/antimony#153), never landed.
+- **Indexed mesh storage in the mesher.** Replace `std::list<Triangle>` +
+  dedup map/set (~275 B/triangle with detect-features on; 43M tris ≈ 12 GB;
+  ~2 min to mesh the 4x5 ground glass holder) with flat vectors + indexed
+  vertices. Halves memory, kills the large-export OOM, big speedup.
 
-## Nodes / shape library
+## Tier 2 — strong wants
 
-- Port more of the libfive stdlib (MPL-2.0, license-compatible):
-  gyroid / TPMS infill, polar + linear arrays beyond stock, rounded
-  primitives (capsule, rounded box), elongate, bend, twirl.
-- 2D-specific ops for the vector-graphics workflow (pure-2D fillet/chamfer
-  variants; text-on-path; stroke/outline of a 2D field).
+- **Print-centric checks.** Minimum-wall-thickness detection from the
+  field itself (walls thinner than nozzle flagged before slicing);
+  overhang-angle visualization is plausible too (gradient vs build
+  direction). Ends guess-and-check on functional parts.
+- **Domain repetition nodes.** Modulo-space repeat (finite grid / radial),
+  O(1) field cost regardless of copy count — unlike Array nodes, which
+  union N copies at O(N). The recursive/massive-pattern primitive
+  (photolithography masks, lattices, textures).
+- **Multi-shape export.** One click → N files (print plates, assemblies).
+  The export hook currently hard-rejects multiple export tasks per script.
+- **Parallel meshing.** `triangulate_region()` subdivides recursively —
+  natural fork/join; currently single-threaded.
+- **Node editor QoL.** Fuzzy-search add menu (type "cyl"), minimap for big
+  graphs, canvas annotations (sticky notes + named zones behind nodes,
+  persisted in the .sb JSON like node positions).
+- **Autosave v2.** Rotating timestamped backups instead of
+  overwrite-in-place; crash-recovery prompt on next launch; interval and
+  retention in a real preferences dialog (the fork's founding feature,
+  un-hacked).
+- **Preferences dialog.** Autosave settings, default export deviation,
+  default resolution heuristic, viewport colors. The app currently has
+  essentially no user configuration surface.
+- **Reusable node groups / user parts library.** Save a subgraph cluster
+  (e.g. a measurement block + subsystem) as a named, reusable node in a
+  user library folder. Foundation for a community parts ecosystem.
 
-## UI
+## Tier 2.5 — adopted from dreaming mode (concrete, just not scheduled)
 
-- **Canvas annotations**: comment boxes + named highlighted zones behind
-  nodes (QGraphicsObject at low z, persisted as canvas metadata in the .sb
-  JSON alongside node positions). Both sticky notes and named zones.
-- Enable "Detect features" by default in the resolution dialog — DONE
-  (2026-07-12), label de-experimentalized.
+- **Color propagation fix.** Color currently vanishes when a colored shape
+  merges with any uncolored node. Rule: CSG results inherit color from
+  colored operand(s) (union of colored+uncolored keeps the color;
+  colored+colored could blend or keep-first). Prereq for color export.
+- **Color/multi-material 3MF export.** The color nodes already exist and
+  die in the viewport; 3MF carries material/color regions and
+  multi-material printers are mainstream. ~70% built and doesn't know it.
+- **Parametric ISO thread nodes.** Helix = twisted profile; f-rep handles
+  it natively. Internal/external, standard pitches, printable clearance
+  presets. Every functional-parts tool hits this wall; Stibium doesn't.
+- **Analytics panel.** Field integrals via Monte Carlo: volume, mass per
+  material, center of gravity, stands-upright check, bounding box &
+  projected footprint. Ends guess-and-check counterweighting.
+- **Procedural noise opcodes.** Perlin/simplex in the C evaluator →
+  knurling, stipple, woodgrain-as-a-node (with seed input so "every
+  render unique" becomes reproducible-unique). Tactile surfaces on
+  functional prints.
+- **Lithophane / image-displacement node.** Image import's sibling:
+  thickness-modulated surface from a photo. (The archive is full of
+  camera and darkroom gear; this audience overlap is not a coincidence.)
+- **Slicer modifier-volume export.** Export designated shapes as 3MF
+  modifier meshes (PrusaSlicer supports them): "this region 100% infill,
+  this one 0.1mm layers" — print-tuning designed in the graph.
 
-## Tooling
+## Tier 3 — moonshots
 
-- **Headless CLI renderer** (`antimony-render model.sb -o front.png`):
-  render core (`render16`/`shaded8`) is pure C, no Qt/GL needed. Unlocks
-  a generated gallery for antimony-models and wiki illustrations.
-  Reference harness for driving lib/fab headless already exists (parse
-  math string → Region → triangulate/render).
-- **Getting-started wiki** (GitHub Pages). Nothing comparable exists
-  anywhere; node reference could be partially generated from the .node
-  files (they're self-describing Python).
+- **GPU field evaluation for the viewport.** CPU raymarching holds back
+  complex models (Zeiss ID02: dozens of assemblies). Fidget proves the
+  JIT/wide-evaluation approach; upstream has an abandoned `gl-render`
+  branch to study. Months, not days — but it makes the tool feel current.
+- **Adaptive meshing (libfive-style manifold dual contouring).** Fewer,
+  feature-aligned triangles at the source. MPL-2.0 core, license-safe to
+  adapt. The meshoptimizer post-pass covers most of the value meanwhile.
+- **Image import node.** PNG/heightmap → interpolated field (inverse of
+  the existing heightmap export). Engraving, litho, textures.
+- **Exact layer preview / field-to-toolpath.** A slicer computes planar
+  contours per layer; the field gives exact contours for free. Start with
+  "show me layer N" in the viewport; unhinged endgame is math → gcode
+  with no mesh in between.
+- **Differentiable-CAD optimization.** Fields are closed-form and exactly
+  differentiable: "minimize material s.t. wall ≥ 0.8mm", "solve for the
+  parameter where these parts stop colliding." Gradient descent over the
+  graph's free datums.
+- **Kinematic scrubber.** A driver datum on a timeline slider — assemblies
+  articulate in the viewport (the Zeiss focus mechanism actually racking).
+  Also: motion GIFs for the gallery.
+- **WASM web viewer.** Field evaluation compiled to WASM (Fidget proves
+  it) → the GitHub gallery becomes interactive: visitors orbit models in
+  the browser instead of squinting at JPGs.
 
-## Known small bugs / cleanups
+*The thesis binding all of these: everyone else converts to triangles and
+then fights the triangles. Stay math longer — slice, optimize, texture,
+weigh, and animate the field, upstream of any mesh.*
+
+## Agent-friendly modeling (LLM/automation as a first-class user)
+
+Antimony already speaks Python-into-math; make the loop closable without
+a GUI so agentic tools can contribute to modeling cleanly:
+
+- **Headless verbs.** `stibium export model.sb out.3mf`, `stibium render
+  model.sb -o view.png`, `stibium validate model.sb` (parse + evaluate +
+  report errors as structured output). Render = the agent's eyes; export
+  = hands; validate = conscience. (Same plumbing as the CLI renderer.)
+- **`fab` as an installable pure-Python package.** The shape library
+  already imports standalone with a small Shape/Transform shim (proven
+  during chamfer testing). Publish it so scripts/agents can compose
+  shapes and emit .sb or math strings outside the app.
+- **Programmatic .sb authoring.** The format is JSON; document the
+  schema (protocol 6) + connection encoding, provide a tiny writer
+  library, and keep serialization deterministic so agent edits diff
+  cleanly next to human edits in git.
+- **Machine-readable node reference.** Generate JSON (name, inputs,
+  types, defaults, category, doc line) from the self-describing .node
+  files — same generator feeds the wiki for humans.
+- **Structured errors.** Script/node errors surfaced on stdout/exit
+  codes in the headless verbs, not just red text in a GUI datum.
+- **MCP server (stretch).** load/save graph, list/add/edit nodes, eval
+  bounds, render viewport → any agent-capable editor can drive a live
+  Stibium session interactively.
+
+## Distribution / project health
+
+- GitHub Actions CI (build on push), AppImage/Flatpak releases — "runs on
+  other people's machines" is a feature.
+- Deterministic .sb serialization (stable key/node ordering) so models
+  diff cleanly in git.
+- Getting-started wiki (GitHub Pages); node reference partially generated
+  from the self-describing .node files. Nothing comparable exists.
+- Headless CLI renderer (`antimony-render model.sb -o front.png`) —
+  render core is pure C, no Qt/GL. Unlocks the antimony-models gallery,
+  wiki illustrations, and turntable GIFs. 2D path is first-class.
+- Batch shrink tool for existing STL archives (prototype works; decide
+  home + overwrite-vs-suffix policy).
+- Port more libfive stdlib (MPL-2.0-compatible): gyroid/TPMS, rounded
+  primitives, elongate, bend, twirl. Text-on-path for the vector font.
+
+## Small bugs / cleanups
 
 - `v2parse()` leaks scanner/parser/locals on the parse-failure early
   return (v2parser.cpp) — pre-existing, low priority.
-- `RenderTask::render()` (viewport/render/task.cpp) missing-field warnings
-  for Region initializers; harmless but noisy.
-- STL writer (`lib/fab/src/formats/stl.c`) writes the triangle count via
-  `sizeof(float)` — works because sizeof(int)==sizeof(float), but it's
-  fragile-looking; trivial cleanup.
+- `RenderTask::render()` missing-field-initializer warnings for Region.
+- STL writer counts via `sizeof(float)` for an int — works, fragile.
+
+## Done
+
+- 2026-07-12 — meshoptimizer simplification in STL export (weld +
+  error-bounded decimation, "max deviation" in the dialog, `simplify=`
+  kwarg for scripted exports). ~94-99% smaller files.
+- 2026-07-12 — chamfer + fillet union/intersection/difference nodes
+  (six), math verified to machine precision.
+- 2026-07-12 — fixed SIGFPE on thin models (region.c div-by-zero), parser
+  new/free mismatch, mesher hardening (contour guard, normals-overflow
+  early-return, safe erase idioms). Detect-features large-model "crash"
+  root-caused as memory exhaustion (~275 B/tri), not a logic bug.
+- 2026-07-12 — detect features enabled by default, "(experimental)"
+  label dropped.
