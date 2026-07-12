@@ -100,8 +100,8 @@ void ViewportView::drawBackground(QPainter* painter, const QRectF& rect)
 
     {   // Vertical gradient backdrop in the warm palette
         QLinearGradient grad(rect.topLeft(), rect.bottomLeft());
-        grad.setColorAt(0, Colors::adjust(Colors::base00, 1.35f));
-        grad.setColorAt(1, Colors::base00);
+        grad.setColorAt(0, QColor("#12100b"));
+        grad.setColorAt(1, QColor("#080706"));
         painter->fillRect(rect, grad);
     }
 
