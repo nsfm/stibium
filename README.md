@@ -35,7 +35,7 @@ For Antimony history and design rationale, see [Matt Keeter's writeup](https://m
 Stibium's new work is released under the [GPLv3](LICENSE).
 
 Code inherited from Antimony remains under its original MIT License —
-see [LICENSE.antimony](LICENSE.antimony).
+see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
 Copyright (c) 2013-2015 Matthew Keeter and other contributors (Antimony)
 
