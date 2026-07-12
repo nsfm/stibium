@@ -14,6 +14,7 @@ set(SRC_FILES
     app/main.cpp
     app/app.cpp
     app/colors.cpp
+    app/theme.cpp
     canvas/scene.cpp
     canvas/canvas_view.cpp
     canvas/info.cpp

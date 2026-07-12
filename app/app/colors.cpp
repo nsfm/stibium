@@ -10,30 +10,33 @@
 
 namespace Colors
 {
-QColor red("#ac4142");
-QColor orange("#d28445");
-QColor yellow("#f4bf75");
-QColor green("#90a959");
-QColor teal("#75b5aa");
-QColor blue("#6a9fb5");
-QColor violet("#aa759f");
-QColor brown("#8f5536");
+QColor red("#e05252");
+QColor orange("#e8883f");
+QColor yellow("#f2c14e");
+QColor green("#97bf70");
+QColor teal("#4fc1b0");
+QColor blue("#5a9fe0");
+QColor violet("#b183d6");
+QColor brown("#c08552");
+QColor amber("#f0a63c");    // UI accent: selection, focus, hover
 
-QColor base00("#151515");
-QColor base01("#202020");
-QColor base02("#303030");
-QColor base03("#505050");
-QColor base04("#b0b0b0");
-QColor base05("#d0d0d0");
-QColor base06("#e0e0e0");
-QColor base07("#f5f5f5");
+// Warm charcoal ramp (dark -> light)
+QColor base00("#16130e");
+QColor base01("#1e1a14");
+QColor base02("#2a241b");
+QColor base03("#4d4536");
+QColor base04("#b5aa96");
+QColor base05("#d8cfbe");
+QColor base06("#eae3d5");
+QColor base07("#f8f4eb");
 
 QColor adjust(QColor c, float scale)
 {
-    c.setRed(fmax(fmin(c.red()*scale, 255), 0));
-    c.setGreen(fmax(fmin(c.green()*scale, 255), 0));
-    c.setBlue(fmax(fmin(c.blue()*scale, 255), 0));
-    return c;
+    // Lightness-based shift: multiplicative RGB scaling can't brighten
+    // dark colors (0 * anything is 0), so hover highlights vanished on
+    // dark fills.
+    return scale >= 1 ? c.lighter(int(scale * 100))
+                      : c.darker(int(100 / scale));
 }
 
 QColor highlight(QColor c)
@@ -73,6 +76,7 @@ PyObject* PyColors()
         {"blue", blue},
         {"violet", violet},
         {"brown", brown},
+        {"amber", amber},
         {"base00", base00},
         {"base01", base01},
         {"base02", base02},
