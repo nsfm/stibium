@@ -21,9 +21,9 @@ QColor brown("#c08552");
 QColor amber("#f0a63c");    // UI accent: selection, focus, hover
 
 // Warm charcoal ramp (dark -> light)
-QColor base00("#16130e");
-QColor base01("#1e1a14");
-QColor base02("#2a241b");
+QColor base00("#100e0a");
+QColor base01("#272219");
+QColor base02("#352d20");
 QColor base03("#4d4536");
 QColor base04("#b5aa96");
 QColor base05("#d8cfbe");
