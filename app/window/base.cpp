@@ -60,8 +60,6 @@ void BaseWindow::connectActions(App* app)
     // Help menu
     connect(ui->actionAbout, &QAction::triggered,
             app, &App::onAbout);
-    connect(ui->actionCheckUpdate, &QAction::triggered,
-            app, &App::onUpdateCheck);
 
     // Connect to the App-level signals that adjust window titles
     connect(app, &App::filenameChanged,

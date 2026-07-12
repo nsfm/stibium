@@ -8,7 +8,6 @@
 #include <QJsonDocument>
 
 #include "app/app.h"
-#include "app/update.h"
 
 #include "graph/proxy/graph.h"
 #include "graph/serialize/serializer.h"
@@ -235,12 +234,6 @@ void App::onAbout()
     txt += "<br>Git revision: <tt>" + rev + "</tt>";
 
     QMessageBox::about(NULL, "Antimony", txt);
-}
-
-void App::onUpdateCheck()
-{
-    auto u = new UpdateChecker(this);
-    u->start();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
