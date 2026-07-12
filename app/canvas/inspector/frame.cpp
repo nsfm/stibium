@@ -1,5 +1,7 @@
 #include <Python.h>
 
+#include <algorithm>
+
 #include <QGraphicsScene>
 #include <QPainter>
 #include <QGraphicsSceneMouseEvent>
@@ -59,7 +61,7 @@ QList<DatumRow*> InspectorFrame::visibleRows() const
         }
 
     // Sort datums by row order
-    qSort(rows.begin(), rows.end(),
+    std::sort(rows.begin(), rows.end(),
           [](const DatumRow* a, const DatumRow* b)
           { return a->getIndex() < b->getIndex(); });
 
@@ -159,7 +161,7 @@ void InspectorFrame::redoLayout()
     }
 
     // Sort datums by row order
-    qSort(rows.begin(), rows.end(),
+    std::sort(rows.begin(), rows.end(),
           [](const DatumRow* a, const DatumRow* b)
           { return a->getIndex() < b->getIndex(); });
 

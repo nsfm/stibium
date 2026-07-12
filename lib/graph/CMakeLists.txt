@@ -45,7 +45,7 @@ target_include_directories(SbGraphTest SYSTEM PRIVATE
 
 ################################################################################
 
-set_property(TARGET SbGraph PROPERTY CXX_STANDARD 11)
+set_property(TARGET SbGraph PROPERTY CXX_STANDARD 17)
 set_property(TARGET SbGraph PROPERTY C_STANDARD 99)
-set_property(TARGET SbGraphTest PROPERTY CXX_STANDARD 11)
+set_property(TARGET SbGraphTest PROPERTY CXX_STANDARD 17)
 set_property(TARGET SbGraphTest PROPERTY C_STANDARD 99)
