@@ -91,6 +91,9 @@ void CanvasView::wheelEvent(QWheelEvent* event)
 {
     QPointF a = mapToScene(event->position().toPoint());
     auto s = pow(1.001, -event->angleDelta().y());
+    // Clamp cumulative zoom to a sane range
+    const float zoom = transform().m11();
+    s = fmax(0.08 / zoom, fmin(4 / zoom, s));
     scale(s, s);
     auto d = a - mapToScene(event->position().toPoint());
     setSceneRect(sceneRect().translated(d.x(), d.y()));
@@ -166,15 +169,28 @@ void CanvasView::drawBackground(QPainter* painter, const QRectF& rect)
     painter->setPen(Qt::NoPen);
     painter->drawRect(rect);
 
-    if (fabs(rect.left() - rect.right()) < 5e3 &&
-        fabs(rect.top() - rect.bottom()) < 5e3)
-    {
-        const int d = 20;
-        painter->setPen(Colors::base03);
+    // Two-level dot grid whose opacity fades with zoom instead of
+    // vanishing at a hard threshold.
+    const float zoom = painter->transform().m11();
+    const int minor = 20, major = 100;
+
+    auto drawGrid = [&](int d, float alpha){
+        if (alpha <= 0.02f)
+            return;
+        QVector<QPointF> pts;
+        pts.reserve(int((rect.width() / d + 2) * (rect.height() / d + 2)));
         for (int i = int(rect.left() / d) * d; i < rect.right(); i += d)
             for (int j = int(rect.top() / d) * d; j < rect.bottom(); j += d)
-                painter->drawPoint(i, j);
-    }
+                pts.append(QPointF(i, j));
+        auto c = Colors::base02;
+        c.setAlphaF(alpha);
+        painter->setPen(QPen(c, 2 / zoom));
+        painter->drawPoints(pts.data(), pts.size());
+    };
+
+    // Minor dots fade out as you zoom away; major dots persist longer.
+    drawGrid(minor, fmin(1.f, (zoom - 0.25f) * 2));
+    drawGrid(major, fmin(1.f, zoom * 2));
 }
 
 void CanvasView::drawForeground(QPainter* painter, const QRectF& rect)
@@ -183,7 +199,10 @@ void CanvasView::drawForeground(QPainter* painter, const QRectF& rect)
 
     if (selecting)
     {
-        painter->setPen(QPen(Colors::base05, 2));
+        auto fill = Colors::amber;
+        fill.setAlpha(25);
+        painter->setBrush(fill);
+        painter->setPen(QPen(Colors::amber, 1));
         painter->drawRect(QRectF(click_pos, drag_pos));
     }
 }

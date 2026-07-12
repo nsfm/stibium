@@ -38,9 +38,17 @@ void DatumPort::paint(QPainter *painter,
     Q_UNUSED(option);
     Q_UNUSED(widget);
 
+    painter->setRenderHint(QPainter::Antialiasing);
     painter->setBrush(hover ? Colors::highlight(color) : color);
-    painter->setPen(Qt::NoPen);
-    painter->drawRect(portRect());
+    painter->setPen(QPen(Colors::base00, 1));
+    painter->drawEllipse(portRect());
+
+    if (hover)
+    {
+        painter->setBrush(Qt::NoBrush);
+        painter->setPen(QPen(Colors::amber, 1.5));
+        painter->drawEllipse(portRect().adjusted(-2.5, -2.5, 2.5, 2.5));
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -53,7 +61,7 @@ InputPort::InputPort(Datum* d, DatumRow* parent)
 
 QRectF InputPort::portRect() const
 {
-    return QRectF(0, 5, 10, 10);
+    return QRectF(0, 3, 14, 14);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -66,7 +74,7 @@ OutputPort::OutputPort(Datum* d, DatumRow* parent)
 
 QRectF OutputPort::portRect() const
 {
-    return QRectF(10, 5, 10, 10);
+    return QRectF(6, 3, 14, 14);
 }
 
 void OutputPort::mousePressEvent(QGraphicsSceneMouseEvent *event)

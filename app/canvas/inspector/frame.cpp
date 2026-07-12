@@ -84,30 +84,47 @@ void InspectorFrame::paint(QPainter *painter,
 
     const auto r = tightBoundingRect();
 
-    // Draw higlight
-    if (has_focus)
+    painter->setRenderHint(QPainter::Antialiasing);
+
+    // Drop shadow: stacked translucent rects (deliberately not a
+    // QGraphicsDropShadowEffect, which rasterizes items on every repaint)
+    painter->setPen(Qt::NoPen);
+    for (int i=0; i < 3; ++i)
     {
-        painter->setPen(QPen(QColor(255, 255, 255, 128), 10));
+        painter->setBrush(QColor(0, 0, 0, 34 - i*10));
+        painter->drawRoundedRect(r.translated(0, 1.5 + i), 8 + i, 8 + i);
+    }
+
+    // Body with a subtle vertical gradient
+    QLinearGradient grad(r.topLeft(), r.bottomLeft());
+    grad.setColorAt(0, Colors::base01);
+    grad.setColorAt(1, Colors::adjust(Colors::base01, 1/1.2f));
+    painter->setBrush(grad);
+    painter->drawRoundedRect(r, 8, 8);
+
+    {   // Title band, rounded only at the top corners
+        const auto tr = title_row->boundingRect();
+        QPainterPath band;
+        band.setFillRule(Qt::WindingFill);
+        band.addRoundedRect(tr, 8, 8);
+        band.addRect(tr.adjusted(0, tr.height()/2, 0, 0));
+        painter->setBrush(Colors::base02);
+        painter->drawPath(band.simplified());
+    }
+
+    // Soft accent glow when hovered (focus without selection)
+    painter->setBrush(Qt::NoBrush);
+    if (has_focus && !isSelected())
+    {
+        QColor glow = Colors::amber;
+        glow.setAlpha(70);
+        painter->setPen(QPen(glow, 4));
         painter->drawRoundedRect(r, 8, 8);
     }
 
-    // Draw interior
-    painter->setBrush(Colors::base01);
-    painter->setPen(Qt::NoPen);
-    painter->drawRoundedRect(r, 8, 8);
-
-    {   // Draw light-colored rectangle under title bar
-        painter->setBrush(Colors::base03);
-        painter->drawRoundedRect(title_row->boundingRect(), 8, 8);
-        painter->setBrush(Qt::NoBrush);
-        painter->setPen(QPen(Colors::base03, 4));
-        const auto y = title_row->boundingRect().bottom();
-        painter->drawLine(2, y, tightBoundingRect().right() - 2, y);
-    }
-
-    // Draw outer edge
-    painter->setBrush(Qt::NoBrush);
-    painter->setPen(QPen(isSelected() ? Colors::base05 : Colors::base03, 2));
+    // Outline: amber when selected, quiet otherwise
+    painter->setPen(isSelected() ? QPen(Colors::amber, 1.5)
+                                 : QPen(Colors::base02, 1));
     painter->drawRoundedRect(r, 8, 8);
 }
 
