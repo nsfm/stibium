@@ -1,0 +1,9 @@
+import fab
+
+title('Bend (Y)')
+
+input('shape', fab.types.Shape)
+input('radius', float, 5)
+input('y0', float, 0)
+
+output('bent', fab.shapes.bend_y(shape, radius, y0))

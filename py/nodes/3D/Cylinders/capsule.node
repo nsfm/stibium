@@ -1,0 +1,18 @@
+import fab
+
+title('Capsule')
+
+input('x0', float, 0)
+input('y0', float, 0)
+input('z0', float, -1)
+input('x1', float, 0)
+input('y1', float, 0)
+input('z1', float, 1)
+input('r', float, 0.5)
+
+output('shape', fab.shapes.capsule(x0, y0, z0, x1, y1, z1, r))
+
+# UI
+sb.ui.wireframe([(x0, y0, z0), (x1, y1, z1)])
+sb.ui.point(x0, y0, z0)
+sb.ui.point(x1, y1, z1)

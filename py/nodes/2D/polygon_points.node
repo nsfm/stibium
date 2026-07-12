@@ -1,0 +1,15 @@
+import fab
+import math
+
+title('Polygon (filled, arbitrary vertices)')
+
+# 'points' is a list datum (ordered vertices). Convex inputs are exact;
+# non-convex inputs are clipped to the intersection of their edge lines.
+input('points', list, [[-1, -1], [1, -1], [1.2, 0.6], [0, 1.2], [-1, 0.6]])
+
+output('shape', fab.shapes.polygon(points))
+
+# UI
+sb.ui.wireframe([(p[0], p[1], 0) for p in points], close=True)
+for p in points:
+    sb.ui.point(p[0], p[1])

@@ -1,0 +1,16 @@
+import fab
+
+title('Countersink Hole')
+
+# NEGATIVE: wire into a Difference `b` input.  Clearance shaft + 90-degree
+# conical recess for a flat-head screw (DIN 965 / ISO 7046).
+input('x', float, 0)
+input('y', float, 0)
+input('z_top', float, 0)
+input('length', float, 12)
+input('size', str, 'M3')
+input('angle', float, 90)
+
+output('shape', fab.shapes.countersink_hole(x, y, z_top, length, size, angle))
+
+sb.ui.point(x, y, z_top)

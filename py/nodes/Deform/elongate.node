@@ -1,0 +1,10 @@
+import fab
+
+title('Elongate')
+
+input('shape', fab.types.Shape)
+input('hx', float, 0)
+input('hy', float, 0)
+input('hz', float, 0)
+
+output('elongated', fab.shapes.elongate(shape, hx, hy, hz))

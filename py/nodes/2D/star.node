@@ -1,0 +1,23 @@
+import fab
+import math
+
+title('Star')
+
+input('x', float, 0)
+input('y', float, 0)
+input('n', int, 5)
+input('r_inner', float, 0.5)
+input('r_outer', float, 1)
+input('angle', float, 90)
+
+output('shape', fab.shapes.star(x, y, n, r_inner, r_outer, angle))
+
+# UI
+a0 = math.radians(angle)
+verts = []
+for k in range(2 * int(n)):
+    r = r_outer if (k % 2 == 0) else r_inner
+    a = a0 + k * math.pi / n
+    verts.append((x + r * math.cos(a), y + r * math.sin(a), 0))
+sb.ui.wireframe(verts, close=True)
+sb.ui.point(x, y)

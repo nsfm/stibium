@@ -1,0 +1,21 @@
+import fab
+import math
+
+title('Arc (stroked)')
+
+input('x', float, 0)
+input('y', float, 0)
+input('r', float, 1)
+input('a0', float, 0)
+input('a1', float, 180)
+input('w', float, 0.2)
+
+output('shape', fab.shapes.arc(x, y, r, a0, a1, w))
+
+# UI: centerline of the arc
+ra0, ra1 = math.radians(a0), math.radians(a1)
+span = (ra1 - ra0) % (2 * math.pi)
+sb.ui.wireframe([(x + r * math.cos(ra0 + span * i / 48),
+                  y + r * math.sin(ra0 + span * i / 48), 0)
+                 for i in range(49)])
+sb.ui.point(x, y)

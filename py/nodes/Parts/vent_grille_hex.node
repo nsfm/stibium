@@ -1,0 +1,15 @@
+import fab
+
+title('Hex Vent Grille')
+
+# POSITIVE: a panel perforated with a hexagonal trig quasi-lattice.
+input('x0', float, -15)
+input('x1', float, 15)
+input('y0', float, -15)
+input('y1', float, 15)
+input('z0', float, 0)
+input('z1', float, 2)
+input('cell', float, 5)
+input('strut', float, 1)
+
+output('shape', fab.shapes.vent_grille_hex(x0, x1, y0, y1, z0, z1, cell, strut))

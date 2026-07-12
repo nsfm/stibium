@@ -1,0 +1,20 @@
+import fab
+
+title('Sliding Dovetail')
+
+# kind='male'   -> POSITIVE pin (Union).
+# kind='female' -> NEGATIVE socket (Difference), enlarged by clearance.
+input('x', float, 0)
+input('y', float, 0)
+input('z', float, 0)
+input('width', float, 10)
+input('height', float, 6)
+input('depth', float, 20)
+input('angle', float, 15)
+input('kind', str, 'male')
+input('clearance', float, 0.2)
+
+output('shape', fab.shapes.dovetail(x, y, z, width, height, depth,
+                                    angle, kind, clearance))
+
+sb.ui.point(x, y, z)

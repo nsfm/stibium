@@ -1,0 +1,20 @@
+import fab
+import math
+
+title('Cut sphere (dome)')
+
+input('x', float, 0)
+input('y', float, 0)
+input('z', float, 0)
+input('r', float, 1)
+input('h', float, 0)   # cut plane at Z = z + h; lower part is kept
+
+output('shape', fab.shapes.cut_sphere(x, y, z, r, h))
+
+# UI
+sb.ui.wireframe([
+    (math.cos(i/36. * 2*math.pi) * r + x,
+     math.sin(i/36. * 2*math.pi) * r + y, z)
+    for i in range(36)], close=True)
+sb.ui.point(x, y, z)
+sb.ui.point(x, y, z + h, drag=(None, None, h))

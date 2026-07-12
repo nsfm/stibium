@@ -1,0 +1,20 @@
+import fab
+import math
+
+title('Cross / Plus')
+
+input('x', float, 0)
+input('y', float, 0)
+input('arm_length', float, 1)
+input('thickness', float, 0.3)
+input('rounding', float, 0)
+
+output('shape', fab.shapes.cross(arm_length, thickness, rounding, x, y))
+
+# UI
+L, T = arm_length, thickness
+sb.ui.wireframe([(x - L, y - T, 0), (x + L, y - T, 0),
+                 (x + L, y + T, 0), (x - L, y + T, 0)], close=True)
+sb.ui.wireframe([(x - T, y - L, 0), (x + T, y - L, 0),
+                 (x + T, y + L, 0), (x - T, y + L, 0)], close=True)
+sb.ui.point(x, y)

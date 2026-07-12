@@ -1,0 +1,9 @@
+import fab
+
+title('Bend (X)')
+
+input('shape', fab.types.Shape)
+input('radius', float, 5)
+input('x0', float, 0)
+
+output('bent', fab.shapes.bend_x(shape, radius, x0))

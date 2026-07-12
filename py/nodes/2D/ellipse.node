@@ -1,0 +1,19 @@
+import fab
+import math
+
+title('Ellipse (approx, non-euclidean field)')
+
+input('x', float, 0)
+input('y', float, 0)
+input('a', float, 1)
+input('b', float, 0.6)
+
+output('shape', fab.shapes.ellipse_approx(x, y, a, b))
+
+# UI
+sb.ui.wireframe([(x + a * math.cos(i / 48. * 2 * math.pi),
+                  y + b * math.sin(i / 48. * 2 * math.pi), 0)
+                 for i in range(48)], close=True)
+sb.ui.point(x, y)
+sb.ui.point(x + a, y, drag=(a, None, None))
+sb.ui.point(x, y + b, drag=(None, b, None))

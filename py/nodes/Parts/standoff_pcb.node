@@ -1,0 +1,18 @@
+import fab
+
+title('PCB Standoff')
+
+# POSITIVE: wire into a Union.  Boss with a through hole (clearance or pilot).
+input('x', float, 0)
+input('y', float, 0)
+input('z0', float, 0)
+input('height', float, 6)
+input('size', str, 'M3')
+input('mode', str, 'clearance')   # 'clearance' or 'pilot'
+input('wall', float, 1.5)
+input('fillet', float, 0)
+
+output('shape', fab.shapes.standoff_pcb(x, y, z0, height, size,
+                                        mode, wall, None, fillet))
+
+sb.ui.point(x, y, z0)

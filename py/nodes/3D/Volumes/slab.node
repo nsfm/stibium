@@ -1,0 +1,13 @@
+import fab
+
+title('Slab')
+
+# Any bound may be left blank (None) to leave that side open / infinite.
+input('xmin', float, -1)
+input('xmax', float, 1)
+input('ymin', float, -1)
+input('ymax', float, 1)
+input('zmin', float, -1)
+input('zmax', float, 1)
+
+output('shape', fab.shapes.slab(xmin, xmax, ymin, ymax, zmin, zmax))

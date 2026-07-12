@@ -1,0 +1,20 @@
+import fab
+import math
+
+title('Twirl (Y)')
+
+input('shape', fab.types.Shape)
+input('amount', float, 90)
+input('radius', float, 1)
+input('x', float, 0)
+input('y', float, 0)
+input('z', float, 0)
+
+output('twirled', fab.shapes.twirl_y(shape, amount, radius, x, y, z))
+
+# UI
+sb.ui.wireframe([
+    (math.cos(i/36. * 2*math.pi) * radius + x, y,
+     math.sin(i/36. * 2*math.pi) * radius + z)
+    for i in range(36)], close=True)
+sb.ui.point(x, y, z)

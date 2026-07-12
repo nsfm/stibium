@@ -1,0 +1,31 @@
+import fab
+import fab.shapes
+import math
+
+
+title('Tapped Hole (ISO metric internal, NEGATIVE)')
+
+# This node outputs a NEGATIVE solid: subtract it from a body (CSG
+# difference) to cut an internal thread that mates with a matching
+# threaded rod.  clearance grows the hole radially for printer fit.
+
+input('d', float, 6)             # nominal diameter (M6 default)
+input('pitch', float, 1.0)       # M6 coarse = 1.0
+input('length', float, 10)
+input('n_starts', int, 1)
+input('clearance', float, 0.2)   # radial clearance for FDM fit
+
+output('negative', fab.shapes.iso_thread_internal_negative(
+    d, pitch, length, n_starts, clearance))
+
+# UI: axis + major-radius circles (subtract region extends to d/2+clearance)
+_rc = d / 2 + clearance
+sb.ui.wireframe([(0, 0, 0), (0, 0, length)])
+sb.ui.wireframe([(math.cos(i / 36. * 2 * math.pi) * _rc,
+                  math.sin(i / 36. * 2 * math.pi) * _rc, 0)
+                 for i in range(36)], close=True)
+sb.ui.wireframe([(math.cos(i / 36. * 2 * math.pi) * _rc,
+                  math.sin(i / 36. * 2 * math.pi) * _rc, length)
+                 for i in range(36)], close=True)
+sb.ui.point(0, 0, length, drag=(None, None, length))
+sb.ui.point(_rc, 0, 0, drag=(_rc, None, None))

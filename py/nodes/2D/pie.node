@@ -1,0 +1,22 @@
+import fab
+import math
+
+title('Pie / Sector')
+
+input('x', float, 0)
+input('y', float, 0)
+input('r', float, 1)
+input('a0', float, 0)
+input('a1', float, 120)
+
+output('shape', fab.shapes.pie(x, y, r, a0, a1))
+
+# UI: two bounding radii + arc
+ra0, ra1 = math.radians(a0), math.radians(a1)
+span = (ra1 - ra0) % (2 * math.pi)
+pts = [(x, y, 0)]
+for i in range(37):
+    a = ra0 + span * i / 36
+    pts.append((x + r * math.cos(a), y + r * math.sin(a), 0))
+sb.ui.wireframe(pts, close=True)
+sb.ui.point(x, y)
