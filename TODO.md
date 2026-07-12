@@ -164,6 +164,17 @@ a GUI so agentic tools can contribute to modeling cleanly:
 
 ## Small bugs / cleanups
 
+- **Root-cause the Python-error crash (the autosave origin story).** The
+  live code-checker segfaulted randomly mid-typing; the workaround
+  (fork-era, see `lib/graph/src/util.cpp` getPyError — the line-number
+  extraction is commented out and pinned to 0) disables error line
+  numbers entirely. Fix properly with defensive PyObject extraction so
+  script errors report real line numbers again without the crash.
+- **Infrequent crash when deleting groups of nodes at once.** Suspect
+  the multi-delete undo path (`app/undo/undo_delete_multi.cpp`) or
+  dangling proxies during batch removal. Needs a repro harness /
+  ASan session like the detect-features hunt.
+
 - `v2parse()` leaks scanner/parser/locals on the parse-failure early
   return (v2parser.cpp) — pre-existing, low priority.
 - `RenderTask::render()` missing-field-initializer warnings for Region.
