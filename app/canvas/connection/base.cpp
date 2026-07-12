@@ -30,15 +30,32 @@ void BaseConnection::paint(QPainter *painter,
     Q_UNUSED(option);
     Q_UNUSED(widget);
 
-    // If the mouse is hovering over this connection, draw
-    // a translucent highlighting under the line.
-    if (hover)
+    painter->setRenderHint(QPainter::Antialiasing);
+
+    // Soft accent glow when hovered or selected
+    if (hover || isSelected())
     {
-        painter->setPen(QPen(QColor(255, 255, 255, 128), 20));
+        QColor glow = Colors::amber;
+        glow.setAlpha(40);
+        painter->setPen(QPen(glow, 11, Qt::SolidLine, Qt::RoundCap));
+        painter->drawPath(path(true));
+        glow.setAlpha(70);
+        painter->setPen(QPen(glow, 7, Qt::SolidLine, Qt::RoundCap));
         painter->drawPath(path(true));
     }
 
-    painter->setPen(QPen(color(), 4));
+    // Drop shadow pass
+    painter->save();
+    painter->translate(0, 1.5);
+    painter->setPen(QPen(QColor(0, 0, 0, 90), 4, Qt::SolidLine, Qt::RoundCap));
+    painter->drawPath(path());
+    painter->restore();
+
+    // Main stroke: subtle gradient along the wire to imply flow
+    QLinearGradient grad(startPos(), endPos());
+    grad.setColorAt(0, Colors::dim(color()));
+    grad.setColorAt(1, Colors::highlight(color()));
+    painter->setPen(QPen(QBrush(grad), 3, Qt::SolidLine, Qt::RoundCap));
     painter->drawPath(path());
 }
 
