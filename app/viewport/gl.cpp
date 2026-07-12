@@ -24,6 +24,13 @@ QOpenGLShaderProgram* ViewportGL::getHeightmapShader()
     return &height_shader;
 }
 
+QOpenGLShaderProgram* ViewportGL::getEnhancedShader()
+{
+    if (!initialized)
+        initialize();
+    return &enhanced_shader;
+}
+
 void ViewportGL::initialize()
 {
     Q_ASSERT(context->isValid());
@@ -49,6 +56,12 @@ void ViewportGL::initialize()
     height_shader.addShaderFromSourceFile(
             QOpenGLShader::Fragment, ":/gl/height.frag");
     height_shader.link();
+
+    enhanced_shader.addShaderFromSourceFile(
+            QOpenGLShader::Vertex, ":/gl/quad.vert");
+    enhanced_shader.addShaderFromSourceFile(
+            QOpenGLShader::Fragment, ":/gl/enhanced.frag");
+    enhanced_shader.link();
 
     initialized = true;
 }

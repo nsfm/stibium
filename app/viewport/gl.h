@@ -20,6 +20,7 @@ public:
      */
     QOpenGLShaderProgram* getShadedShader();
     QOpenGLShaderProgram* getHeightmapShader();
+    QOpenGLShaderProgram* getEnhancedShader();
 
     /*
      *  Returns the VBO for drawing textured quads
@@ -50,6 +51,7 @@ protected:
 
     QOpenGLShaderProgram height_shader;
     QOpenGLShaderProgram shaded_shader;
+    QOpenGLShaderProgram enhanced_shader;
     QOpenGLBuffer quad_vertices;
 
     friend class ViewportView;

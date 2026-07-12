@@ -73,6 +73,7 @@
     </property>
     <addaction name="actionHeightmap"/>
     <addaction name="actionShaded"/>
+    <addaction name="actionEnhanced"/>
     <addaction name="separator"/>
     <addaction name="actionHideUI"/>
    </widget>
@@ -159,11 +160,19 @@
     <string>Height-map</string>
    </property>
   </action>
-  <action name="actionShaded">
+  <action name="actionEnhanced">
    <property name="checkable">
     <bool>true</bool>
    </property>
    <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Enhanced</string>
+   </property>
+  </action>
+  <action name="actionShaded">
+   <property name="checkable">
     <bool>true</bool>
    </property>
    <property name="text">

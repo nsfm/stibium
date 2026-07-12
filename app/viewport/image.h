@@ -59,6 +59,11 @@ protected:
     void paintShaded(QMatrix4x4 m, float zmin_global, float zmax_global);
 
     /*
+     *  Renders with the enhanced shader (ambient/rim/AO/gamma)
+     */
+    void paintEnhanced(QMatrix4x4 m, float zmin_global, float zmax_global);
+
+    /*
      *  Paints the given images as heightmap textures
      */
     void paintHeightmap(QMatrix4x4 m, float zmin_global, float zmax_global);
@@ -89,5 +94,6 @@ protected:
 
     /*  Other relevant settings for drawing images  */
     QColor color;
+    QSize tex_size;
     bool flat;
 };
