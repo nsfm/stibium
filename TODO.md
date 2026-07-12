@@ -43,6 +43,11 @@ were named for the element symbol all along).
 - **Node editor QoL.** Fuzzy-search add menu (type "cyl"), minimap for big
   graphs, canvas annotations (sticky notes + named zones behind nodes,
   persisted in the .sb JSON like node positions).
+- **Enum/choice datums with dropdowns.** Nodes that take one of a known
+  set (dovetail male/female, teardrop axis X/Y/Z, screw-size presets)
+  should render a combo box instead of a free-text field — e.g.
+  `input('kind', str, 'male', options=['male','female'])` flowing through
+  to a QComboBox in the datum row.
 - **UI glow-up.** Full prioritized plan in
   [doc/UI-MODERNIZATION.md](doc/UI-MODERNIZATION.md): palette refresh,
   app-wide dark theme, wire/port/node facelift, viewport shader
