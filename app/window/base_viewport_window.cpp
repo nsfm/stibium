@@ -15,6 +15,7 @@ BaseViewportWindow::BaseViewportWindow(QList<ViewportView*> views)
 
     // Make heightmap and shaded options mutually exclusive
     QActionGroup* view_actions = new QActionGroup(this);
+    view_actions->addAction(ui->actionEnhanced);
     view_actions->addAction(ui->actionShaded);
     view_actions->addAction(ui->actionHeightmap);
     view_actions->setExclusive(true);
@@ -28,6 +29,8 @@ BaseViewportWindow::BaseViewportWindow(QList<ViewportView*> views)
     {
         connect(ui->actionShaded, &QAction::triggered,
                 [=]{ view->scene()->invalidate(); });
+        connect(ui->actionEnhanced, &QAction::triggered,
+                [=]{ view->scene()->invalidate(); });
         connect(ui->actionHeightmap, &QAction::triggered,
                 [=]{ view->scene()->invalidate(); });
         connect(ui->actionHideUI, &QAction::triggered,
@@ -37,7 +40,11 @@ BaseViewportWindow::BaseViewportWindow(QList<ViewportView*> views)
     show();
 }
 
-bool BaseViewportWindow::isShaded() const
+BaseViewportWindow::ShadingMode BaseViewportWindow::shadingMode() const
 {
-    return ui->actionShaded->isChecked();
+    if (ui->actionHeightmap->isChecked())
+        return SHADE_HEIGHTMAP;
+    else if (ui->actionShaded->isChecked())
+        return SHADE_SHADED;
+    return SHADE_ENHANCED;
 }

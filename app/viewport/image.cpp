@@ -36,6 +36,7 @@ void DepthImage::update(QVector3D pos_, QVector3D size_,
     clearTextures();
     buildTexture(depth, &depth_tex);
     buildTexture(shaded, &shaded_tex);
+    tex_size = depth.size();
 
     pos = pos_;
     size = size_;
@@ -101,13 +102,15 @@ void DepthImage::paint(QMatrix4x4 m, float zmin, float zmax)
         while (p && !dynamic_cast<BaseViewportWindow*>(p))
             p = p->parentWidget();
 
-        if (p && static_cast<BaseViewportWindow*>(p)->isShaded())
+        switch (p ? static_cast<BaseViewportWindow*>(p)->shadingMode()
+                  : BaseViewportWindow::SHADE_ENHANCED)
         {
-            paintShaded(m, zmin, zmax);
-        }
-        else
-        {
-            paintHeightmap(m, zmin, zmax);
+            case BaseViewportWindow::SHADE_ENHANCED:
+                paintEnhanced(m, zmin, zmax); break;
+            case BaseViewportWindow::SHADE_SHADED:
+                paintShaded(m, zmin, zmax); break;
+            case BaseViewportWindow::SHADE_HEIGHTMAP:
+                paintHeightmap(m, zmin, zmax); break;
         }
 
         gl->getQuadVertices()->release();
@@ -176,6 +179,26 @@ void DepthImage::paintShaded(
 
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     shaded_shader->release();
+    glDisable(GL_DEPTH_TEST);
+}
+
+void DepthImage::paintEnhanced(
+        QMatrix4x4 m, float zmin_global, float zmax_global)
+{
+    auto shader = gl->getEnhancedShader();
+    glEnable(GL_DEPTH_TEST);
+    loadSharedShaderVariables(m, shader, zmin_global, zmax_global);
+
+    glUniform2f(shader->uniformLocation("pixel_size"),
+                tex_size.width() ? 1.0f / tex_size.width() : 0,
+                tex_size.height() ? 1.0f / tex_size.height() : 0);
+
+    glActiveTexture(GL_TEXTURE0 + 1);
+    glBindTexture(GL_TEXTURE_2D, shaded_tex);
+    glUniform1i(shader->uniformLocation("shaded_tex"), 1);
+
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    shader->release();
     glDisable(GL_DEPTH_TEST);
 }
 

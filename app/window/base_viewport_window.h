@@ -17,5 +17,7 @@ public:
      *  Checks whether the Shaded box is selected
      *  (if not, the Heightmap box should be selected)
      */
-    bool isShaded() const;
+    enum ShadingMode { SHADE_HEIGHTMAP, SHADE_SHADED, SHADE_ENHANCED };
+
+    ShadingMode shadingMode() const;
 };
