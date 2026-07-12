@@ -107,3 +107,5 @@ set_property(TARGET SbFab PROPERTY CXX_STANDARD 17)
 set_property(TARGET SbFab PROPERTY C_STANDARD 99)
 set_property(TARGET SbFabTest PROPERTY CXX_STANDARD 17)
 set_property(TARGET SbFabTest PROPERTY C_STANDARD 99)
+
+add_test(NAME SbFabTest COMMAND SbFabTest)

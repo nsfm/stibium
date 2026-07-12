@@ -13,3 +13,4 @@
 /obj-*-linux-gnu
 build
 build-*
+__pycache__/

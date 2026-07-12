@@ -105,7 +105,6 @@ public slots:
      *  Help menu
      */
     void onAbout();
-    void onUpdateCheck();
 
 signals:
     /*

@@ -8,12 +8,11 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 # Find the Qt libraries
 find_package(Qt6 REQUIRED COMPONENTS
-    Core Gui Widgets OpenGL OpenGLWidgets Network Concurrent)
+    Core Gui Widgets OpenGL OpenGLWidgets Concurrent)
 
 set(SRC_FILES
     app/main.cpp
     app/app.cpp
-    app/update.cpp
     app/colors.cpp
     canvas/scene.cpp
     canvas/canvas_view.cpp
@@ -153,7 +152,6 @@ target_link_libraries(${ANTIMONY_APP}
     Qt6::Gui
     Qt6::OpenGL
     Qt6::OpenGLWidgets
-    Qt6::Network
     Qt6::Concurrent
     SbGraph
     SbFab)

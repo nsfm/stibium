@@ -22,6 +22,8 @@ endif()
 
 ################################################################################
 
+enable_testing()
+
 add_subdirectory(lib/graph)
 add_subdirectory(lib/fab)
 
