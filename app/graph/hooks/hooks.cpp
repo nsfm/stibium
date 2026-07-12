@@ -75,7 +75,7 @@ BOOST_PYTHON_MODULE(_AppHooks)
                 "      If None, a dialog will open to select a file.\n"
                 "    resolution sets the resolution.\n"
                 "      If None, a dialog will open to select the resolution.\n"
-                "    mm_per_unit maps Antimony to real-world units."
+                "    mm_per_unit maps Stibium to real-world units."
                 );
     register_exception_translator<AppHooks::Exception>(
             AppHooks::onException);

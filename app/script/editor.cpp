@@ -1,5 +1,7 @@
 #include <Python.h>
 
+#include <QFontDatabase>
+
 #include <QTextBlock>
 
 #include "script/editor.h"
@@ -20,9 +22,8 @@ ScriptEditor::ScriptEditor(Script* script, QWidget* parent)
     connect(doc, &QTextDocument::contentsChanged,
             [=](){ script->setText(doc->toPlainText().toStdString()); });
 
-    {   // Use Courier as our default font
-        QFont font;
-        font.setFamily("Courier");
+    {   // Use the system's preferred fixed-width font
+        QFont font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
         QFontMetrics fm(font);
         setTabStopDistance(fm.horizontalAdvance("    "));
         document()->setDefaultFont(font);

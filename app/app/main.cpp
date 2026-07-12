@@ -87,7 +87,7 @@ int main(int argc, char *argv[])
             QMessageBox::critical(NULL, "Import error",
                     "Import Error:<br><br>"
                     "Could not find <tt>fab</tt> Python module.<br>"
-                    "Antimony will now exit.");
+                    "Stibium will now exit.");
             exit(1);
         }
         Py_DECREF(fab);

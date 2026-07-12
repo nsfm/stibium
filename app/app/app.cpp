@@ -30,6 +30,8 @@ App::App(int& argc, char** argv)
     connect(autosave_timer, &QTimer::timeout,
         this, &App::onAutosave);
 
+    setApplicationName("Stibium");
+    setOrganizationDomain("github.com/nsfm/stibium");
     Theme::apply(this);
 }
 
@@ -214,11 +216,11 @@ void App::newQuadWindow()
 void App::onAbout()
 {
     QString txt(
-            "<i>Antimony</i><br><br>"
+            "<i>Stibium</i><br><br>"
             "CAD from a parallel universe.<br>"
-            "<a href=\"https://github.com/mkeeter/antimony\">https://github.com/mkeeter/antimony</a><br><br>"
-            "© 2013-2014 Matthew Keeter<br>"
-            "<a href=\"mailto:matt.j.keeter@gmail.com\">matt.j.keeter@gmail.com</a><br>"
+            "<a href=\"https://github.com/nsfm/stibium\">https://github.com/nsfm/stibium</a><br><br>"
+            "A continuation of <a href=\"https://github.com/mkeeter/antimony\">Antimony</a><br>"
+            "© 2013-2015 Matthew Keeter<br>"
             "_________________________________________________<br><br>"
             "Includes code from <a href=\"https://github.com/mkeeter/kokopelli\">kokopelli</a>, which is <br>"
             "© 2012-2013 MIT<br>"
@@ -236,7 +238,7 @@ void App::onAbout()
         txt += "Branch: <tt>" + branch + "</tt>";
     txt += "<br>Git revision: <tt>" + rev + "</tt>";
 
-    QMessageBox::about(NULL, "Antimony", txt);
+    QMessageBox::about(NULL, "Stibium", txt);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
