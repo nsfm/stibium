@@ -165,6 +165,10 @@ a GUI so agentic tools can contribute to modeling cleanly:
 - STL writer counts via `sizeof(float)` for an int — works, fragile.
 
 ## Done
+- 2026-07-12 — Phase 1 node campaign: 46 new nodes / 60+ shape functions
+  (primitives, deforms, 2D stroke kit, functional-parts kit with ISO
+  tables, ISO threads + involute gears). All numerically verified; new
+  Parts/ node category. See doc/LIBRARY-ROADMAP.md.
 
 - 2026-07-12 — meshoptimizer simplification in STL export (weld +
   error-bounded decimation, "max deviation" in the dialog, `simplify=`
