@@ -2,8 +2,8 @@
 
 #include <QObject>
 #include <QVector>
-#include <QtGui/QOpenGLFunctions>
-#include <QtGui/QOpenGLShaderProgram>
+#include <QOpenGLFunctions>
+#include <QOpenGLShaderProgram>
 #include <QImage>
 #include <QPointer>
 #include <QColor>

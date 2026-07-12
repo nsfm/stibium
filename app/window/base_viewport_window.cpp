@@ -3,6 +3,8 @@
 #include "viewport/scene.h"
 #include "viewport/view.h"
 
+#include <QActionGroup>
+
 #include "window/base_viewport_window.h"
 
 BaseViewportWindow::BaseViewportWindow(QList<ViewportView*> views)

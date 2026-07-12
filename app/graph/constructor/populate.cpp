@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QDirIterator>
 #include <QMenu>
+#include <QRegularExpression>
 #include <QTextStream>
 #include <QInputDialog>
 
@@ -50,8 +51,9 @@ static void addNodeToMenu(QMenu* menu, QStringList category, QString name,
 static void populateFromFiles(QMenu* menu, Graph* g,
                               std::function<void(Node*)> callback)
 {
-    QList<QRegExp> title_regexs= {QRegExp(".*title\\('+([^']+)'+\\).*"),
-                                  QRegExp(".*title\\(\"+([^\"]+)\"+\\).*")};
+    QList<QRegularExpression> title_regexs = {
+        QRegularExpression("title\\('+([^']+)'+\\)"),
+        QRegularExpression("title\\(\"+([^\"]+)\"+\\)")};
 
     // Extract all of valid filenames into a QStringList.
     QStringList node_filenames;
@@ -89,8 +91,11 @@ static void populateFromFiles(QMenu* menu, Graph* g,
         QString title = split.last().replace(".node","");
         split.removeLast();
         for (auto& regex : title_regexs)
-            if (regex.exactMatch(txt))
-                title = regex.capturedTexts()[1];
+        {
+            auto match = regex.match(txt);
+            if (match.hasMatch())
+                title = match.captured(1);
+        }
 
         QString name = "n*";
         if (title.size() > 0 && title.at(0).isLetter())

@@ -14,7 +14,7 @@ RenderTask::RenderTask(RenderInstance* parent, PyObject* s, QMatrix4x4 M,
 {
     Py_INCREF(shape);
 
-    future = QtConcurrent::run(this, &RenderTask::async);
+    future = QtConcurrent::run(&RenderTask::async, this);
     watcher.setFuture(future);
 
     connect(&watcher, &decltype(watcher)::finished,
@@ -40,7 +40,7 @@ RenderTask* RenderTask::getNext(RenderInstance* parent) const
 
 void RenderTask::async()
 {
-    QTime timer;
+    QElapsedTimer timer;
     timer.start();
 
     boost::python::extract<const Shape&> get_shape(shape);

@@ -7,11 +7,8 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 # Find the Qt libraries
-find_package(Qt5Core REQUIRED)
-find_package(Qt5Widgets REQUIRED)
-find_package(Qt5OpenGL REQUIRED)
-find_package(Qt5Network REQUIRED)
-find_package(Qt5Concurrent REQUIRED)
+find_package(Qt6 REQUIRED COMPONENTS
+    Core Gui Widgets OpenGL OpenGLWidgets Network Concurrent)
 
 set(SRC_FILES
     app/main.cpp
@@ -152,11 +149,12 @@ else()
 endif()
 
 target_link_libraries(${ANTIMONY_APP}
-    Qt5::Widgets
-    Qt5::Gui
-    Qt5::OpenGL
-    Qt5::Network
-    Qt5::Concurrent
+    Qt6::Widgets
+    Qt6::Gui
+    Qt6::OpenGL
+    Qt6::OpenGLWidgets
+    Qt6::Network
+    Qt6::Concurrent
     SbGraph
     SbFab)
 
@@ -186,6 +184,6 @@ target_include_directories(${ANTIMONY_APP} SYSTEM PRIVATE
 
 ################################################################################
 
-set_property(TARGET ${ANTIMONY_APP} PROPERTY CXX_STANDARD 11)
+set_property(TARGET ${ANTIMONY_APP} PROPERTY CXX_STANDARD 17)
 set_property(TARGET ${ANTIMONY_APP} PROPERTY C_STANDARD 99)
 

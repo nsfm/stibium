@@ -103,7 +103,7 @@ target_include_directories(SbFabTest SYSTEM PRIVATE
 
 ################################################################################
 
-set_property(TARGET SbFab PROPERTY CXX_STANDARD 11)
+set_property(TARGET SbFab PROPERTY CXX_STANDARD 17)
 set_property(TARGET SbFab PROPERTY C_STANDARD 99)
-set_property(TARGET SbFabTest PROPERTY CXX_STANDARD 11)
+set_property(TARGET SbFabTest PROPERTY CXX_STANDARD 17)
 set_property(TARGET SbFabTest PROPERTY C_STANDARD 99)

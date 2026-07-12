@@ -14,7 +14,7 @@ void ExportWorker::runAsync()
 {
     auto exporting_dialog = new ExportingDialog();
 
-    auto future = QtConcurrent::run(this, &ExportWorker::async);
+    auto future = QtConcurrent::run(&ExportWorker::async, this);
     QFutureWatcher<void> watcher;
     watcher.setFuture(future);
 

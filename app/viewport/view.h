@@ -1,7 +1,7 @@
 #pragma once
 
 #include <QVector3D>
-#include <QtGui/QOpenGLFunctions>
+#include <QOpenGLFunctions>
 #include <QGraphicsView>
 
 #include "viewport/gl.h"
