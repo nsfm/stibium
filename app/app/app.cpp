@@ -18,6 +18,8 @@
 #include "graph/graph.h"
 #include "app/theme.h"
 #include "app/settings.h"
+#include <QGraphicsView>
+#include "canvas/scene.h"
 
 App::App(int& argc, char** argv)
     : QApplication(argc, argv),
@@ -299,6 +301,25 @@ void App::loadFile(QString f)
 
         proxy->setPositions(ds.frames);
         emit(filenameChanged(filename));
+
+        // Center canvas views on the loaded graph, which may live far
+        // from the origin, zooming out (never in) to fit if needed.
+        if (auto scene = proxy->canvasScene())
+        {
+            const auto r = scene->itemsBoundingRect();
+            if (!r.isNull())
+                for (auto v : scene->views())
+                {
+                    const float fit = fmin(1.0,
+                        0.85 * fmin(v->sceneRect().width() / r.width(),
+                                    v->sceneRect().height() / r.height()));
+                    if (fit < 1.0)
+                        v->scale(fit, fit);
+                    auto sr = v->sceneRect();
+                    sr.moveCenter(r.center());
+                    v->setSceneRect(sr);
+                }
+        }
     }
 }
 
