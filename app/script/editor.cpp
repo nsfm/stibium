@@ -8,6 +8,7 @@
 #include "script/syntax.h"
 
 #include "app/colors.h"
+#include "app/settings.h"
 #include "app/app.h"
 
 #include "undo/undo_change_script.h"
@@ -22,8 +23,15 @@ ScriptEditor::ScriptEditor(Script* script, QWidget* parent)
     connect(doc, &QTextDocument::contentsChanged,
             [=](){ script->setText(doc->toPlainText().toStdString()); });
 
-    {   // Use the system's preferred fixed-width font
+    {   // Use the system's preferred fixed-width font unless the
+        // config file says otherwise (editor/font_family, editor/font_size)
         QFont font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+        const auto family = Settings::get("editor/font_family", "").toString();
+        if (!family.isEmpty())
+            font.setFamily(family);
+        const int size = Settings::get("editor/font_size", 0).toInt();
+        if (size > 0)
+            font.setPointSize(size);
         QFontMetrics fm(font);
         setTabStopDistance(fm.horizontalAdvance("    "));
         document()->setDefaultFont(font);
