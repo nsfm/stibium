@@ -1,0 +1,8 @@
+import fab
+
+title('Point (2D)')
+
+input('x', float)
+input('y', float)
+
+sb.ui.point(x, y, 0)

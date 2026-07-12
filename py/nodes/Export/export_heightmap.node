@@ -1,0 +1,8 @@
+import fab
+
+title('Heightmap (.png)')
+
+input('shape', fab.types.Shape)
+output('out', shape)
+
+sb.export.heightmap(shape)

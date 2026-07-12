@@ -1,0 +1,8 @@
+import fab
+
+title('Mesh (.stl)')
+
+input('shape', fab.types.Shape)
+output('out', shape)
+
+sb.export.stl(shape)

@@ -1,0 +1,33 @@
+import fab
+import math
+
+title('Ring (Z)')
+
+input('zmin', float)
+input('zmax', float, 1)
+input('x', float)
+input('y', float)
+input('r', float, 1)
+input('R', float, 2)
+
+output('shape', fab.shapes.cylinder(x,y, zmin, zmax, R) & ~fab.shapes.cylinder(x, y, zmin, zmax,  r))
+
+# UI
+sb.ui.wireframe([(x, y, zmin), (x, y, zmax)])
+sb.ui.wireframe([(x, y, zmax), (x, y, zmax + r)])
+sb.ui.wireframe([(x, y,zmin), (x, y, zmin + R)])
+
+sb.ui.wireframe([
+    (math.cos(i/36. * 2*math.pi) * R + x, 
+     math.sin(i/36. * 2*math.pi) * R + y, zmin)
+    for i in range(36)], close=True)
+
+sb.ui.wireframe([
+    (math.cos(i/36. * 2*math.pi) * r + x,
+     math.sin(i/36. * 2*math.pi) * r + y, zmax)
+    for i in range(36)], close=True)
+
+sb.ui.point(x, y, zmin)
+sb.ui.point(x, y, zmax)
+sb.ui.point(x, y, zmin + R, drag=(None, None, R))
+sb.ui.point(x, y, zmax + r, drag=(None, None, r))
