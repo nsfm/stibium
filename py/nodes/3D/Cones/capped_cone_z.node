@@ -1,0 +1,21 @@
+import fab
+import math
+
+title('Capped cone / frustum (Z)')
+
+input('z0', float, -1)
+input('z1', float, 1)
+input('r0', float, 1)     # radius at z0
+input('r1', float, 0.5)   # radius at z1
+
+output('shape', fab.shapes.capped_cone_z(z0, z1, r0, r1))
+
+# UI
+sb.ui.wireframe([
+    (math.cos(i/36. * 2*math.pi) * r0,
+     math.sin(i/36. * 2*math.pi) * r0, z0)
+    for i in range(36)], close=True)
+sb.ui.wireframe([
+    (math.cos(i/36. * 2*math.pi) * r1,
+     math.sin(i/36. * 2*math.pi) * r1, z1)
+    for i in range(36)], close=True)

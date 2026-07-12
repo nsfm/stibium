@@ -1,0 +1,8 @@
+import fab
+
+title('Revolve (Z)')
+
+# Revolves a 2D profile in the XZ plane (X = radius, Z = height) about Z.
+input('shape', fab.types.Shape)
+
+output('revolved', fab.shapes.revolve_z(shape))

@@ -1,0 +1,16 @@
+import fab
+
+title('Half-space (plane)')
+
+input('px', float, 0)
+input('py', float, 0)
+input('pz', float, 0)
+input('nx', float, 0)
+input('ny', float, 0)
+input('nz', float, 1)
+
+output('shape', fab.shapes.half_space(px, py, pz, nx, ny, nz))
+
+# UI
+sb.ui.point(px, py, pz)
+sb.ui.wireframe([(px, py, pz), (px + nx, py + ny, pz + nz)])

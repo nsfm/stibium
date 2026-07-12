@@ -1,0 +1,17 @@
+import fab
+import math
+
+title('Segment (2D)')
+
+input('x0', float, -1)
+input('y0', float, 0)
+input('x1', float, 1)
+input('y1', float, 0)
+input('w', float, 0.25)
+
+output('shape', fab.shapes.segment(x0, y0, x1, y1, w))
+
+# UI
+sb.ui.wireframe([(x0, y0, 0), (x1, y1, 0)])
+sb.ui.point(x0, y0)
+sb.ui.point(x1, y1)

@@ -1,0 +1,28 @@
+import fab
+import fab.shapes
+import math
+
+
+title('Threaded Rod (ISO metric external)')
+
+input('d', float, 6)          # nominal / major diameter (M6 default)
+input('pitch', float, 1.0)    # thread pitch (M6 coarse = 1.0)
+input('length', float, 10)
+input('n_starts', int, 1)
+input('clearance', float, 0.0)   # 0 for the rod itself
+
+output('shape', fab.shapes.iso_thread_external(d, pitch, length,
+                                          n_starts, clearance))
+
+# UI: axis + crest-radius circles at both ends
+_H = math.sqrt(3) / 2 * pitch
+_rc = d / 2 + clearance
+sb.ui.wireframe([(0, 0, 0), (0, 0, length)])
+sb.ui.wireframe([(math.cos(i / 36. * 2 * math.pi) * _rc,
+                  math.sin(i / 36. * 2 * math.pi) * _rc, 0)
+                 for i in range(36)], close=True)
+sb.ui.wireframe([(math.cos(i / 36. * 2 * math.pi) * _rc,
+                  math.sin(i / 36. * 2 * math.pi) * _rc, length)
+                 for i in range(36)], close=True)
+sb.ui.point(0, 0, length, drag=(None, None, length))
+sb.ui.point(_rc, 0, 0, drag=(_rc, None, None))

@@ -1,0 +1,22 @@
+import fab
+import fab.shapes
+import math
+
+
+title('Spur Gear (involute)')
+
+input('module', float, 2.0)
+input('teeth', int, 20)
+input('pressure_angle', float, 20.0)
+input('thickness', float, 6.0)
+
+output('shape', fab.shapes.spur_gear(module, teeth, pressure_angle, thickness))
+
+# UI: pitch circle + addendum circle
+_g = fab.shapes.gear_geometry(module, teeth, pressure_angle)
+for _r in (_g['r_pitch'], _g['r_add']):
+    sb.ui.wireframe([(math.cos(i / 72. * 2 * math.pi) * _r,
+                      math.sin(i / 72. * 2 * math.pi) * _r, 0)
+                     for i in range(72)], close=True)
+sb.ui.point(0, 0, 0)
+sb.ui.point(_g['r_add'], 0, 0, drag=(_g['r_add'], None, None))

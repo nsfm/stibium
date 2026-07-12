@@ -1,0 +1,16 @@
+import fab
+import math
+
+title('Rhombus')
+
+input('x', float, 0)
+input('y', float, 0)
+input('rx', float, 1)
+input('ry', float, 0.6)
+
+output('shape', fab.shapes.rhombus(rx, ry, x, y))
+
+# UI
+sb.ui.wireframe([(x + rx, y, 0), (x, y + ry, 0),
+                 (x - rx, y, 0), (x, y - ry, 0)], close=True)
+sb.ui.point(x, y)

@@ -1,0 +1,21 @@
+import fab
+import math
+
+title('Crescent / Moon')
+
+input('x', float, 0)
+input('y', float, 0)
+input('r_outer', float, 1)
+input('r_inner', float, 0.85)
+input('offset', float, 0.5)
+
+output('shape', fab.shapes.crescent(x, y, r_outer, r_inner, offset))
+
+# UI: outer disk and the subtracted disk
+sb.ui.wireframe([(x + r_outer * math.cos(i / 36. * 2 * math.pi),
+                  y + r_outer * math.sin(i / 36. * 2 * math.pi), 0)
+                 for i in range(36)], close=True)
+sb.ui.wireframe([(x + offset + r_inner * math.cos(i / 36. * 2 * math.pi),
+                  y + r_inner * math.sin(i / 36. * 2 * math.pi), 0)
+                 for i in range(36)], close=True)
+sb.ui.point(x, y)

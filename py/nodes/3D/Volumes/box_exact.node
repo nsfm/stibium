@@ -1,0 +1,16 @@
+import fab
+
+title('Box (exact SDF)')
+
+input('xmin', float, -1)
+input('xmax', float, 1)
+input('ymin', float, -1)
+input('ymax', float, 1)
+input('zmin', float, -1)
+input('zmax', float, 1)
+
+output('shape', fab.shapes.box_exact(xmin, xmax, ymin, ymax, zmin, zmax))
+
+# UI
+sb.ui.point(xmin, ymin, zmin)
+sb.ui.point(xmax, ymax, zmax)

@@ -1,0 +1,18 @@
+import fab
+import math
+
+title('Trapezoid')
+
+input('x', float, 0)
+input('y', float, 0)
+input('width_bottom', float, 2)
+input('width_top', float, 1)
+input('height', float, 1.5)
+
+output('shape', fab.shapes.trapezoid(width_bottom, width_top, height, x, y))
+
+# UI
+hb, ht, h2 = width_bottom / 2, width_top / 2, height / 2
+sb.ui.wireframe([(x - hb, y - h2, 0), (x + hb, y - h2, 0),
+                 (x + ht, y + h2, 0), (x - ht, y + h2, 0)], close=True)
+sb.ui.point(x, y)

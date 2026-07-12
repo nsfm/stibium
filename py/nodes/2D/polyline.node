@@ -1,0 +1,15 @@
+import fab
+import math
+
+title('Polyline (2D)')
+
+# 'points' is a list datum: edit the literal in the inspector.
+input('points', list, [[-1, -0.5], [0, 0.75], [1, -0.5]])
+input('w', float, 0.2)
+
+output('shape', fab.shapes.polyline(points, w))
+
+# UI
+sb.ui.wireframe([(p[0], p[1], 0) for p in points])
+for p in points:
+    sb.ui.point(p[0], p[1])

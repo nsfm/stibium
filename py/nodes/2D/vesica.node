@@ -1,0 +1,18 @@
+import fab
+import math
+
+title('Vesica / Lens')
+
+input('x', float, 0)
+input('y', float, 0)
+input('r', float, 1)
+input('d', float, 0.5)
+
+output('shape', fab.shapes.vesica(x, y, r, d))
+
+# UI: the two generating circles
+for cx in (x - d, x + d):
+    sb.ui.wireframe([(cx + r * math.cos(i / 36. * 2 * math.pi),
+                      y + r * math.sin(i / 36. * 2 * math.pi), 0)
+                     for i in range(36)], close=True)
+sb.ui.point(x, y)

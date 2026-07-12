@@ -1,0 +1,19 @@
+import fab
+
+title('Snap-fit Clip')
+
+# POSITIVE: wire into a Union.  Cantilever snap-fit clip: arm along +X,
+# thickness +Y, width +Z, hooked barb at the free end.
+input('x', float, 0)
+input('y', float, 0)
+input('z', float, 0)
+input('arm_length', float, 10)
+input('arm_thickness', float, 2)
+input('arm_width', float, 4)
+input('barb_depth', float, 1.2)
+input('barb_angle', float, 45)
+
+output('shape', fab.shapes.snap_clip(x, y, z, arm_length, arm_thickness,
+                                     arm_width, barb_depth, barb_angle))
+
+sb.ui.point(x, y, z)

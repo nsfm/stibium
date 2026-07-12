@@ -1,0 +1,18 @@
+import fab
+
+title('Heat-set Boss')
+
+# POSITIVE: wire into a Union.  Cylindrical boss with a blind bore sized for a
+# heat-set threaded insert.  fillet > 0 rounds the base foot.
+input('x', float, 0)
+input('y', float, 0)
+input('z0', float, 0)
+input('height', float, 8)
+input('size', str, 'M3')
+input('wall', float, 1.6)
+input('fillet', float, 0)
+
+output('shape', fab.shapes.heatset_boss(x, y, z0, height, size,
+                                        wall, None, fillet))
+
+sb.ui.point(x, y, z0)

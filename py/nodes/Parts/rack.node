@@ -1,0 +1,20 @@
+import fab
+import fab.shapes
+import math
+
+
+title('Rack (involute, straight-flank)')
+
+input('module', float, 2.0)
+input('n_teeth', int, 8)
+input('pressure_angle', float, 20.0)
+input('thickness', float, 6.0)
+
+output('shape', fab.shapes.rack(module, n_teeth, pressure_angle, thickness))
+
+# UI: pitch line
+_p = math.pi * module
+_total = n_teeth * _p
+sb.ui.wireframe([(-_total / 2, 0, 0), (_total / 2, 0, 0)])
+sb.ui.point(-_total / 2, 0, 0)
+sb.ui.point(_total / 2, 0, 0)

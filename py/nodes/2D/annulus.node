@@ -1,0 +1,18 @@
+import fab
+import math
+
+title('Annulus / Ring')
+
+input('x', float, 0)
+input('y', float, 0)
+input('r_outer', float, 1)
+input('r_inner', float, 0.5)
+
+output('shape', fab.shapes.annulus(x, y, r_outer, r_inner))
+
+# UI
+for r in (r_inner, r_outer):
+    sb.ui.wireframe([(x + r * math.cos(i / 36. * 2 * math.pi),
+                      y + r * math.sin(i / 36. * 2 * math.pi), 0)
+                     for i in range(36)], close=True)
+sb.ui.point(x, y)

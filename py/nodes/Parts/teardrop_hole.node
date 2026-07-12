@@ -1,0 +1,16 @@
+import fab
+
+title('Teardrop Hole')
+
+# NEGATIVE: wire into a Difference `b` input.  Overhang-safe horizontal hole
+# whose 45-degree peak (always toward +Z) lets it print without support.
+input('x', float, 0)
+input('y', float, 0)
+input('z', float, 0)
+input('r', float, 1.7)          # M3 close clearance radius (3.4 dia)
+input('length', float, 20)
+input('axis', str, 'X')         # 'X' or 'Y' (horizontal); 'Z' allowed
+
+output('shape', fab.shapes.teardrop_hole(x, y, z, r, length, axis))
+
+sb.ui.point(x, y, z)

@@ -1,0 +1,19 @@
+import fab
+
+title('Hex Nut Trap')
+
+# NEGATIVE: wire into a Difference `b` input.  Hex pocket for a captive nut;
+# set slot_length > 0 for a side-entry slide channel.
+input('x', float, 0)
+input('y', float, 0)
+input('z0', float, 0)
+input('depth', float, 2.4)      # M3 nut thickness (ISO 4032)
+input('size', str, 'M3')
+input('clearance', float, 0.2)
+input('slot_length', float, 0)
+input('slot_dir', str, 'X')
+
+output('shape', fab.shapes.nut_trap_hex(x, y, z0, depth, size,
+                                        clearance, slot_length, slot_dir))
+
+sb.ui.point(x, y, z0)
