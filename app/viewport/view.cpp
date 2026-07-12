@@ -1,5 +1,7 @@
 #include <Python.h>
 
+#include <QFontDatabase>
+
 #include <QOpenGLWidget>
 #include <QMatrix4x4>
 #include <QMouseEvent>
@@ -93,8 +95,17 @@ void ViewportView::drawBackground(QPainter* painter, const QRectF& rect)
         initializeOpenGLFunctions();
         gl_initialized = true;
     }
-    glClearColor(0.0, 0.0, 0.0, 1.0);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    painter->endNativePainting();
+
+    {   // Vertical gradient backdrop in the warm palette
+        QLinearGradient grad(rect.topLeft(), rect.bottomLeft());
+        grad.setColorAt(0, Colors::adjust(Colors::base00, 1.35f));
+        grad.setColorAt(1, Colors::base00);
+        painter->fillRect(rect, grad);
+    }
+
+    painter->beginNativePainting();
 
     // Get bounds from all child images
     float zmin = INFINITY;
@@ -127,10 +138,24 @@ void ViewportView::drawAxes(QPainter* painter) const
             [](QPair<QVector3D, QColor> a, QPair<QVector3D, QColor> b)
             { return a.first.z() < b.first.z(); });
 
+    QList<QPair<QVector3D, QString>> labels = {
+        {x, "X"}, {y, "Y"}, {z, "Z"}};
+
+    int i = 0;
     for (auto p : pts)
     {
         painter->setPen(QPen(p.second, 2));
         painter->drawLine(o.toPointF(), p.first.toPointF());
+    }
+    for (auto l : labels)
+    {
+        const auto c = QList<QColor>({Colors::red, Colors::green,
+                                      Colors::blue})[i++];
+        painter->setPen(c);
+        const auto tip = o.toPointF() +
+            (l.first.toPointF() - o.toPointF()) * 1.12;
+        painter->drawText(QRectF(tip.x() - 6, tip.y() - 6, 12, 12),
+                          Qt::AlignCenter, l.second);
     }
 }
 
@@ -169,7 +194,10 @@ void ViewportView::drawCoords(QPainter* painter) const
 
     int value = opacity * 200;
 
-    painter->setPen(QPen(QColor(255, 255, 255, value)));
+    auto readout = Colors::base05;
+    readout.setAlpha(value);
+    painter->setPen(QPen(readout));
+    painter->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
     QString txt;
     if (axis == 'z')
     {
