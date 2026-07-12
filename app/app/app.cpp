@@ -16,6 +16,7 @@
 #include "undo/undo_stack.h"
 
 #include "graph/graph.h"
+#include "app/theme.h"
 
 App::App(int& argc, char** argv)
     : QApplication(argc, argv),
@@ -28,6 +29,8 @@ App::App(int& argc, char** argv)
     autosave_timer = new QTimer(this);
     connect(autosave_timer, &QTimer::timeout,
         this, &App::onAutosave);
+
+    Theme::apply(this);
 }
 
 App::~App()

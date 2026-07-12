@@ -16,6 +16,7 @@ extern QColor teal;
 extern QColor blue;
 extern QColor violet;
 extern QColor brown;
+extern QColor amber;
 
 extern QColor base00;
 extern QColor base01;
