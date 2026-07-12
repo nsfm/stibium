@@ -1,0 +1,10 @@
+# Neil Gershenfeld 1/29/15
+# Matt Keeter 6/12/15
+
+import fab
+
+title('Invert')
+
+input('shape', fab.types.Shape)
+output('out', fab.shapes.invert(shape))
+

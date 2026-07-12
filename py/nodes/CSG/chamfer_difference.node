@@ -1,0 +1,9 @@
+import fab.types
+import fab.shapes
+
+title('Chamfer Difference')
+input('a', fab.types.Shape)
+input('b', fab.types.Shape)
+input('r', float, 0.1)
+
+output('shape', fab.shapes.chamfer_difference(a, b, r))
