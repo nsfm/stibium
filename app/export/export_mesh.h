@@ -10,8 +10,9 @@
 class ExportMeshWorker : public ExportWorker
 {
 public:
-    explicit ExportMeshWorker(Shape s, Bounds b, QString f, float r, bool d)
-        : ExportWorker(s, b, f, r), detect_features(d) {}
+    explicit ExportMeshWorker(Shape s, Bounds b, QString f, float r, bool d,
+                              float sim=0)
+        : ExportWorker(s, b, f, r), detect_features(d), simplify(sim) {}
 
     /*
      *  Top-level function that accepts user input and start the export
@@ -25,12 +26,26 @@ public:
 
 protected:
     /*
+     *  Welds the triangle soup produced by the mesher, simplifies it to
+     *  within _simplify model units of deviation, and replaces verts /
+     *  count with the (much smaller) result.
+     */
+    void simplifyMesh(float** verts, unsigned* count) const;
+
+    /*
      *  Call-time settings
      */
     const bool detect_features;
+    const float simplify;
 
     /*
      *  Run-time, set by dialogs
      */
     bool _detect_features;
+
+    /*
+     *  Maximum geometric deviation (in model units) allowed when
+     *  simplifying the mesh after triangulation; <= 0 disables it.
+     */
+    float _simplify;
 };

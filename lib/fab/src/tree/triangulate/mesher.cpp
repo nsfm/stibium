@@ -93,8 +93,15 @@ std::list<Vec3f> Mesher::get_normals(const std::list<Vec3f>& points)
     Region dummy;
     dummy.voxels = points.size() * 7;
     if (dummy.voxels >= MIN_VOLUME)
+    {
+        // The nx/ny/nz scratch buffers hold MIN_VOLUME floats; writing
+        // points.size() * 7 entries past that would overflow them.
+        // Returning no normals makes check_feature treat this fan as
+        // featureless, which is safe (it just isn't sharpened).
         std::cerr << "Error: too many normals to calculate at once!"
                   << std::endl;
+        return {};
+    }
     dummy.X = nx;
     dummy.Y = ny;
     dummy.Z = nz;
@@ -283,6 +290,12 @@ std::list<Vec3f> Mesher::get_contour()
 void Mesher::check_feature()
 {
     auto contour = get_contour();
+
+    // A degenerate contour can't contain a feature, and the math below
+    // (center /= size, least-squares fit) misbehaves on empty input.
+    if (contour.size() < 2)
+        return;
+
     const auto normals = get_normals(contour);
 
     // Find the largest cone and the normals that enclose
@@ -374,7 +387,7 @@ void Mesher::remove_dupes()
     std::set<std::array<size_t, 3>> tris;
     size_t vertex_id = 0;
 
-    for (auto itr=triangles.begin(); itr != triangles.end(); ++itr)
+    for (auto itr=triangles.begin(); itr != triangles.end();)
     {
         std::array<size_t, 3> t;
         int i=0;
@@ -397,15 +410,17 @@ void Mesher::remove_dupes()
 
         // Check to see if there are any other triangles that use these
         // three vertices; if so, delete this triangle.
+        // (erase-then-advance, rather than erase-then-decrement, since
+        // decrementing begin() is undefined behavior)
         std::sort(t.begin(), t.end());
         if (tris.count(t))
         {
             itr = triangles.erase(itr);
-            itr--;
         }
         else
         {
             tris.insert(t);
+            ++itr;
         }
     }
 }
@@ -420,14 +435,17 @@ void Mesher::prune_flags()
         edges.insert(t.ca_());
     }
 
-    for (auto itr=triangles.begin(); itr != triangles.end(); ++itr)
+    for (auto itr=triangles.begin(); itr != triangles.end();)
     {
         if (!edges.count(itr->ba_()) ||
             !edges.count(itr->cb_()) ||
             !edges.count(itr->ac_()))
         {
             itr = triangles.erase(itr);
-            itr--;
+        }
+        else
+        {
+            ++itr;
         }
     }
 }

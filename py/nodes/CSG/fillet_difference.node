@@ -1,0 +1,9 @@
+import fab.types
+import fab.shapes
+
+title('Fillet Difference')
+input('a', fab.types.Shape)
+input('b', fab.types.Shape)
+input('r', float, 0.1)
+
+output('shape', fab.shapes.fillet_difference(a, b, r))

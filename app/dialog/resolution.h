@@ -47,6 +47,12 @@ public:
      */
     bool getDetectFeatures() const;
 
+    /*
+     *  Returns the maximum deviation (in model units) for mesh
+     *  simplification, or 0 if simplification is disabled
+     */
+    float getSimplifyDeviation() const;
+
 protected slots:
     /*
      *  When a value changes, update pixel / voxel count

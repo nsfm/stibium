@@ -1,0 +1,9 @@
+import fab.types
+import fab.shapes
+
+title('Fillet Union')
+input('a', fab.types.Shape)
+input('b', fab.types.Shape)
+input('r', float, 0.1)
+
+output('shape', fab.shapes.fillet_union(a, b, r))
