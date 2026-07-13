@@ -82,6 +82,13 @@ Mesher::~Mesher()
 
 uint32_t Mesher::intern(float x, float y, float z)
 {
+    // Normalize -0.0f to +0.0f: keys are compared by bit pattern, but
+    // the mesh topology logic needs value equality (the pre-indexed
+    // code keyed float values through std::map/std::set).
+    if (x == 0)     x = 0;
+    if (y == 0)     y = 0;
+    if (z == 0)     z = 0;
+
     std::array<uint32_t, 3> key;
     memcpy(&key[0], &x, sizeof(float));
     memcpy(&key[1], &y, sizeof(float));
@@ -90,6 +97,15 @@ uint32_t Mesher::intern(float x, float y, float z)
     auto found = vertex_ids.find(key);
     if (found != vertex_ids.end())
         return found->second;
+
+    // UINT32_MAX is the tombstone sentinel, so it can never be handed
+    // out as a live vertex id (that would need a ~50 GB vertex table;
+    // fail loudly rather than silently dropping triangles).
+    if (vertices.size() >= UINT32_MAX)
+    {
+        std::cerr << "Mesher: vertex count overflow" << std::endl;
+        std::abort();
+    }
 
     const uint32_t id = vertices.size();
     vertices.push_back({{x, y, z}});
@@ -425,7 +441,7 @@ void Mesher::remove_dupes()
     // its position so that the first copy is the one that survives.
     struct Key {
         uint32_t v[3];
-        uint32_t seq;
+        size_t seq;
     };
     std::vector<Key> keys;
     keys.reserve(triangles.size());
@@ -435,7 +451,7 @@ void Mesher::remove_dupes()
         const Tri& t = triangles[i];
         if (dead(t))
             continue;
-        Key k = {{t.a, t.b, t.c}, uint32_t(i)};
+        Key k = {{t.a, t.b, t.c}, i};
         std::sort(std::begin(k.v), std::end(k.v));
         keys.push_back(k);
     }
