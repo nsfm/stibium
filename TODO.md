@@ -58,12 +58,6 @@ were named for the element symbol all along).
 - **Node editor QoL.** Fuzzy-search add menu (type "cyl"), minimap for big
   graphs, canvas annotations (sticky notes + named zones behind nodes,
   persisted in the .sb JSON like node positions).
-- **Floating node labels for the zoomed-out canvas.** Card labels
-  currently scale with the scene; replace/augment with labels rendered
-  at constant screen size floating near their nodes, nudging each other
-  to avoid overlap, and prioritizing custom-named nodes over
-  default-named ones (default names match `[a-z]\d+`). "Web-map style"
-  chrome per Nate. Complements the LOD cards.
 - **Light-direction UI for the Enhanced render mode.** The key light is
   configurable today (`render/key_light = "x,y,z"` in the config file);
   give it real UI - a drag gizmo in the viewport or at least a dialog.
@@ -252,6 +246,12 @@ library -> MCP server on the live session):
 
 
 ## Done
+- 2026-07-13 — floating node labels: below ~18% zoom, constant-size
+  labels fade in near nodes (viewport-space, drawn in the canvas
+  foreground pass). Custom-named nodes place first with amber edges;
+  default-named (`[a-z]\d+`) fill remaining space and yield when
+  crowded. Overlaps nudge vertically; pushed labels get leader lines;
+  capped at 150 for huge graphs. Complements the LOD cards.
 - 2026-07-13 — app-level CTest: every example runs --validate,
   --render, and a double --resave byte-compare (17 tests total with
   the lib suites, ~7s). Plus Render ▸ Export image in viewport

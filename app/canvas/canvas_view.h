@@ -113,6 +113,14 @@ protected:
 
     void updateLOD();
 
+    /*
+     *  Draws web-map style floating node labels: constant screen
+     *  size, nudged to avoid overlap, custom-named nodes first.
+     *  Active when zoomed out far enough that the LOD cards' own
+     *  labels become unreadable.
+     */
+    void drawFloatingLabels(QPainter* painter);
+
     bool selecting;
     bool low_detail_mode=false;
 };

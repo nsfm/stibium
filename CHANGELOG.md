@@ -118,6 +118,10 @@ release; newest work at the top of each section.
   by output datum type — shape green, float yellow, etc. — and
   shape-consuming shape-producers (CSG/deforms/transforms) tint violet,
   so operators read differently from sources at a glance.
+- **Floating node labels**: far zoom-out fades in web-map style
+  labels — fixed screen size, overlap-avoiding, custom-named nodes
+  prioritized (amber-edged) over auto-named ones, leader lines when
+  nudged. Big graphs read like a labeled map.
 - **Zoom LOD**: below ~32% zoom nodes collapse to solid type-tinted name
   cards and wires simplify to cosmetic strokes; graphs read as a labeled
   map instead of gray fuzz. Zoom-out unclamped deep (0.02).
