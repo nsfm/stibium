@@ -33,6 +33,11 @@ typedef enum Opcode_ {
     OP_FLOOR,
     OP_LOG,
 
+    /*  Trilinear sample of a registered MeshGrid (see fab/tree/grid.h).
+     *  Ternary: lhs/rhs/mhs are the x/y/z sample coordinates, so
+     *  map-based transforms compose exactly as for other nodes. */
+    OP_GRID,
+
     OP_X,
     OP_Y,
     OP_Z,

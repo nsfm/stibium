@@ -48,6 +48,16 @@ typedef struct Node_ {
     */
     struct Node_* rhs;
 
+    /** @var mhs
+    Third child node, used only by OP_GRID (the z sample coordinate;
+    lhs and rhs carry x and y).  NULL everywhere else. */
+    struct Node_* mhs;
+
+    /** @var payload
+    Refcounted heap payload, used only by OP_GRID (a MeshGrid*).
+    Cloning retains it; free_node releases it. */
+    void* payload;
+
     /** @var clone_address
     Most recent place to which this node was cloned
     */
@@ -62,6 +72,11 @@ typedef struct Node_ {
     @returns Pointer to clone
 */
 Node* clone_node(Node* n);
+
+/** @brief Frees a single node, releasing its payload if it has one.
+    @details All node deallocation must go through here (not free)
+    so OP_GRID payload refcounts stay balanced. */
+void free_node(Node* n);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Node constructors
@@ -102,6 +117,10 @@ Node* constant_n(float value);
 Node* X_n(void);
 Node* Y_n(void);
 Node* Z_n(void);
+
+// Grid sample (ternary; retains the grid payload)
+struct MeshGrid_;
+Node* grid_n(struct MeshGrid_* grid, Node* x, Node* y, Node* z);
 
 #ifdef __cplusplus
 }

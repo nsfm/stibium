@@ -35,14 +35,14 @@ void free_tree(MathTree* tree)
 
     for (unsigned level=0; level < tree->num_levels; ++level) {
         for (unsigned n=0; n < tree->active[level]; ++n) {
-            free(tree->nodes[level][n]);
+            free_node(tree->nodes[level][n]);
         }
         free(tree->nodes[level]);
         free(tree->disabled[level].data);
     }
 
     for (unsigned c=0; c < tree->num_constants; ++c) {
-        free(tree->constants[c]);
+        free_node(tree->constants[c]);
     }
 
     free(tree->nodes);
@@ -161,6 +161,7 @@ void disable_nodes_binary(MathTree* tree)
             {
                 if (node->lhs)  node->lhs->flags &= ~NODE_BOOLEAN;
                 if (node->rhs)  node->rhs->flags &= ~NODE_BOOLEAN;
+                if (node->mhs)  node->mhs->flags &= ~NODE_BOOLEAN;
             }
         }
     }
@@ -226,6 +227,7 @@ void disable_nodes(MathTree* tree)
             else {
                 if (node->lhs)  node->lhs->flags &= ~NODE_IGNORED;
                 if (node->rhs)  node->rhs->flags &= ~NODE_IGNORED;
+                if (node->mhs)  node->mhs->flags &= ~NODE_IGNORED;
             }
         }
     }

@@ -10,6 +10,8 @@
 #include "fab/tree/math/math_g.h"
 #include "fab/tree/math/math_r.h"
 
+#include "fab/tree/grid.h"
+
 float eval_f(MathTree* tree, const float x, const float y, const float z)
 {
     Node* node = NULL;
@@ -46,6 +48,12 @@ float eval_f(MathTree* tree, const float x, const float y, const float z)
                 case OP_EXP:    node->results.f = exp_f(A); break;
                 case OP_FLOOR:    node->results.f = floor_f(A); break;
                 case OP_LOG:    node->results.f = log_f(A); break;
+
+                case OP_GRID:
+                    node->results.f = grid_eval_f(
+                            (const MeshGrid*)node->payload,
+                            A, B, node->mhs->results.f);
+                    break;
 
                 case OP_X:      node->results.f = X_f(x); break;
                 case OP_Y:      node->results.f = Y_f(y); break;
@@ -103,6 +111,12 @@ Interval eval_i(MathTree* tree, const Interval X,
                 case OP_FLOOR:    node->results.i = floor_i(A); break;
                 case OP_LOG:    node->results.i = log_i(A); break;
 
+                case OP_GRID:
+                    node->results.i = grid_eval_i(
+                            (const MeshGrid*)node->payload,
+                            A, B, node->mhs->results.i);
+                    break;
+
                 case OP_CONST:  break;
                 case OP_X:      node->results.i = X_i(X); break;
                 case OP_Y:      node->results.i = Y_i(Y); break;
@@ -156,6 +170,14 @@ float* eval_r(MathTree* tree, const Region r)
                 case OP_EXP:    exp_r(A, R, c); break;
                 case OP_FLOOR:    floor_r(A, R, c); break;
                 case OP_LOG:    log_r(A, R, c); break;
+
+                case OP_GRID: {
+                    const MeshGrid* grid = (const MeshGrid*)node->payload;
+                    const float* M = node->mhs->results.r;
+                    for (int q = 0; q < c; ++q)
+                        R[q] = grid_eval_f(grid, A[q], B[q], M[q]);
+                    break;
+                }
 
                 case OP_CONST:  break;
                 case OP_X:      X_r(r.X, R, c); break;
@@ -212,6 +234,24 @@ derivative* eval_g(MathTree* tree, const Region r)
                 case OP_EXP:    exp_g(A, R, c); break;
                 case OP_FLOOR:    floor_g(A, R, c); break;
                 case OP_LOG:    log_g(A, R, c); break;
+
+                case OP_GRID: {
+                    // Chain rule through the (possibly remapped)
+                    // sample coordinates in A, B, and mhs
+                    const MeshGrid* grid = (const MeshGrid*)node->payload;
+                    const derivative* M =
+                            (const derivative*)node->mhs->results.r;
+                    for (int q = 0; q < c; ++q) {
+                        float v, gx, gy, gz;
+                        grid_eval_g(grid, A[q].v, B[q].v, M[q].v,
+                                    &v, &gx, &gy, &gz);
+                        R[q].v = v;
+                        R[q].dx = gx*A[q].dx + gy*B[q].dx + gz*M[q].dx;
+                        R[q].dy = gx*A[q].dy + gy*B[q].dy + gz*M[q].dy;
+                        R[q].dz = gx*A[q].dz + gy*B[q].dz + gz*M[q].dz;
+                    }
+                    break;
+                }
 
                 case OP_CONST:  break;
                 case OP_X:      X_g(r.X, R, c); break;
