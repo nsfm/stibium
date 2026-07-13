@@ -49,7 +49,12 @@ static int renderHeadless(App& app, const QString& out, float resolution,
     for (auto n : app.getGraph()->childNodes())
         for (auto d : n->childDatums())
         {
-            if (!d->isValid() || d->getType() != fab::ShapeType)
+            // Match the viewport: only terminal shape outputs are
+            // drawn (an output feeding another node is construction
+            // geometry, e.g. a cutter feeding a difference)
+            if (!d->isValid() || d->getType() != fab::ShapeType ||
+                !d->isOutput() || !d->outgoingLinks().empty() ||
+                !d->currentValue())
                 continue;
             boost::python::extract<Shape> es(d->currentValue());
             if (!es.check())
@@ -409,7 +414,8 @@ int main(int argc, char *argv[])
                 code = renderHeadless(app, parser.value(renderOpt), res,
                                       parser.value(viewOpt),
                                       parser.value(sizeOpt).toInt());
-            exit(code);
+            // Return (rather than exit()) so Qt tears down cleanly
+            return code;
         }
     }
 
