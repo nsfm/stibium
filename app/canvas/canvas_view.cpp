@@ -229,7 +229,12 @@ void CanvasView::drawBackground(QPainter* painter, const QRectF& rect)
     const int minor = 20, major = 100;
 
     auto drawGrid = [&](int d, float alpha){
-        if (alpha <= 0.02f)
+        // Fade by screen-space dot spacing: dots tighter than ~7px
+        // are visual mush at a cost proportional to visible WORLD
+        // area, which explodes at far zoom. Spacing-gating bounds
+        // the work by screen area instead, on any monitor.
+        alpha *= fmin(1.f, (float(d) * zoom - 6) / 6);
+        if (alpha <= 0.05f)
             return;
         QVector<QPointF> pts;
         pts.reserve(int((rect.width() / d + 2) * (rect.height() / d + 2)));
@@ -242,9 +247,11 @@ void CanvasView::drawBackground(QPainter* painter, const QRectF& rect)
         painter->drawPoints(pts.data(), pts.size());
     };
 
-    // Minor dots fade out as you zoom away; major dots persist longer.
+    // Minor dots fade out as you zoom away; major dots persist
+    // longer; a far-field level keeps texture at deep zoom-out.
     drawGrid(minor, fmin(1.f, (zoom - 0.25f) * 2));
     drawGrid(major, fmin(1.f, zoom * 2));
+    drawGrid(500, 0.7f);
 }
 
 void CanvasView::drawForeground(QPainter* painter, const QRectF& rect)
