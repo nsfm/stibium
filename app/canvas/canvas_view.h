@@ -83,6 +83,11 @@ protected:
     void openAddMenu();
 
     /*
+     *  Opens the fuzzy-search node palette at the cursor
+     */
+    void openAddPalette();
+
+    /*
      *  Looks up the inspector for the given node
      */
     InspectorFrame* inspectorFor(Node* n);
@@ -104,6 +109,8 @@ protected:
      *  Toggles low-detail mode on inspector frames when the zoom level
      *  crosses the readability threshold (called on any zoom change).
      */
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
+
     void updateLOD();
 
     bool selecting;
