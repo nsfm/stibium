@@ -53,7 +53,6 @@ add_library(SbFab STATIC
     src/tree/tree.c
     src/tree/v2parser.cpp
     src/tree/triangulate/mesher.cpp
-    src/tree/triangulate/triangle.cpp
     src/tree/triangulate.cpp
     src/types/bounds.cpp
     src/types/shape.cpp
@@ -90,6 +89,7 @@ target_include_directories(SbFab SYSTEM PRIVATE
 
 add_executable(SbFabTest
     tests/main.cpp
+    tests/mesher.cpp
     tests/parser.cpp
     tests/shape.cpp
 )

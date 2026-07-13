@@ -1,9 +1,10 @@
 #ifndef MESHER_H
 #define MESHER_H
 
-#include <list>
-#include <map>
 #include <array>
+#include <cstdint>
+#include <list>
+#include <unordered_map>
 #include <vector>
 
 #include "fab/tree/triangulate/triangle.h"
@@ -37,12 +38,55 @@ public:
      */
     float* get_verts(unsigned* count);
 
-protected:
     /*
-     *  Finds the normals of each vertex on the triangle.
-     *  Returns a Triangle with the corners as the new normals.
+     *  Returns the mesh in indexed form: out_verts is a flat list of
+     *  unique vertices (3 floats each); out_indices is 3 vertex indices
+     *  per triangle.  Vertices are emitted in first-use order.
      */
-     std::list<Vec3f> get_normals(const std::list<Vec3f>& t);
+    void get_mesh(std::vector<float>& out_verts,
+                  std::vector<uint32_t>& out_indices);
+
+protected:
+    // Sentinel for the triangle-range bookmarks below (the equivalent of
+    // a list.end() iterator: "no position yet" / "runs to the tail").
+    static constexpr size_t NONE = SIZE_MAX;
+
+    /*
+     *  Returns the vertex table index for (x, y, z), creating a new
+     *  entry if this position hasn't been seen before.  Positions are
+     *  keyed on their exact float bit patterns.
+     */
+    uint32_t intern(float x, float y, float z);
+
+    /*
+     *  Looks up an interned vertex's position.
+     */
+    Vec3f pos(uint32_t v) const;
+
+    /*
+     *  Packs a directed edge into a single map key.
+     */
+    static uint64_t edge(uint32_t a, uint32_t b)
+        { return (uint64_t(a) << 32) | b; }
+
+    /*
+     *  An erased (tombstoned) triangle.  Erasing in place keeps every
+     *  triangle index stable, so bookmarks and the swappable-edge map
+     *  never need fixing up; dead triangles are skipped on output.
+     */
+    static bool dead(const Tri& t) { return t.a == UINT32_MAX; }
+
+    /*
+     *  Upper bound of the current voxel's triangle range
+     *  (voxel_end, or the current tail if voxel_end is unset).
+     */
+    size_t voxel_limit() const
+        { return voxel_end == NONE ? triangles.size() : voxel_end; }
+
+    /*
+     *  Finds the normals of each vertex on the contour.
+     */
+    std::vector<Vec3f> get_normals(const std::vector<uint32_t>& contour);
 
     /*
      *  Records another vertex.
@@ -101,16 +145,16 @@ protected:
      *  Marks that the first edge of this triangle is swappable,
      *  and performs the swap if a match is found.
      */
-    void push_swappable_triangle(Triangle t);
+    void push_swappable_triangle(Tri t);
 
     /*
-     *  Check the most recent fan (from voxel_start to triangles.end())
+     *  Check the most recent fan (from voxel_start to voxel_limit())
      *  for features and process them if they are found.
      */
     void check_feature();
 
     /*
-     *  Removes duplicates from the triangle list.
+     *  Removes duplicate triangles (same three vertices, any order).
      */
     void remove_dupes();
 
@@ -121,12 +165,19 @@ protected:
     void prune_flags();
 
     /*
+     *  One-time cleanup before output: drops the interning and
+     *  swappable-edge maps, then runs remove_dupes / prune_flags
+     *  when feature detection is enabled.
+     */
+    void finalize();
+
+    /*
      *  Returns a closed contour that traces the most recent fan.
      *
      *  Modifies triangles, voxel_start, and fan_start so that the
      *  most recent fan is stored between fan_start and voxel_start.
      */
-    std::list<Vec3f> get_contour();
+    std::vector<uint32_t> get_contour();
 
     // MathTree that we're evaluating
     struct MathTree_* tree;
@@ -156,16 +207,32 @@ protected:
     // Queue of interpolation commands to be run soon
     std::list<InterpolateCommand> queue;
 
-    // Triangle that's being constructed
-    std::vector<Vec3f> triangle;
+    // Triangle that's being constructed (vertex indices, up to 3)
+    std::vector<uint32_t> triangle;
 
-    // List of existing triangles
-    std::list<Triangle> triangles;
+    // Interned vertex positions, and a bit-pattern lookup table for them
+    std::vector<std::array<float, 3>> vertices;
+    struct VertHash {
+        size_t operator()(const std::array<uint32_t, 3>& k) const {
+            // FNV-1a over the three packed floats
+            uint64_t h = 0xcbf29ce484222325ull;
+            for (uint32_t w : k) {
+                h = (h ^ w) * 0x100000001b3ull;
+            }
+            return h;
+        }
+    };
+    std::unordered_map<std::array<uint32_t, 3>, uint32_t, VertHash> vertex_ids;
 
-    std::list<Triangle>::iterator voxel_start;
-    std::list<Triangle>::iterator voxel_end;
-    std::list<Triangle>::iterator fan_start;
-    std::map<std::array<float, 6>, std::list<Triangle>::iterator> swappable;
+    // Flat list of triangles (12 bytes each); erased ones are tombstoned
+    std::vector<Tri> triangles;
+    bool finalized;
+
+    // Bookmarks into the triangle list (see get_contour / check_feature)
+    size_t voxel_start;
+    size_t voxel_end;
+    size_t fan_start;
+    std::unordered_map<uint64_t, size_t> swappable;
 };
 
 #endif

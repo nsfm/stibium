@@ -1,11 +1,3 @@
-#include <algorithm>
-
-#include <stdlib.h>
-#include <stdio.h>
-#include <stdbool.h>
-#include <string.h>
-#include <math.h>
-
 #include "fab/tree/triangulate.h"
 #include "fab/tree/triangulate/mesher.h"
 
@@ -22,6 +14,16 @@ void triangulate(MathTree* tree, const Region r,
     // Top-level call to the recursive triangulation function.
     t.triangulate_region(r);
 
-    // Copy data from tristate struct to output pointers.
+    // Copy data from the mesher to the output pointers.
     *verts = t.get_verts(count);
+}
+
+void triangulate_indexed(MathTree* tree, const Region r,
+                         bool detect_edges, volatile int* halt,
+                         std::vector<float>& verts,
+                         std::vector<uint32_t>& indices)
+{
+    Mesher t(tree, detect_edges, halt);
+    t.triangulate_region(r);
+    t.get_mesh(verts, indices);
 }

@@ -2,6 +2,9 @@
 
 #include <Python.h>
 
+#include <cstdint>
+#include <vector>
+
 #include "export/export_worker.h"
 #include "fab/types/shape.h"
 
@@ -26,11 +29,11 @@ public:
 
 protected:
     /*
-     *  Welds the triangle soup produced by the mesher, simplifies it to
-     *  within _simplify model units of deviation, and replaces verts /
-     *  count with the (much smaller) result.
+     *  Simplifies the indexed mesh to within _simplify model units of
+     *  deviation, replacing indices with the (much smaller) result.
      */
-    void simplifyMesh(float** verts, unsigned* count) const;
+    void simplifyMesh(const std::vector<float>& verts,
+                      std::vector<uint32_t>& indices) const;
 
     /*
      *  Call-time settings
