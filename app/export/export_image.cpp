@@ -182,7 +182,9 @@ QString render(Graph* graph, const Options& opt)
     delete [] s8;
     delete [] s8_rows;
 
-    if (!img.save(opt.filename))
+    // Fall back to PNG when the filename has no recognized suffix
+    // (freedesktop thumbnailers pass bare temp paths)
+    if (!img.save(opt.filename) && !img.save(opt.filename, "PNG"))
         return "could not write " + opt.filename;
 
     return QString();

@@ -1,0 +1,4 @@
+[Thumbnailer Entry]
+TryExec=stibium
+Exec=stibium --render %o --size %s %i
+MimeType=application/x-stibium;
