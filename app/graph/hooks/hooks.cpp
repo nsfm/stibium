@@ -86,7 +86,9 @@ BOOST_PYTHON_MODULE(_AppHooks)
                 "    resolution sets the resolution (cells per unit).\n"
                 "      If None, a dialog will open to select it.\n"
                 "    detect_features recovers sharp corners exactly\n"
-                "      (on by default)"
+                "      (on by default)\n"
+                "    simplify sets the max path-simplification deviation\n"
+                "      in model units (default: a quarter cell; 0 disables)"
                 )
         .def("heightmap", raw_function(&ScriptExportHooks::heightmap),
                 "heightmap(shape, bounds=None, pad=True, filename=None,\n"

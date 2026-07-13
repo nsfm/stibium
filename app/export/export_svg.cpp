@@ -85,19 +85,24 @@ void ExportSvgWorker::async()
             : (bounds.zmin + bounds.zmax) / 2;
 
     progress_phase = PHASE_CONTOURING;
-    progress_total = uint64_t(ny) + 1;
 
     std::vector<ContourPath> paths;
     contour_field(shape.tree.get(),
                   bounds.xmin, bounds.ymin, bounds.xmax, bounds.ymax,
                   nx, ny, z, detect_features, &halt, paths,
-                  &progress_done);
+                  -1, &progress_done, &progress_total);
 
     if (halt)
         return;
 
     progress_phase = PHASE_WRITING;
     progress_total = 0;
+
+    // Drop redundant collinear points (marching squares emits one
+    // chord per cell even along straight runs); corners are maximal-
+    // deviation points, so they always survive.
+    const float tolerance = simplify < 0 ? 0.25f / _resolution : simplify;
+    simplify_contours(paths, tolerance);
 
     save_svg(paths, bounds.xmin, bounds.ymin, bounds.xmax, bounds.ymax,
              _filename.toStdString().c_str());

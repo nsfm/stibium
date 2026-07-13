@@ -1,5 +1,6 @@
 #include <cmath>
 #include <cstring>
+#include <thread>
 #include <unordered_map>
 
 #include "fab/tree/contour.h"
@@ -23,31 +24,77 @@
 namespace {
 
 /*
- *  Batched field evaluation: xs/ys/zs are parallel coordinate arrays.
- *  Results land in out.  Points are fed through eval_r in chunks of
- *  MIN_VOLUME (the per-node result buffers' capacity).
+ *  Evaluates the field at n points, in chunks of MIN_VOLUME (the
+ *  per-node result buffers' capacity).
  */
-void eval_points(MathTree* tree,
-                 std::vector<float>& xs, std::vector<float>& ys,
-                 std::vector<float>& zs, std::vector<float>& out,
-                 volatile int* halt)
+void eval_span(MathTree* tree,
+               const float* xs, const float* ys, const float* zs,
+               float* out, size_t n, volatile int* halt,
+               std::atomic<uint64_t>* progress)
 {
-    out.resize(xs.size());
     size_t done = 0;
-    while (done < xs.size() && !*halt)
+    while (done < n && !*halt)
     {
-        const size_t count = std::min(size_t(MIN_VOLUME) - 1,
-                                      xs.size() - done);
+        const size_t count = std::min(size_t(MIN_VOLUME) - 1, n - done);
         Region dummy = {};
-        dummy.X = xs.data() + done;
-        dummy.Y = ys.data() + done;
-        dummy.Z = zs.data() + done;
+        dummy.X = const_cast<float*>(xs) + done;
+        dummy.Y = const_cast<float*>(ys) + done;
+        dummy.Z = const_cast<float*>(zs) + done;
         dummy.voxels = count;
 
         const float* result = eval_r(tree, dummy);
-        memcpy(out.data() + done, result, count * sizeof(float));
+        memcpy(out + done, result, count * sizeof(float));
         done += count;
+        if (progress)
+            progress->fetch_add(count, std::memory_order_relaxed);
     }
+}
+
+/*
+ *  eval_span across a pool of threads, each on its own tree clone.
+ */
+void parallel_eval(MathTree* tree,
+                   const float* xs, const float* ys, const float* zs,
+                   float* out, size_t n, int threads, volatile int* halt,
+                   std::atomic<uint64_t>* progress)
+{
+    if (threads <= 0)
+    {
+        // Default to physical-core count (hardware_concurrency counts
+        // hyperthreads): this workload is dense FP dependency chains,
+        // and measured on an 8c/16t machine, 16 threads spent 6x the
+        // CPU of 8 threads for 3x worse wall time.
+        const unsigned hw = std::thread::hardware_concurrency();
+        threads = hw > 1 ? int(hw / 2) : 1;
+    }
+    threads = int(std::min(size_t(threads), n / MIN_VOLUME + 1));
+
+    if (threads < 2)
+    {
+        eval_span(tree, xs, ys, zs, out, n, halt, progress);
+        return;
+    }
+
+    // clone_tree writes bookkeeping into the source, so clone serially
+    std::vector<MathTree*> trees(threads);
+    for (auto& t : trees)
+        t = clone_tree(tree);
+
+    std::vector<std::thread> pool;
+    pool.reserve(threads);
+    for (int t = 0; t < threads; ++t)
+    {
+        const size_t lo = n * t / threads;
+        const size_t hi = n * (t + 1) / threads;
+        pool.emplace_back([=, &trees]() {
+            eval_span(trees[t], xs + lo, ys + lo, zs + lo,
+                      out + lo, hi - lo, halt, progress);
+        });
+    }
+    for (auto& th : pool)
+        th.join();
+    for (auto& t : trees)
+        free_tree(t);
 }
 
 struct Segment {
@@ -64,7 +111,9 @@ void contour_field(MathTree* tree,
                    uint32_t nx, uint32_t ny, float z,
                    bool detect_features, volatile int* halt,
                    std::vector<ContourPath>& paths,
-                   std::atomic<uint64_t>* progress)
+                   int threads,
+                   std::atomic<uint64_t>* progress_done,
+                   std::atomic<uint64_t>* progress_total)
 {
     paths.clear();
     if (nx == 0 || ny == 0)
@@ -87,24 +136,31 @@ void contour_field(MathTree* tree,
 
     std::vector<float> values(size_t(NX) * NY, EMPTY);
 
-    {   // Evaluate the interior samples, row by row
-        std::vector<float> xs(nx + 1), ys(nx + 1), zs(nx + 1), row;
-        for (uint32_t i = 0; i <= nx; ++i)
-            xs[i] = gx[i + 1];
-        std::fill(zs.begin(), zs.end(), z);
+    {   // Evaluate all interior samples across the thread pool
+        const size_t n = size_t(nx + 1) * (ny + 1);
+        if (progress_total)
+            progress_total->fetch_add(n, std::memory_order_relaxed);
 
-        for (uint32_t j = 1; j + 1 < NY && !*halt; ++j)
-        {
-            std::fill(ys.begin(), ys.end(), gy[j]);
-            eval_points(tree, xs, ys, zs, row, halt);
-            memcpy(&values[size_t(j) * NX + 1], row.data(),
+        std::vector<float> xs(n), ys(n), zs(n, z), out(n);
+        size_t k = 0;
+        for (uint32_t j = 0; j <= ny; ++j)
+            for (uint32_t i = 0; i <= nx; ++i)
+            {
+                xs[k] = gx[i + 1];
+                ys[k] = gy[j + 1];
+                k++;
+            }
+
+        parallel_eval(tree, xs.data(), ys.data(), zs.data(), out.data(),
+                      n, threads, halt, progress_done);
+        if (*halt)
+            return;
+
+        for (uint32_t j = 0; j <= ny; ++j)
+            memcpy(&values[size_t(j + 1) * NX + 1],
+                   &out[size_t(j) * (nx + 1)],
                    (nx + 1) * sizeof(float));
-            if (progress)
-                progress->fetch_add(1, std::memory_order_relaxed);
-        }
     }
-    if (*halt)
-        return;
 
     const auto val = [&](uint32_t i, uint32_t j) -> float {
         return values[size_t(j) * NX + i];
@@ -164,15 +220,20 @@ void contour_field(MathTree* tree,
     std::unordered_map<uint64_t, bool> saddle_inside;
     if (!saddles.empty())
     {
-        std::vector<float> xs, ys, zs, out;
+        if (progress_total)
+            progress_total->fetch_add(saddles.size(),
+                                      std::memory_order_relaxed);
+        std::vector<float> xs, ys, zs(saddles.size(), z),
+                           out(saddles.size());
         xs.reserve(saddles.size());
+        ys.reserve(saddles.size());
         for (auto& s : saddles)
         {
             xs.push_back((gx[s.first] + gx[s.first + 1]) / 2);
             ys.push_back((gy[s.second] + gy[s.second + 1]) / 2);
-            zs.push_back(z);
         }
-        eval_points(tree, xs, ys, zs, out, halt);
+        parallel_eval(tree, xs.data(), ys.data(), zs.data(), out.data(),
+                      saddles.size(), threads, halt, progress_done);
         if (*halt)
             return;
         for (size_t k = 0; k < saddles.size(); ++k)
@@ -275,9 +336,13 @@ void contour_field(MathTree* tree,
     {
         // Batch-evaluate central-difference gradients at every
         // crossing point (four evaluations per point).
+        if (progress_total)
+            progress_total->fetch_add(points.size() * 4,
+                                      std::memory_order_relaxed);
         const float eps = 0.01f * fmin(dx, dy);
-        std::vector<float> xs, ys, zs, out;
+        std::vector<float> xs, ys, zs, out(points.size() * 4);
         xs.reserve(points.size() * 4);
+        ys.reserve(points.size() * 4);
         for (const auto& p : points)
         {
             xs.push_back(p[0] + eps); ys.push_back(p[1]);
@@ -286,7 +351,8 @@ void contour_field(MathTree* tree,
             xs.push_back(p[0]);       ys.push_back(p[1] - eps);
         }
         zs.assign(xs.size(), z);
-        eval_points(tree, xs, ys, zs, out, halt);
+        parallel_eval(tree, xs.data(), ys.data(), zs.data(), out.data(),
+                      xs.size(), threads, halt, progress_done);
         if (*halt)
             return;
 
@@ -367,4 +433,112 @@ void contour_field(MathTree* tree,
         if (path.size() >= 3)
             paths.push_back(std::move(path));
     }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+namespace {
+
+// Squared distance from point p to segment [a, b]
+float seg_dist2(const std::array<float, 2>& p,
+                const std::array<float, 2>& a,
+                const std::array<float, 2>& b)
+{
+    const float abx = b[0] - a[0], aby = b[1] - a[1];
+    const float apx = p[0] - a[0], apy = p[1] - a[1];
+    const float len2 = abx*abx + aby*aby;
+    float t = len2 > 0 ? (apx*abx + apy*aby) / len2 : 0;
+    t = t < 0 ? 0 : (t > 1 ? 1 : t);
+    const float dx = apx - t*abx, dy = apy - t*aby;
+    return dx*dx + dy*dy;
+}
+
+// Douglas-Peucker over the index span [i0, i1] of a loop (i1 may be
+// p.size(), meaning the wrap back to point 0).  Iterative, to keep
+// pathological inputs off the stack.
+void dp_span(const ContourPath& p, size_t i0, size_t i1, float tol2,
+             std::vector<char>& keep)
+{
+    const auto at = [&](size_t i) -> const std::array<float, 2>& {
+        return p[i == p.size() ? 0 : i];
+    };
+
+    std::vector<std::pair<size_t, size_t>> stack = {{i0, i1}};
+    while (!stack.empty())
+    {
+        const auto span = stack.back();
+        stack.pop_back();
+        if (span.second <= span.first + 1)
+            continue;
+
+        float worst = tol2;
+        size_t split = 0;
+        for (size_t k = span.first + 1; k < span.second; ++k)
+        {
+            const float d2 = seg_dist2(at(k), at(span.first),
+                                       at(span.second));
+            if (d2 > worst)
+            {
+                worst = d2;
+                split = k;
+            }
+        }
+
+        if (split)
+        {
+            keep[split] = 1;
+            stack.push_back({span.first, split});
+            stack.push_back({split, span.second});
+        }
+    }
+}
+
+}  // namespace
+
+void simplify_contours(std::vector<ContourPath>& paths, float tolerance)
+{
+    if (tolerance <= 0)
+        return;
+    const float tol2 = tolerance * tolerance;
+
+    std::vector<ContourPath> out;
+    out.reserve(paths.size());
+    for (auto& p : paths)
+    {
+        if (p.size() < 4)
+        {
+            out.push_back(std::move(p));
+            continue;
+        }
+
+        // Closed loop: anchor at point 0 and the point farthest from
+        // it, then simplify the two open spans between the anchors.
+        size_t far = 1;
+        float best = 0;
+        for (size_t k = 1; k < p.size(); ++k)
+        {
+            const float dx = p[k][0] - p[0][0];
+            const float dy = p[k][1] - p[0][1];
+            const float d2 = dx*dx + dy*dy;
+            if (d2 > best)
+            {
+                best = d2;
+                far = k;
+            }
+        }
+
+        std::vector<char> keep(p.size(), 0);
+        keep[0] = keep[far] = 1;
+        dp_span(p, 0, far, tol2, keep);
+        dp_span(p, far, p.size(), tol2, keep);
+
+        ContourPath simplified;
+        for (size_t k = 0; k < p.size(); ++k)
+            if (keep[k])
+                simplified.push_back(p[k]);
+
+        if (simplified.size() >= 3)
+            out.push_back(std::move(simplified));
+    }
+    paths = std::move(out);
 }

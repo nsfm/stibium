@@ -11,8 +11,9 @@ class ExportSvgWorker : public ExportWorker
 {
 public:
     explicit ExportSvgWorker(Shape s, Bounds b, QString f, float r,
-                             bool detect=true)
-        : ExportWorker(s, b, f, r), detect_features(detect) {}
+                             bool detect=true, float sim=-1)
+        : ExportWorker(s, b, f, r), detect_features(detect),
+          simplify(sim) {}
 
     /*
      *  Top-level function that accepts user input and start the export
@@ -30,4 +31,10 @@ protected:
      *  (on by default: vector output exists to be exact)
      */
     const bool detect_features;
+
+    /*
+     *  Maximum deviation (model units) for path simplification.
+     *  Negative means automatic (a quarter cell); 0 disables.
+     */
+    const float simplify;
 };
