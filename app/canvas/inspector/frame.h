@@ -68,6 +68,12 @@ public:
     void setLowDetail(bool low);
 
     /*
+     *  Header/card tint mixed from the node's output datum type
+     *  (Blender-style at-a-glance category color)
+     */
+    QColor typeTint() const;
+
+    /*
      *  Sets the dragging flag
      *  (should only be called on first insertion, see comment
      *   below for why this is necessary)
@@ -146,6 +152,7 @@ protected:
 
     /*  Set to true when we should highlight the inspector  */
     bool has_focus=false;
+    qreal focus_glow=0;
 
     // Ugly hack because simply grabbing the mouse doesn't set up all of the
     // magic that QGraphicsScene uses to drag items: upon first insertion,

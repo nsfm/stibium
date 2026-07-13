@@ -4,6 +4,7 @@
 #include "canvas/scene.h"
 #include "canvas/connection/base.h"
 #include <QStyleOptionGraphicsItem>
+#include <QVariantAnimation>
 
 #include "app/colors.h"
 
@@ -52,14 +53,15 @@ void BaseConnection::paint(QPainter *painter,
     const float fade = fmin(1.0f,
             (lod - CANVAS_LOD_THRESHOLD) / 0.13f);
 
-    // Soft accent glow when hovered or selected
-    if (hover || isSelected())
+    // Soft accent glow when hovered or selected, eased in and out
+    const qreal glow_t = isSelected() ? 1.0 : hover_glow;
+    if (glow_t > 0.01)
     {
         QColor glow = Colors::amber;
-        glow.setAlpha(40 * fade);
+        glow.setAlpha(40 * fade * glow_t);
         painter->setPen(QPen(glow, 11, Qt::SolidLine, Qt::RoundCap));
         painter->drawPath(path(true));
-        glow.setAlpha(70 * fade);
+        glow.setAlpha(70 * fade * glow_t);
         painter->setPen(QPen(glow, 7, Qt::SolidLine, Qt::RoundCap));
         painter->drawPath(path(true));
     }
@@ -116,13 +118,26 @@ QPainterPath BaseConnection::shape() const
     return s.createStroke(path(true));
 }
 
+void BaseConnection::animateGlow(qreal target)
+{
+    auto anim = new QVariantAnimation(this);
+    anim->setDuration(110);
+    anim->setStartValue(hover_glow);
+    anim->setEndValue(target);
+    connect(anim, &QVariantAnimation::valueChanged,
+            [this](const QVariant& v){
+                hover_glow = v.toReal();
+                update(); });
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
 void BaseConnection::hoverEnterEvent(QGraphicsSceneHoverEvent *event)
 {
     Q_UNUSED(event);
     if (!hover)
     {
         hover = true;
-        update();
+        animateGlow(1.0);
     }
 }
 
@@ -132,6 +147,6 @@ void BaseConnection::hoverLeaveEvent(QGraphicsSceneHoverEvent *event)
     if (hover)
     {
         hover = false;
-        update();
+        animateGlow(0.0);
     }
 }

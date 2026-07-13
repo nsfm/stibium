@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include <QPropertyAnimation>
+#include <QVariantAnimation>
 
 #include <QGraphicsScene>
 #include <QPainter>
@@ -18,6 +19,7 @@
 #include "canvas/scene.h"
 
 #include "graph/node.h"
+#include "graph/datum.h"
 
 #include "app/colors.h"
 
@@ -99,7 +101,7 @@ void InspectorFrame::paint(QPainter *painter,
         painter->setPen(Qt::NoPen);
         painter->setBrush(QColor(0, 0, 0, 40));
         painter->drawRoundedRect(r.translated(0, 3), 10, 10);
-        painter->setBrush(Colors::base02);
+        painter->setBrush(typeTint());
         painter->drawRoundedRect(r, 10, 10);
         painter->setBrush(Qt::NoBrush);
         painter->setPen(isSelected() ? QPen(Colors::amber, 2)
@@ -142,16 +144,16 @@ void InspectorFrame::paint(QPainter *painter,
         band.setFillRule(Qt::WindingFill);
         band.addRoundedRect(tr, 8, 8);
         band.addRect(tr.adjusted(0, tr.height()/2, 0, 0));
-        painter->setBrush(Colors::base02);
+        painter->setBrush(typeTint());
         painter->drawPath(band.simplified());
     }
 
     // Soft accent glow when hovered (focus without selection)
     painter->setBrush(Qt::NoBrush);
-    if (has_focus && !isSelected())
+    if (focus_glow > 0.01 && !isSelected())
     {
         QColor glow = Colors::amber;
-        glow.setAlpha(70);
+        glow.setAlpha(70 * focus_glow);
         painter->setPen(QPen(glow, 4));
         painter->drawRoundedRect(r, 8, 8);
     }
@@ -163,6 +165,19 @@ void InspectorFrame::paint(QPainter *painter,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+
+QColor InspectorFrame::typeTint() const
+{
+    QColor type = Colors::base03;
+    for (auto d : node->childDatums())
+        if (d->isOutput())
+            type = Colors::getColor(d);
+
+    const auto base = Colors::base02;
+    return QColor(base.red()   * 0.72 + type.red()   * 0.28,
+                  base.green() * 0.72 + type.green() * 0.28,
+                  base.blue()  * 0.72 + type.blue()  * 0.28);
+}
 
 void InspectorFrame::setLowDetail(bool low)
 {
@@ -287,6 +302,18 @@ void InspectorFrame::setFocus(bool focus)
     if (focus != has_focus)
     {
         has_focus = focus;
+
+        // Ease the hover glow in and out
+        auto anim = new QVariantAnimation(this);
+        anim->setDuration(120);
+        anim->setStartValue(focus_glow);
+        anim->setEndValue(focus ? 1.0 : 0.0);
+        connect(anim, &QVariantAnimation::valueChanged,
+                [this](const QVariant& v){
+                    focus_glow = v.toReal();
+                    update(); });
+        anim->start(QAbstractAnimation::DeleteWhenStopped);
+
         prepareGeometryChange();
     }
 }
