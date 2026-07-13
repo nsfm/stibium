@@ -1,0 +1,306 @@
+{
+ "type": "sb",
+ "protocol": 7,
+ "nodes": [
+  {
+   "uid": 0,
+   "name": "gear",
+   "inspector": [
+    -400,
+    -150
+   ],
+   "script": [
+    "import fab",
+    "import fab.shapes",
+    "import math",
+    "",
+    "",
+    "title('Spur Gear (involute)')",
+    "",
+    "input('module', float, 2.0)",
+    "input('teeth', int, 20)",
+    "input('pressure_angle', float, 20.0)",
+    "input('thickness', float, 6.0)",
+    "",
+    "output('shape', fab.shapes.spur_gear(module, teeth, pressure_angle, thickness))"
+   ],
+   "datums": [
+    {
+     "uid": 0,
+     "name": "module",
+     "expr": "2.0",
+     "type": "float"
+    },
+    {
+     "uid": 1,
+     "name": "teeth",
+     "expr": "24",
+     "type": "int"
+    },
+    {
+     "uid": 2,
+     "name": "pressure_angle",
+     "expr": "20.0",
+     "type": "float"
+    },
+    {
+     "uid": 3,
+     "name": "thickness",
+     "expr": "6.0",
+     "type": "float"
+    },
+    {
+     "uid": 4,
+     "name": "shape",
+     "expr": "\u0012",
+     "type": "_fabtypes.Shape"
+    }
+   ]
+  },
+  {
+   "uid": 1,
+   "name": "lightening_hole",
+   "inspector": [
+    -400,
+    150
+   ],
+   "script": [
+    "import fab",
+    "",
+    "title('Cylinder')",
+    "",
+    "input('x', float)",
+    "input('y', float)",
+    "input('z0', float)",
+    "input('z1', float)",
+    "input('r', float)",
+    "",
+    "output('shape', fab.shapes.cylinder(x, y, z0, z1, r))"
+   ],
+   "datums": [
+    {
+     "uid": 0,
+     "name": "x",
+     "expr": "13.0",
+     "type": "float"
+    },
+    {
+     "uid": 1,
+     "name": "y",
+     "expr": "0.0",
+     "type": "float"
+    },
+    {
+     "uid": 2,
+     "name": "z0",
+     "expr": "-1.0",
+     "type": "float"
+    },
+    {
+     "uid": 3,
+     "name": "z1",
+     "expr": "7.0",
+     "type": "float"
+    },
+    {
+     "uid": 4,
+     "name": "r",
+     "expr": "4.5",
+     "type": "float"
+    },
+    {
+     "uid": 5,
+     "name": "shape",
+     "expr": "\u0012",
+     "type": "_fabtypes.Shape"
+    }
+   ]
+  },
+  {
+   "uid": 2,
+   "name": "hole_ring",
+   "inspector": [
+    -100,
+    150
+   ],
+   "script": [
+    "import fab.types",
+    "import fab.shapes",
+    "",
+    "title('Repeat Polar')",
+    "",
+    "input('shape', fab.types.Shape)",
+    "input('n', int, 6)",
+    "input('x', float, 0)",
+    "input('y', float, 0)",
+    "",
+    "output('repeated', fab.shapes.repeat_polar(shape, n, x, y))"
+   ],
+   "datums": [
+    {
+     "uid": 0,
+     "name": "shape",
+     "expr": "\u0011[__1.__5]",
+     "type": "_fabtypes.Shape"
+    },
+    {
+     "uid": 1,
+     "name": "n",
+     "expr": "5",
+     "type": "int"
+    },
+    {
+     "uid": 2,
+     "name": "x",
+     "expr": "0",
+     "type": "float"
+    },
+    {
+     "uid": 3,
+     "name": "y",
+     "expr": "0",
+     "type": "float"
+    },
+    {
+     "uid": 4,
+     "name": "repeated",
+     "expr": "\u0012",
+     "type": "_fabtypes.Shape"
+    }
+   ]
+  },
+  {
+   "uid": 3,
+   "name": "lightened",
+   "inspector": [
+    150,
+    -20
+   ],
+   "script": [
+    "import fab.types",
+    "",
+    "title('Difference')",
+    "input('a', fab.types.Shape)",
+    "input('b', fab.types.Shape)",
+    "",
+    "output('shape', a & ~b)"
+   ],
+   "datums": [
+    {
+     "uid": 0,
+     "name": "a",
+     "expr": "\u0011[__0.__4]",
+     "type": "_fabtypes.Shape"
+    },
+    {
+     "uid": 1,
+     "name": "b",
+     "expr": "\u0011[__2.__4]",
+     "type": "_fabtypes.Shape"
+    },
+    {
+     "uid": 2,
+     "name": "shape",
+     "expr": "\u0012",
+     "type": "_fabtypes.Shape"
+    }
+   ]
+  },
+  {
+   "uid": 4,
+   "name": "center_bore",
+   "inspector": [
+    -100,
+    -300
+   ],
+   "script": [
+    "import fab",
+    "",
+    "title('Cylinder')",
+    "",
+    "input('x', float)",
+    "input('y', float)",
+    "input('z0', float)",
+    "input('z1', float)",
+    "input('r', float)",
+    "",
+    "output('shape', fab.shapes.cylinder(x, y, z0, z1, r))"
+   ],
+   "datums": [
+    {
+     "uid": 0,
+     "name": "x",
+     "expr": "0.0",
+     "type": "float"
+    },
+    {
+     "uid": 1,
+     "name": "y",
+     "expr": "0.0",
+     "type": "float"
+    },
+    {
+     "uid": 2,
+     "name": "z0",
+     "expr": "-1.0",
+     "type": "float"
+    },
+    {
+     "uid": 3,
+     "name": "z1",
+     "expr": "7.0",
+     "type": "float"
+    },
+    {
+     "uid": 4,
+     "name": "r",
+     "expr": "5.0",
+     "type": "float"
+    },
+    {
+     "uid": 5,
+     "name": "shape",
+     "expr": "\u0012",
+     "type": "_fabtypes.Shape"
+    }
+   ]
+  },
+  {
+   "uid": 5,
+   "name": "hub_gear",
+   "inspector": [
+    400,
+    -20
+   ],
+   "script": [
+    "import fab.types",
+    "",
+    "title('Difference')",
+    "input('a', fab.types.Shape)",
+    "input('b', fab.types.Shape)",
+    "",
+    "output('shape', a & ~b)"
+   ],
+   "datums": [
+    {
+     "uid": 0,
+     "name": "a",
+     "expr": "\u0011[__3.__2]",
+     "type": "_fabtypes.Shape"
+    },
+    {
+     "uid": 1,
+     "name": "b",
+     "expr": "\u0011[__4.__5]",
+     "type": "_fabtypes.Shape"
+    },
+    {
+     "uid": 2,
+     "name": "shape",
+     "expr": "\u0012",
+     "type": "_fabtypes.Shape"
+    }
+   ]
+  }
+ ]
+}

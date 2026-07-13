@@ -199,10 +199,10 @@ library -> MCP server on the live session):
 - freedesktop thumbnailer: .thumbnailer file + shared-mime-info XML
   for .sb in deploy/ - file managers preview models via `--render`.
   Cheap and delightful.
-- Examples refresh: examples/ is upstream-era. A showcase set
-  exercising the fork (ISO threads, gears, Repeat nodes, chamfered
-  CSG, a litho-style 2D mask) doubles as CI corpus, gallery source,
-  and wiki illustrations - and ships protocol-7-native.
+- Examples refresh, continued: showcase_gear.sb landed (Parts +
+  Repeat + CSG, protocol-7-native, in CI). Still wanted: ISO-thread
+  assembly, chamfered-CSG piece, litho-style 2D mask for the vector
+  pipeline.
 - GitHub Actions CI (build on push), AppImage/Flatpak releases — "runs on
   other people's machines" is a feature.
 - Getting-started wiki (GitHub Pages); node reference partially generated
@@ -216,6 +216,12 @@ library -> MCP server on the live session):
   primitives, elongate, bend, twirl. Text-on-path for the vector font.
 
 ## Small bugs / cleanups
+
+- **spur_gear.node UI loop fails under --validate**: "Cannot declare
+  multiple UI elements on same line (without unique keys)" from the
+  wireframe-in-a-loop. Check whether the GUI path hits it too (red
+  script box?) and either key the loop calls or teach the hook about
+  loops.
 
 - **Root-cause the Python-error crash (the autosave origin story).** The
   live code-checker segfaulted randomly mid-typing; the workaround
