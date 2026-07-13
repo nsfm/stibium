@@ -40,6 +40,9 @@ add_library(SbFab STATIC
     src/fab.cpp
     src/formats/dxf.cpp
     src/formats/png.c
+    src/mesh/mesh_query.cpp
+    src/mesh/trimesh.cpp
+    src/tree/grid.cpp
     src/formats/stl.c
     src/formats/svg.cpp
     src/formats/threemf.cpp
@@ -101,7 +104,9 @@ target_include_directories(SbFab SYSTEM PRIVATE
 add_executable(SbFabTest
     tests/analytics.cpp
     tests/contour.cpp
+    tests/grid.cpp
     tests/main.cpp
+    tests/mesh.cpp
     tests/mesher.cpp
     tests/parser.cpp
     tests/shape.cpp

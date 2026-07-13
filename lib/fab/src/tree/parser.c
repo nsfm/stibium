@@ -108,6 +108,7 @@ void flag_in_tree(Node* n)
     n->flags |= NODE_IN_TREE;
     flag_in_tree(n->lhs);
     flag_in_tree(n->rhs);
+    flag_in_tree(n->mhs);
 }
 
 
@@ -122,7 +123,7 @@ Node* get_cached_node(NodeCache* const cache, Node* const n)
         while (*next) {
             if ((**next).node->results.f == n->results.f) {
                 // Only free this node if it isn't the same as the match
-                if (n != (**next).node) free(n);
+                if (n != (**next).node) free_node(n);
                 return (**next).node;
             }
             next = &(**next).next;
@@ -148,13 +149,16 @@ Node* get_cached_node(NodeCache* const cache, Node* const n)
     }
 
     // Fly through the linked list, comparing child pointers
+    // (and the payload, so distinct grids never merge)
     NodeList** next = &(cache->nodes[n->rank][n->opcode]);
     while (*next) {
         // If we've found a match, free the target and return the match
-        if ((**next).node->lhs == n->lhs && (**next).node->rhs == n->rhs) {
+        if ((**next).node->lhs == n->lhs && (**next).node->rhs == n->rhs &&
+            (**next).node->mhs == n->mhs &&
+            (**next).node->payload == n->payload) {
 
             // Only free this node if it isn't the same as the match.
-            if (n != (**next).node) free(n);
+            if (n != (**next).node) free_node(n);
             return (**next).node;
         }
         next = &(**next).next;
@@ -189,7 +193,7 @@ unsigned flatten_list(NodeList* list, Node** array)
             ++count;
             *(array++) = list->node;
         } else {
-            free(list->node);
+            free_node(list->node);
         }
         NodeList* prev = list;
         list = list->next;
@@ -203,7 +207,7 @@ void free_list(NodeList* list)
 {
     while (list)
     {
-        free(list->node);
+        free_node(list->node);
         NodeList* prev = list;
         list = list->next;
         free(prev);

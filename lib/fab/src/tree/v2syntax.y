@@ -10,6 +10,7 @@
 	extern "C"
 	{
 		Node* get_cached_node(NodeCache* const cache, Node* const n);
+		struct MeshGrid_* grid_lookup(unsigned id);
 	}
 
 	#define CACHED(n) get_cached_node(environment->cache, n)
@@ -95,6 +96,22 @@ v1_expr(E)	::= V1NEG v1_expr(O).   				{	E = CACHED(neg_n(O)); 	}
 v1_expr(E)	::= V1EXP v1_expr(O).   				{	E = CACHED(exp_n(O)); 	}
 v1_expr(E)	::= CONSTANT V1MINUS V1FLOAT(F).		{	E = CACHED(constant_n(-atof(F))); 	}
 v1_expr(E)	::= CONSTANT V1FLOAT(F).				{	E = CACHED(constant_n(atof(F))); 	}
+
+v1_expr(E)	::= V1GRID V1FLOAT(F).
+			{
+				// Sample of a registered mesh grid at the current
+				// (possibly remapped) coordinates; an unknown id
+				// fails the parse instead of producing geometry.
+				struct MeshGrid_* grid = grid_lookup(atoi(F));
+				if (grid) {
+					E = CACHED(grid_n(grid, environment->Xnode,
+					                  environment->Ynode,
+					                  environment->Znode));
+				} else {
+					environment->valid = false;
+					E = CACHED(constant_n(0));
+				}
+			}
 
 v1_expr(E)	::= V1X.						{	E = CACHED(environment->Xnode); 	}
 v1_expr(E)	::= V1Y.						{	E = CACHED(environment->Ynode); 	}

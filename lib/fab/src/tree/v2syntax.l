@@ -46,6 +46,7 @@ real				{integer}*("."{digit}+)?{exponent}?
 "n"				return TOKEN_V1NEG;
 "x"				return TOKEN_V1EXP;
 "m"				return TOKEN_V1MAP;
+"g"				return TOKEN_V1GRID;
 "_"				return TOKEN_V1SKIP;
 
 "X"				return TOKEN_V1X;

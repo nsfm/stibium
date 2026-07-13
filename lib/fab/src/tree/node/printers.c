@@ -1,5 +1,6 @@
 #include "fab/tree/node/printers.h"
 #include "fab/tree/node/node.h"
+#include "fab/tree/grid.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -211,6 +212,19 @@ static void exp_p(Node* n, FILE* f)
 
 ////////////////////////////////////////////////////////////////////////////////
 
+static void grid_p(Node* n, FILE* f)
+{
+    fprintf(f, "grid#%u", grid_id((MeshGrid*)n->payload));
+    base_p(n, f);
+    fprintf(f, "(");
+    fprint_node(n->lhs, f);
+    fprintf(f, ", ");
+    fprint_node(n->rhs, f);
+    fprintf(f, ", ");
+    fprint_node(n->mhs, f);
+    fprintf(f, ")");
+}
+
 static void constant_p(Node* n, FILE* f)
 {
     fprintf(f, "%.3g", n->results.f);
@@ -274,6 +288,7 @@ void fprint_node(Node* n, FILE* f)
         case OP_NEG:    neg_p(n, f); break;
         case OP_EXP:    exp_p(n, f); break;
 
+        case OP_GRID:   grid_p(n, f); break;
         case OP_CONST:  constant_p(n, f); break;
         case OP_X:      X_p(n, f); break;
         case OP_Y:      Y_p(n, f); break;

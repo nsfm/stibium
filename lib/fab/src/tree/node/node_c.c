@@ -5,6 +5,7 @@
 #include "fab/tree/node/node.h"
 #include "fab/tree/node/printers.h"
 #include "fab/tree/math/math_f.h"
+#include "fab/tree/grid.h"
 
 #include "fab/util/switches.h"
 
@@ -18,12 +19,26 @@ Node* clone_node(Node* n)
     // Update children clone pointers
     if (n->lhs) clone->lhs = n->lhs->clone_address;
     if (n->rhs) clone->rhs = n->rhs->clone_address;
+    if (n->mhs) clone->mhs = n->mhs->clone_address;
+
+    // The clone shares the original's payload (grids are immutable
+    // and refcounted, so clones across threads read the same data)
+    if (n->opcode == OP_GRID)
+        grid_retain((MeshGrid*)clone->payload);
 
     // Record the address of the new clone, so that clones of
     // its parents can be adjusted to point in the right place
     n->clone_address = clone;
 
     return clone;
+}
+
+void free_node(Node* n)
+{
+    if (n == NULL)  return;
+    if (n->opcode == OP_GRID)
+        grid_release((MeshGrid*)n->payload);
+    free(n);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -124,6 +139,31 @@ Node* constant_n(float value)
     Node* n = nonary_n(OP_CONST);
     n->flags = NODE_CONSTANT;
     fill_results(n, value);
+    return n;
+}
+
+Node* grid_n(struct MeshGrid_* grid, Node* x, Node* y, Node* z)
+{
+    Node* n = malloc(sizeof(Node));
+
+    int rank = x->rank > y->rank ? x->rank : y->rank;
+    if (z->rank > rank)   rank = z->rank;
+
+    /*  Never constant-folded, even with constant children: the
+     *  payload lookup is cheap and folding would complicate the
+     *  refcount story for no real win. */
+    *n = (Node) {
+        .opcode     = OP_GRID,
+        .rank       = 1 + rank,
+        .flags      = 0,
+        .lhs        = x,
+        .rhs        = y,
+        .mhs        = z,
+        .payload    = grid,
+        .clone_address = NULL,
+    };
+    grid_retain(grid);
+
     return n;
 }
 

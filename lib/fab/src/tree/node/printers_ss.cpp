@@ -2,6 +2,7 @@
 
 #include "fab/tree/node/printers_ss.h"
 #include "fab/tree/node/node.h"
+#include "fab/tree/grid.h"
 
 static std::string add_pss(Node* n)
 {
@@ -155,6 +156,16 @@ static std::string exp_pss(Node* n)
 
 ////////////////////////////////////////////////////////////////////////////////
 
+static std::string grid_pss(Node* n)
+{
+    std::stringstream ss;
+    ss << "grid#" << grid_id((MeshGrid*)n->payload)
+       << "(" << print_node_ss(n->lhs)
+       << ", " << print_node_ss(n->rhs)
+       << ", " << print_node_ss(n->mhs) << ")";
+    return ss.str();
+}
+
 static std::string constant_pss(Node* n)
 {
     std::stringstream ss;
@@ -207,6 +218,7 @@ std::string print_node_ss(Node* n)
         case OP_NEG:    return neg_pss(n);
         case OP_EXP:    return exp_pss(n);
 
+        case OP_GRID:   return grid_pss(n);
         case OP_CONST:  return constant_pss(n);
         case OP_X:      return X_pss(n);
         case OP_Y:      return Y_pss(n);
