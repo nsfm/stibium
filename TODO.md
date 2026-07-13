@@ -43,6 +43,12 @@ were named for the element symbol all along).
 - **Node editor QoL.** Fuzzy-search add menu (type "cyl"), minimap for big
   graphs, canvas annotations (sticky notes + named zones behind nodes,
   persisted in the .sb JSON like node positions).
+- **Floating node labels for the zoomed-out canvas.** Card labels
+  currently scale with the scene; replace/augment with labels rendered
+  at constant screen size floating near their nodes, nudging each other
+  to avoid overlap, and prioritizing custom-named nodes over
+  default-named ones (default names match `[a-z]\d+`). "Web-map style"
+  chrome per Nate. Complements the LOD cards.
 - **Light-direction UI for the Enhanced render mode.** The key light is
   configurable today (`render/key_light = "x,y,z"` in the config file);
   give it real UI - a drag gizmo in the viewport or at least a dialog.

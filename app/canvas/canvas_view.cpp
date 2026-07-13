@@ -93,7 +93,7 @@ void CanvasView::wheelEvent(QWheelEvent* event)
     auto s = pow(1.001, -event->angleDelta().y());
     // Clamp cumulative zoom to a sane range
     const float zoom = transform().m11();
-    s = fmax(0.08 / zoom, fmin(4 / zoom, s));
+    s = fmax(0.02 / zoom, fmin(4 / zoom, s));
     scale(s, s);
     updateLOD();
     auto d = a - mapToScene(event->position().toPoint());
