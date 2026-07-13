@@ -149,8 +149,6 @@ library -> MCP server on the live session):
 
 - GitHub Actions CI (build on push), AppImage/Flatpak releases — "runs on
   other people's machines" is a feature.
-- Deterministic .sb serialization (stable key/node ordering) so models
-  diff cleanly in git.
 - Getting-started wiki (GitHub Pages); node reference partially generated
   from the self-describing .node files. Nothing comparable exists.
 - Headless CLI renderer (`antimony-render model.sb -o front.png`) —
@@ -176,6 +174,14 @@ library -> MCP server on the live session):
 
 
 ## Done
+- 2026-07-13 — protocol 7: output datums serialize as uid/name/type
+  stubs (bare sigil, no geometry repr — scripts regenerate values on
+  load; the entry only anchors wire uids). Files 8-35% smaller, diffs
+  meaningful, and save/resave is a byte-identical fixed point (key
+  order was already canonical via QJsonObject). New `--resave FILE`
+  verb for batch migration + determinism testing. Loader accepts 6
+  and 7. Verified: all examples migrate, validate clean, and render
+  byte-identically to their protocol-6 sources.
 - 2026-07-13 — headless render verb: `antimony --render out.png
   [--view iso|top|front] [--size N | --resolution R] model.sb`.
   Unions the file's 3D shapes (2D construction profiles excluded

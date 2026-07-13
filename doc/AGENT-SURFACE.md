@@ -21,7 +21,11 @@ Python expressions like `s0.shape`) but is fragile at the edges.
 
 ## The layers, in build order
 
-### 1. Deterministic serialization (foundation, small)
+### 1. Deterministic serialization (foundation, small) — ✅ shipped
+
+*(landed 2026-07-13 as protocol 7 + `--resave`; key ordering was
+already canonical thanks to QJsonObject. Everything below was the
+plan as written.)*
 
 Stable node/datum/key ordering on save, so `.sb` files diff cleanly in
 git and an agent's read-modify-write cycle doesn't shuffle unrelated

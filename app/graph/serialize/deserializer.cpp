@@ -49,7 +49,7 @@ static bool checkProtocol(const QJsonObject& in, SceneDeserializer::Info* info)
                                       "and can no longer be read.";
             return false;
         }
-        else if (protocol_version > 6)
+        else if (protocol_version > 7)
         {
             if (info)
                 info->error_message = "File was saved with a newer protocol "
