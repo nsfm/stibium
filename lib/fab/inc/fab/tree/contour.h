@@ -29,14 +29,29 @@ typedef std::vector<std::array<float, 2>> ContourPath;
  *  at the intersection of the two tangent lines (the 2D analog of the
  *  mesher's feature detection).
  *
- *  progress, if given, is incremented once per sample row; it reaches
- *  ny + 1 on completion.
+ *  Evaluation is spread across threads (<= 0 means hardware
+ *  concurrency), each on its own clone of the tree.
+ *
+ *  Progress: done counts field evaluations as they complete; total is
+ *  maintained by this function and grows as later evaluation passes
+ *  (saddles, corner gradients) are sized.  done/total is always an
+ *  honest fraction.
  */
 void contour_field(struct MathTree_* tree,
                    float xmin, float ymin, float xmax, float ymax,
                    uint32_t nx, uint32_t ny, float z,
                    bool detect_features, volatile int* halt,
                    std::vector<ContourPath>& paths,
-                   std::atomic<uint64_t>* progress = nullptr);
+                   int threads = -1,
+                   std::atomic<uint64_t>* progress_done = nullptr,
+                   std::atomic<uint64_t>* progress_total = nullptr);
+
+/*
+ *  Simplifies each loop with Douglas-Peucker: points are removed
+ *  while the path stays within tolerance of the original.  Recovered
+ *  corners survive (they are maximal-deviation points by
+ *  construction).  Loops degenerating below 3 points are dropped.
+ */
+void simplify_contours(std::vector<ContourPath>& paths, float tolerance);
 
 #endif

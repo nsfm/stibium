@@ -124,6 +124,34 @@ TEST_CASE("Contour: clipped shape closes along the bounds")
     REQUIRE(signed_area(paths[0]) == Approx(4.0).epsilon(0.02));
 }
 
+TEST_CASE("Contour: simplification preserves shape and corners")
+{
+    // Dense circle: most chord points are redundant
+    auto circle = trace(CIRCLE, false, 200);
+    REQUIRE(circle.size() == 1);
+    const size_t before = circle[0].size();
+    simplify_contours(circle, 0.001f);
+    REQUIRE(circle.size() == 1);
+    REQUIRE(circle[0].size() < before / 4);
+    REQUIRE(signed_area(circle[0]) ==
+            Approx(M_PI * 0.8 * 0.8).epsilon(0.01));
+
+    // Sharp square: simplification should reduce it to nearly its
+    // four corners, and the corners must not move
+    auto square = trace(SQUARE, true);
+    simplify_contours(square, 0.002f);
+    REQUIRE(square.size() == 1);
+    REQUIRE(square[0].size() <= 12);
+    REQUIRE(signed_area(square[0]) == Approx(1.2 * 1.2).epsilon(0.002));
+    for (float sx : {-0.6f, 0.6f})
+        for (float sy : {-0.6f, 0.6f})
+        {
+            CAPTURE(sx);
+            CAPTURE(sy);
+            REQUIRE(has_point_near(square, sx, sy, 0.005f));
+        }
+}
+
 TEST_CASE("SVG writer: valid document")
 {
     auto paths = trace(ANNULUS, true);
