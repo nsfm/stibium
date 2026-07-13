@@ -412,3 +412,51 @@ library -> MCP server on the live session):
   root-caused as memory exhaustion (~275 B/tri), not a logic bug.
 - 2026-07-12 — detect features enabled by default, "(experimental)"
   label dropped.
+
+## Upstream recon (2026-07-13, issues + PRs sweep)
+
+172 issues and 69 PRs scanned. ~70% is dead build/packaging noise;
+the signal, ranked:
+
+**Bugs to verify against our rewrites (repro files attached upstream):**
+- #198 parser crash: malformed math expression hits a lemon assert and
+  aborts the app. We OWN this parser (extended it twice) — malformed
+  input must error, not core-dump. Cheapest safety win on the board.
+- #20/#29/#177 interaction segfaults (handle drag, view rotate, wire
+  dropped into empty canvas) — canvas overhaul may have fixed; test.
+- #174 geometry: union of exactly-coincident faces leaves a gap in
+  exported meshes. Test against the indexed mesher.
+- #200 geometry: subtracted extruded text flattens in STL export —
+  probably the dead heightmap path, confirm with our mesher.
+- #135 datum formatLink assert on cross-type connections.
+
+**Feature themes by demand:**
+- Node reuse cluster (#217/#68/#25/#127/#22, 5 issues): user node
+  directory (small, enabling), then subgraph-as-node. Highest-ROI
+  feature theme on the tracker.
+- Inline wire math / cross-node datum references (#26/#66/#24):
+  "clearance = other_node.dim - 0.2". Core parametric workflow.
+- Graph organization (#223/#221/#226/#73): grouping, collapse,
+  per-node display toggles. Big-graph usability.
+- #165 partial torus/revolve (sweep angle) — confirmed missing,
+  one-node quick win (wedge intersection).
+- Convex hull (#79/#134) — recurring OpenSCAD-migrant ask, but no
+  exact closed-form in f-rep; research item.
+- Windows build + package managers (#71 + 10 others): the single
+  biggest raw-demand cluster; distribution, not code.
+- #17: declare a clear license for the fork (upstream's was murky).
+
+**From the PR queue (mostly pre-rewrite, two keepers):**
+- PR #228 autosave (unmerged, clean): QTimer -> onSave every minute.
+  Improve to a sidecar file (file.sb.autosave) rather than
+  overwriting; expose interval in settings.
+- PR #222 scalar math nodes (add/multiply/number with the operand
+  echoed in the title) — check py/nodes/Math coverage first.
+- Fragile-area map for future upgrades: Boost::Python ABI matching,
+  lemon version sensitivity (yy_find_shift_action signature), Qt
+  deprecations, C-locale-after-QApplication (we already do this).
+
+**Already covered (cite in release notes):** #153 mesh import (the
+tracker's most-wanted), #148 lattice repetition, #37 chamfer, #61/#72
+polylines, #56 save-dialog extension, #10 file sizes (3MF+simplify),
+#175 zoom clip, #182 AA (still on our own TODO).
