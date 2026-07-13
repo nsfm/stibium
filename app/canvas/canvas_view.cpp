@@ -229,11 +229,15 @@ void CanvasView::drawBackground(QPainter* painter, const QRectF& rect)
     const int minor = 20, major = 100;
 
     auto drawGrid = [&](int d, float alpha){
-        // Fade by screen-space dot spacing: dots tighter than ~7px
-        // are visual mush at a cost proportional to visible WORLD
-        // area, which explodes at far zoom. Spacing-gating bounds
-        // the work by screen area instead, on any monitor.
-        alpha *= fmin(1.f, (float(d) * zoom - 6) / 6);
+        // Zoom fade first (negative means fully faded - clamp it,
+        // or multiplying two negatives resurrects the grid)...
+        if (alpha <= 0.05f)
+            return;
+        // ...then fade by screen-space dot spacing: dots tighter
+        // than ~7px are visual mush at a cost proportional to
+        // visible WORLD area, which explodes at far zoom. Spacing-
+        // gating bounds the work by screen area on any monitor.
+        alpha *= fmax(0.f, fmin(1.f, (float(d) * zoom - 6) / 6));
         if (alpha <= 0.05f)
             return;
         QVector<QPointF> pts;
