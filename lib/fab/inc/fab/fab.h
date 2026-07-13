@@ -3,6 +3,7 @@
 
 #include <Python.h>
 
+#include <cstdint>
 #include <vector>
 #include <string>
 
@@ -35,6 +36,15 @@ namespace fab
      *  open/save/new, before any scripts run. */
     void setProjectDir(std::string dir);
     std::string projectDir();
+
+    /** Optional hook for long blocking operations inside script
+     *  evaluation (today: mesh-import sampling).  Called on the
+     *  thread that is blocked, every few tens of ms, with
+     *  done < total while running and done == total exactly once at
+     *  the end (close your dialog there).  The GUI registers a
+     *  progress-dialog pump; headless leaves it NULL. */
+    extern void (*longOpHook)(const char* label,
+                              uint64_t done, uint64_t total);
 
     extern PyTypeObject* ShapeType;
 }
