@@ -76,6 +76,7 @@ public:
 
 protected:
     bool low_detail=false;
+    QRectF low_detail_rect;
 
 public:
 
