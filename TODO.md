@@ -28,6 +28,21 @@ were named for the element symbol all along).
   field itself (walls thinner than nozzle flagged before slicing);
   overhang-angle visualization is plausible too (gradient vs build
   direction). Ends guess-and-check on functional parts.
+- **Interval-pruned contour evaluation.** `contour_field` evaluates
+  the full sample grid; the mesher's quadtree interval-culling would
+  skip empty space entirely. For sparse masks at high resolution
+  (most photolithography content is mostly empty), plausibly another
+  5-10x on top of the threading.
+- **Viewport render parallelism.** Each shape's RenderTask runs on
+  one core; a monster single-shape model renders single-threaded
+  while 15 cores idle. Same row-chunking treatment contour_field got
+  (render16/shaded8 over cloned trees). The affordable sibling of
+  the GPU-eval moonshot, available now.
+- **`--describe-nodes` + `--render --node NAME`.** Layer 2 of
+  doc/AGENT-SURFACE.md and the visual-bisection verb: the node
+  library as JSON (same generator can feed the wiki), and per-node
+  renders so agents (and humans) can see intermediate geometry
+  when the final shape is wrong.
 - **Multi-shape export.** One click → N files (print plates, assemblies).
   The export hook currently hard-rejects multiple export tasks per script.
 - **Node editor QoL.** Fuzzy-search add menu (type "cyl"), minimap for big
@@ -154,6 +169,18 @@ library -> MCP server on the live session):
 
 ## Distribution / project health
 
+- App-level integration tests via the headless verbs: every
+  example/*.sb as CTest cases (`--validate` passes, `--resave` twice
+  is byte-identical, `--render` succeeds). The verbs finally make CI
+  assert real behavior - load, evaluate, save, render - not just
+  compilation.
+- freedesktop thumbnailer: .thumbnailer file + shared-mime-info XML
+  for .sb in deploy/ - file managers preview models via `--render`.
+  Cheap and delightful.
+- Examples refresh: examples/ is upstream-era. A showcase set
+  exercising the fork (ISO threads, gears, Repeat nodes, chamfered
+  CSG, a litho-style 2D mask) doubles as CI corpus, gallery source,
+  and wiki illustrations - and ships protocol-7-native.
 - GitHub Actions CI (build on push), AppImage/Flatpak releases — "runs on
   other people's machines" is a feature.
 - Getting-started wiki (GitHub Pages); node reference partially generated
@@ -174,6 +201,12 @@ library -> MCP server on the live session):
   extraction is commented out and pinned to 0) disables error line
   numbers entirely. Fix properly with defensive PyObject extraction so
   script errors report real line numbers again without the crash.
+- **Undo stack survives file loads (use-after-free suspect).**
+  App::loadFile clears the graph but not the undo stack, so undoing
+  after File > Open (or a live reload) replays commands holding
+  pointers into the old, freed graph. Verify and fix (clear the
+  stack on load, or make load itself an undo barrier). Live reload
+  makes this easier to hit than it used to be.
 - **Infrequent crash when deleting groups of nodes at once.** Suspect
   the multi-delete undo path (`app/undo/undo_delete_multi.cpp`) or
   dangling proxies during batch removal. Needs a repro harness /
