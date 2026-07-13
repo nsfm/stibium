@@ -8,6 +8,7 @@
 #include <cstring>
 #include <fstream>
 #include <map>
+#include <sys/stat.h>
 #include <random>
 #include <string>
 #include <vector>
@@ -439,4 +440,136 @@ TEST_CASE("Mesh: signed_distance throughput", "[mesh]")
            "(%.2f us/query), checksum=%.3f\n",
            m.tri_count(), ms, ms * 1000.0 / N, acc);
     REQUIRE(N > 0);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Import pipeline: STL -> signed grid -> registry -> tree evaluation
+
+#include "fab/mesh/mesh_import.h"
+#include "fab/tree/grid.h"
+#include "fab/tree/tree.h"
+#include "fab/tree/parser.h"
+#include "fab/tree/eval.h"
+
+TEST_CASE("Import: icosphere STL evaluates like a sphere", "[mesh]")
+{
+    Soup sphere = make_icosphere(3, 1.0f);
+    std::string path = tmp_path("import_sphere.stl");
+    write_binary_stl(path, sphere, "icosphere");
+
+    auto res = fab_mesh::import_mesh_grid(path, 16.0f, "");
+    CAPTURE(res.error);
+    REQUIRE(res.grid_id != 0);
+    REQUIRE(res.sha256.size() == 64);
+    REQUIRE(res.stibium_stamp == false);
+
+    // Padded bounds must contain the unit sphere with margin
+    REQUIRE(res.bounds[0] < -1.0f);
+    REQUIRE(res.bounds[3] > 1.0f);
+
+    char math[32];
+    snprintf(math, sizeof(math), "g%u", res.grid_id);
+    MathTree* t = parse(math);
+    REQUIRE(t != nullptr);
+
+    // Inside the sampled box the field should track |p| - 1
+    // closely (icosphere level 3 is within ~0.6% of the true
+    // sphere; trilinear sampling adds a little more)
+    float worst = 0;
+    for (float x = -1.1f; x < 1.12f; x += 0.31f) {
+        for (float y = -1.1f; y < 1.12f; y += 0.29f) {
+            for (float z = -1.1f; z < 1.12f; z += 0.33f) {
+                const float expected = sqrtf(x*x + y*y + z*z) - 1;
+                const float got = eval_f(t, x, y, z);
+                const float err = fabsf(got - expected);
+                if (err > worst)    worst = err;
+            }
+        }
+    }
+    CAPTURE(worst);
+    REQUIRE(worst < 0.05f);
+
+    // Beyond the box the extension must stay conservative: at least
+    // the true distance (never negative -> no phantom material), and
+    // not wildly larger
+    for (float r = 1.3f; r < 3.f; r += 0.4f) {
+        const float dir[3] = {0.62f, -0.54f, 0.57f};
+        const float got = eval_f(t, dir[0]*r, dir[1]*r, dir[2]*r);
+        const float truth = r - 1;
+        CAPTURE(r);
+        CAPTURE(got);
+        REQUIRE(got >= truth - 0.02f);
+        REQUIRE(got <= truth + 0.35f);
+    }
+
+    // Center is solidly inside
+    const float center = eval_f(t, 0, 0, 0);
+    REQUIRE(center < -0.8f);
+
+    free_tree(t);
+    grid_registry_trim();
+}
+
+TEST_CASE("Import: registry and cache reuse", "[mesh]")
+{
+    Soup sphere = make_icosphere(2, 1.0f);
+    std::string path = tmp_path("import_cached.stl");
+    write_binary_stl(path, sphere, "icosphere");
+    const std::string cache_dir = tmp_path("cache");
+    mkdir(cache_dir.c_str(), 0755);
+
+    // First import samples and writes the cache file
+    auto first = fab_mesh::import_mesh_grid(path, 8.0f, cache_dir);
+    REQUIRE(first.grid_id != 0);
+    REQUIRE(first.from_cache == false);
+
+    // Same session, same params: registry hit, same id
+    auto again = fab_mesh::import_mesh_grid(path, 8.0f, cache_dir);
+    REQUIRE(again.grid_id == first.grid_id);
+    REQUIRE(again.from_cache == true);
+
+    // Simulate a fresh session: drop the registry entry, re-import,
+    // and expect the cache file to satisfy it (new id, no sampling)
+    grid_registry_trim();
+    MeshGrid* gone = grid_lookup(first.grid_id);
+    REQUIRE(gone == nullptr);
+
+    auto reopened = fab_mesh::import_mesh_grid(path, 8.0f, cache_dir);
+    REQUIRE(reopened.grid_id != 0);
+    REQUIRE(reopened.from_cache == true);
+
+    // Field values survive the cache round-trip bit-exactly
+    MeshGrid* g = grid_lookup(reopened.grid_id);
+    REQUIRE(g != nullptr);
+    const float v = grid_eval_f(g, 0.3f, -0.4f, 0.5f);
+
+    grid_registry_trim();
+    auto sampled = fab_mesh::import_mesh_grid(path, 8.0f, "");
+    MeshGrid* g2 = grid_lookup(sampled.grid_id);
+    REQUIRE(g2 != nullptr);
+    const float v2 = grid_eval_f(g2, 0.3f, -0.4f, 0.5f);
+    REQUIRE(v == v2);
+
+    grid_registry_trim();
+}
+
+TEST_CASE("Import: Stibium export stamp is detected", "[mesh]")
+{
+    Soup cube = make_cube(1.0f);
+    std::string path = tmp_path("import_stamped.stl");
+    write_binary_stl(path, cube,
+            "Stibium binary STL export (f-rep source)");
+
+    auto res = fab_mesh::import_mesh_grid(path, 8.0f, "");
+    REQUIRE(res.grid_id != 0);
+    REQUIRE(res.stibium_stamp == true);
+    grid_registry_trim();
+}
+
+TEST_CASE("Import: unreadable file fails cleanly", "[mesh]")
+{
+    auto res = fab_mesh::import_mesh_grid("/nonexistent/nope.stl",
+                                          8.0f, "");
+    REQUIRE(res.grid_id == 0);
+    REQUIRE(!res.error.empty());
 }

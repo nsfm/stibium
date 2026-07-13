@@ -40,6 +40,7 @@ add_library(SbFab STATIC
     src/fab.cpp
     src/formats/dxf.cpp
     src/formats/png.c
+    src/mesh/mesh_import.cpp
     src/mesh/mesh_query.cpp
     src/mesh/trimesh.cpp
     src/tree/grid.cpp
