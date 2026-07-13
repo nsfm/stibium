@@ -441,10 +441,16 @@ void CanvasView::zoomTo(Node* n)
 void CanvasView::updateLOD()
 {
     // Below the readability threshold, nodes collapse to name cards
-    const bool low = transform().m11() < 0.4;
+    const bool low = transform().m11() < CANVAS_LOD_THRESHOLD;
     if (low != low_detail_mode)
     {
         low_detail_mode = low;
+
+        // Flag the scene first: connections consult it when their
+        // ports' visibility changes, so they survive the collapse.
+        if (auto s = dynamic_cast<CanvasScene*>(scene()))
+            s->setLowDetail(low);
+
         for (auto i : scene()->items())
             if (auto f = dynamic_cast<InspectorFrame*>(i))
                 f->setLowDetail(low);

@@ -1,6 +1,7 @@
 #include <Python.h>
 #include <QPainter>
 
+#include "canvas/scene.h"
 #include "canvas/connection/base.h"
 #include <QStyleOptionGraphicsItem>
 
@@ -33,22 +34,32 @@ void BaseConnection::paint(QPainter *painter,
 
     painter->setRenderHint(QPainter::Antialiasing);
 
-    // Zoomed way out: single cheap stroke, no shadow or glow
-    if (option->levelOfDetailFromTransform(painter->worldTransform()) < 0.4)
+    const float lod = option->levelOfDetailFromTransform(
+            painter->worldTransform());
+
+    // Zoomed way out: constant screen-width stroke (never sub-pixel)
+    if (lod < CANVAS_LOD_THRESHOLD)
     {
-        painter->setPen(QPen(color(), 2, Qt::SolidLine, Qt::RoundCap));
+        QPen pen(color(), 1.5, Qt::SolidLine, Qt::RoundCap);
+        pen.setCosmetic(true);
+        painter->setPen(pen);
         painter->drawPath(path());
         return;
     }
+
+    // Fade the expensive dressing in over a band above the threshold,
+    // so the transition reads as gradual rather than a snap.
+    const float fade = fmin(1.0f,
+            (lod - CANVAS_LOD_THRESHOLD) / 0.13f);
 
     // Soft accent glow when hovered or selected
     if (hover || isSelected())
     {
         QColor glow = Colors::amber;
-        glow.setAlpha(40);
+        glow.setAlpha(40 * fade);
         painter->setPen(QPen(glow, 11, Qt::SolidLine, Qt::RoundCap));
         painter->drawPath(path(true));
-        glow.setAlpha(70);
+        glow.setAlpha(70 * fade);
         painter->setPen(QPen(glow, 7, Qt::SolidLine, Qt::RoundCap));
         painter->drawPath(path(true));
     }
@@ -56,7 +67,8 @@ void BaseConnection::paint(QPainter *painter,
     // Drop shadow pass
     painter->save();
     painter->translate(0, 1.5);
-    painter->setPen(QPen(QColor(0, 0, 0, 90), 4, Qt::SolidLine, Qt::RoundCap));
+    painter->setPen(QPen(QColor(0, 0, 0, int(90 * fade)), 4,
+                         Qt::SolidLine, Qt::RoundCap));
     painter->drawPath(path());
     painter->restore();
 
@@ -64,7 +76,8 @@ void BaseConnection::paint(QPainter *painter,
     QLinearGradient grad(startPos(), endPos());
     grad.setColorAt(0, Colors::dim(color()));
     grad.setColorAt(1, Colors::highlight(color()));
-    painter->setPen(QPen(QBrush(grad), 3, Qt::SolidLine, Qt::RoundCap));
+    painter->setPen(QPen(QBrush(grad), 1.5 + 1.5 * fade,
+                         Qt::SolidLine, Qt::RoundCap));
     painter->drawPath(path());
 }
 
