@@ -6,6 +6,23 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **Mesh import** (upstream's most-requested feature, mkeeter/antimony#153):
+  the new Import > Import Mesh node turns an STL into a solid distance
+  field that composes with the whole vocabulary — CSG, transforms,
+  deforms, analytics, re-export. The mesh is sampled once onto a
+  signed distance grid (exact BVH distance; inside/outside from the
+  generalized winding number, so non-watertight scans still classify)
+  and evaluates as a new ternary `OP_GRID` opcode: trilinear point and
+  gradient lookups, conservative block-min/max intervals (all interval
+  pruning keeps working), heap payload refcounted and shared across
+  thread clones. Paths are project-relative (portable projects, no
+  baked absolute paths); processed grids cache in a regenerable
+  gitignored `.stibium-cache/` beside the project keyed by
+  sha256+resolution, so re-opens don't re-sample. An optional `sha256`
+  input pins the source file and fails loudly if it changes; importing
+  a Stibium-stamped export gets an advisory to open the source `.sb`
+  instead. STL exports now carry a Stibium stamp in their 80-byte
+  header to power that advisory. Example: `examples/import_bead.sb`.
 - **DXF export**: the same contours as R12 closed POLYLINEs (y-up,
   mm) — the flavor laser-cutter and CAM toolchains read. One
   extension-driven vector exporter covers both (`export.vector`).
