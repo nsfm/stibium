@@ -136,30 +136,77 @@ void contour_field(MathTree* tree,
 
     std::vector<float> values(size_t(NX) * NY, EMPTY);
 
-    {   // Evaluate all interior samples across the thread pool
-        const size_t n = size_t(nx + 1) * (ny + 1);
-        if (progress_total)
-            progress_total->fetch_add(n, std::memory_order_relaxed);
+    {   // Sample the field, skipping regions interval evaluation can
+        // prove are entirely empty or entirely solid.  Culled regions
+        // keep a one-sample evaluated ring: the interval guarantees
+        // ring and interior share a sign, so sentinel-filled samples
+        // never sit across a cell edge from an opposite-signed real
+        // value (which would corrupt crossing interpolation).
+        std::vector<uint8_t> need(size_t(NX) * NY, 0);
+        for (uint32_t j = 1; j + 1 < NY; ++j)
+            memset(&need[size_t(j) * NX + 1], 1, nx + 1);
 
-        std::vector<float> xs(n), ys(n), zs(n, z), out(n);
-        size_t k = 0;
-        for (uint32_t j = 0; j <= ny; ++j)
-            for (uint32_t i = 0; i <= nx; ++i)
+        // Quadtree over inclusive sample-index rects
+        struct Rect { uint32_t i0, i1, j0, j1; };
+        std::vector<Rect> stack = {{1, nx + 1, 1, ny + 1}};
+        while (!stack.empty() && !*halt)
+        {
+            const Rect r = stack.back();
+            stack.pop_back();
+            const uint32_t w = r.i1 - r.i0, h = r.j1 - r.j0;
+            if (w < 8 || h < 8)
+                continue;   // leave small rects for direct evaluation
+
+            const Interval out = eval_i(tree,
+                    (Interval){gx[r.i0], gx[r.i1]},
+                    (Interval){gy[r.j0], gy[r.j1]},
+                    (Interval){z, z});
+
+            if (out.lower > 0 || out.upper < 0)
             {
-                xs[k] = gx[i + 1];
-                ys[k] = gy[j + 1];
-                k++;
+                const float fill = out.lower > 0 ? EMPTY : -EMPTY;
+                for (uint32_t j = r.j0 + 1; j < r.j1; ++j)
+                    for (uint32_t i = r.i0 + 1; i < r.i1; ++i)
+                    {
+                        values[size_t(j) * NX + i] = fill;
+                        need[size_t(j) * NX + i] = 0;
+                    }
+                continue;
             }
 
-        parallel_eval(tree, xs.data(), ys.data(), zs.data(), out.data(),
-                      n, threads, halt, progress_done);
+            const uint32_t im = r.i0 + w / 2, jm = r.j0 + h / 2;
+            stack.push_back({r.i0, im, r.j0, jm});
+            stack.push_back({im, r.i1, r.j0, jm});
+            stack.push_back({r.i0, im, jm, r.j1});
+            stack.push_back({im, r.i1, jm, r.j1});
+        }
         if (*halt)
             return;
 
-        for (uint32_t j = 0; j <= ny; ++j)
-            memcpy(&values[size_t(j + 1) * NX + 1],
-                   &out[size_t(j) * (nx + 1)],
-                   (nx + 1) * sizeof(float));
+        // Gather the samples that still need real values
+        std::vector<float> xs, ys;
+        std::vector<size_t> idx;
+        for (uint32_t j = 1; j + 1 < NY; ++j)
+            for (uint32_t i = 1; i + 1 < NX; ++i)
+                if (need[size_t(j) * NX + i])
+                {
+                    xs.push_back(gx[i]);
+                    ys.push_back(gy[j]);
+                    idx.push_back(size_t(j) * NX + i);
+                }
+
+        if (progress_total)
+            progress_total->fetch_add(xs.size(),
+                                      std::memory_order_relaxed);
+
+        std::vector<float> zs(xs.size(), z), out(xs.size());
+        parallel_eval(tree, xs.data(), ys.data(), zs.data(), out.data(),
+                      xs.size(), threads, halt, progress_done);
+        if (*halt)
+            return;
+
+        for (size_t k = 0; k < idx.size(); ++k)
+            values[idx[k]] = out[k];
     }
 
     const auto val = [&](uint32_t i, uint32_t j) -> float {
