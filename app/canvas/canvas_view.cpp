@@ -13,6 +13,7 @@
 #include "canvas/canvas_view.h"
 #include "canvas/scene.h"
 #include "canvas/add_node_popup.h"
+#include "canvas/connection/dummy.h"
 
 #include "canvas/connection/connection.h"
 #include "canvas/inspector/frame.h"
@@ -37,12 +38,35 @@ CanvasView::CanvasView(CanvasScene* scene, QWidget* parent)
 
     QAbstractScrollArea::setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     QAbstractScrollArea::setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    // Needed so sticky wires can follow the cursor between clicks
+    setMouseTracking(true);
+    viewport()->setMouseTracking(true);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 void CanvasView::mousePressEvent(QMouseEvent* event)
 {
+    // An in-progress sticky wire intercepts clicks: left completes on
+    // a valid port (and otherwise falls through to pan/select),
+    // right cancels.
+    if (auto d = static_cast<CanvasScene*>(scene())->activeDummy())
+    {
+        if (event->button() == Qt::RightButton)
+        {
+            d->deleteLater();
+            event->accept();
+            return;
+        }
+        if (event->button() == Qt::LeftButton && d->hasValidTarget())
+        {
+            d->commit();
+            event->accept();
+            return;
+        }
+    }
+
     QGraphicsView::mousePressEvent(event);
     if (!event->isAccepted()) {
             if (event->button() == Qt::LeftButton) {
@@ -72,6 +96,12 @@ void CanvasView::mouseReleaseEvent(QMouseEvent* event)
 void CanvasView::mouseMoveEvent(QMouseEvent* event)
 {
     QGraphicsView::mouseMoveEvent(event);
+
+    // A sticky wire follows the cursor (buttons or not, so it tracks
+    // through pans too)
+    if (auto d = static_cast<CanvasScene*>(scene())->activeDummy())
+        d->setDragPos(mapToScene(event->position().toPoint()));
+
     if (scene()->mouseGrabberItem() == NULL && event->buttons() == Qt::LeftButton)
     {
         if (event->modifiers() & Qt::ShiftModifier)

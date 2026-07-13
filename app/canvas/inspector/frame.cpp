@@ -20,6 +20,7 @@
 
 #include "graph/node.h"
 #include "graph/datum.h"
+#include "fab/fab.h"
 
 #include "app/colors.h"
 
@@ -169,9 +170,20 @@ void InspectorFrame::paint(QPainter *painter,
 QColor InspectorFrame::typeTint() const
 {
     QColor type = Colors::base03;
+    bool shape_input = false;
     for (auto d : node->childDatums())
+    {
         if (d->isOutput())
             type = Colors::getColor(d);
+        else if (d->getType() == fab::ShapeType)
+            shape_input = true;
+    }
+
+    // Shape-consuming, shape-producing nodes are operators (CSG,
+    // deforms, transforms); tint them violet so they read differently
+    // from shape sources.
+    if (shape_input && type == Colors::green)
+        type = Colors::violet;
 
     const auto base = Colors::base02;
     return QColor(base.red()   * 0.72 + type.red()   * 0.28,

@@ -13,6 +13,7 @@ class DummyConnection : public BaseConnection
     Q_OBJECT
 public:
     explicit DummyConnection(OutputPort* source, CanvasScene* scene);
+    ~DummyConnection();
 
     /*
      *  Overloaded functions for BaseConnection
@@ -25,6 +26,17 @@ public:
      *  Set the ending position of the connection, update state, and redraw
      */
     void setDragPos(QPointF p);
+
+    /*
+     *  True if the current target accepts this link
+     */
+    bool hasValidTarget() const;
+
+    /*
+     *  Installs the link on the current target (if valid) and
+     *  self-destructs. Returns true if a link was made.
+     */
+    bool commit();
 
 protected:
     /*
@@ -47,6 +59,11 @@ protected:
      *  Sets drag_state and target member variables
      */
     void checkDragTarget();
+
+    /*
+     *  Right-click cancels the connection
+     */
+    void mousePressEvent(QGraphicsSceneMouseEvent* event) override;
 
     /*
      *  Catch spacebar and snap to nearest port when it is pressed

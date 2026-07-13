@@ -4,6 +4,7 @@
 
 class Graph;
 class CanvasView;
+class DummyConnection;
 class InputPort;
 class Datum;
 
@@ -23,12 +24,19 @@ public:
     bool lowDetail() const { return low_detail; }
 
     /*
+     *  The in-progress sticky wire, if any (see DummyConnection)
+     */
+    void setActiveDummy(DummyConnection* d) { active_dummy = d; }
+    DummyConnection* activeDummy() const { return active_dummy; }
+
+    /*
      *  Returns a new CanvasView object looking at this scene
      */
     CanvasView* getView(QWidget* parent=NULL);
 
 private:
     bool low_detail=false;
+    DummyConnection* active_dummy=nullptr;
 
 public:
 
