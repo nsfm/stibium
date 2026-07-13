@@ -193,22 +193,30 @@ Transform RenderTask::getTransform(QMatrix4x4 m)
 
 Bounds RenderTask::render(Shape* shape, Bounds b_, float scale)
 {
-    // Screen-space clipping:
-    // x and y are clipped to the window;
-    // z is clipped assuming a voxel depth of max(width, height)
+    // Screen-space clipping: x and y are clipped to the window.
+    // z always covers the shape's full depth - the voxel count is
+    // capped below instead, so depth steps coarsen at extreme zoom
+    // rather than clipping the model at a window-sized slab.
     const float xmin = -M(0,3) - clip.x() / 2;
     const float xmax = -M(0,3) + clip.x() / 2;
     const float ymin = -M(1,3) - clip.y() / 2;
     const float ymax = -M(1,3) + clip.y() / 2;
-    const float zmin = -M(2,3) - fmax(clip.x(), clip.y()) / 2;
-    float zmax = -M(2,3) + fmax(clip.x(), clip.y()) / 2;
+    const float zmin = b_.zmin;
+    float zmax = b_.zmax;
 
-    // Section view: pull the near clip plane down through the slab,
-    // exposing interiors on a screen-parallel cut
-    zmax -= (1 - section) * (zmax - zmin);
+    if (section < 1)
+    {
+        // The section plane lives in view-slab coordinates, so every
+        // shape in the scene is cut on the same global plane
+        const float slab_min = -M(2,3) - fmax(clip.x(), clip.y()) / 2;
+        const float slab_max = -M(2,3) + fmax(clip.x(), clip.y()) / 2;
+        zmax = fmin(zmax,
+                    slab_max - (1 - section) * (slab_max - slab_min));
+        zmax = fmax(zmax, zmin);
+    }
 
-    Bounds b(fmax(xmin, b_.xmin), fmax(ymin, b_.ymin),  fmax(zmin, b_.zmin),
-             fmin(xmax, b_.xmax), fmin(ymax, b_.ymax),  fmin(zmax, b_.zmax));
+    Bounds b(fmax(xmin, b_.xmin), fmax(ymin, b_.ymin),  zmin,
+             fmin(xmax, b_.xmax), fmin(ymax, b_.ymax),  zmax);
     depth = QImage((b.xmax - b.xmin) * scale, (b.ymax - b.ymin) * scale,
                  QImage::Format_RGB32);
     shaded = QImage(depth.width(), depth.height(), depth.format());
@@ -231,7 +239,10 @@ Bounds RenderTask::render(Shape* shape, Bounds b_, float scale)
     Region r = {};
     r.ni = (uint32_t)depth.width();
     r.nj = (uint32_t)depth.height();
-    r.nk = uint32_t(fmax(1, (b.zmax - b.zmin) * scale));
+    // Depth voxel budget: what the old window-sized slab would have
+    // spent (isotropic voxels), now spread over the full model depth
+    r.nk = uint32_t(fmax(1, fmin((b.zmax - b.zmin) * scale,
+                                 fmax(clip.x(), clip.y()) * scale)));
 
     build_arrays(&r, b.xmin, b.ymin, b.zmin,
                      b.xmax, b.ymax, b.zmax);
