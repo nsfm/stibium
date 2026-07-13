@@ -93,13 +93,15 @@ void ResolutionDialog::onValueChanged(int i)
             : QString("min feature \u2248 %1 mm  \u24d8")
                     .arg(feature, 0, 'g', 3));
 
-    // Simplification deviation follows the sampling error (half the
-    // feature size = one voxel) until the user edits it themselves,
-    // making the resolution the gold standard down the whole chain
+    // Simplification deviation follows the resolution at a tenth of
+    // a voxel (until the user edits it directly). Empirically tuned:
+    // decimation error is structured faceting, which the eye punishes
+    // far harder than sampling noise - one voxel of deviation looks
+    // awful, a tenth looks clean (0.0143 at 7 vox/mm).
     if (!deviation_touched)
     {
         updating_deviation = true;
-        ui->max_deviation->setValue(1.0 / i);
+        ui->max_deviation->setValue(0.1 / i);
         updating_deviation = false;
     }
 }
