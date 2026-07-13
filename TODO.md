@@ -28,6 +28,18 @@ were named for the element symbol all along).
   field itself (walls thinner than nozzle flagged before slicing);
   overhang-angle visualization is plausible too (gradient vs build
   direction). Ends guess-and-check on functional parts.
+- **Smooth CSG (smin blending).** Every SDF playground has organic
+  smooth-union/intersect; our CSG is hard min/max plus fixed chamfer/
+  fillet. The exponential smooth-min needs only exp/log/min — opcodes
+  we already have — so this may be pure node-library work: composable,
+  radius-controlled organic blends. Huge visual payoff per line.
+- **Shell / offset nodes.** offset(f, r) = f - r; shell(f, t) =
+  max(f, -t - f). Exact hollowing at wall thickness t — one node,
+  two opcodes, no mesh in sight. Mesh tools ache doing this; for a
+  field it's arithmetic. The 3D-printing staple we're missing.
+- **Viewport measurement probe.** Click two points: distance, plus
+  the field value under the cursor (= exact distance to surface,
+  it's an SDF!). The field is a built-in ruler; expose it.
 - **Interval-pruned contour evaluation.** `contour_field` evaluates
   the full sample grid; the mesher's quadtree interval-culling would
   skip empty space entirely. For sparse masks at high resolution
@@ -83,6 +95,25 @@ were named for the element symbol all along).
 
 ## Tier 2.5 — adopted from dreaming mode (concrete, just not scheduled)
 
+- **Geometric diff (`--diff a.sb b.sb → image`).** Render |f_a - f_b|
+  (or sign changes) as a heatmap: exactly which regions changed
+  between two versions of a model. Meshes can't diff geometry
+  cheaply; fields literally subtract. Git-native CAD review, and an
+  agent's proof that an edit changed only what it claimed.
+- **Assertion nodes — unit tests for geometry.** In-graph checks
+  ("min wall ≥ 0.8", "fits in 200³", "clearance to s0.shape ≥ 0.2")
+  that go red in the canvas and fail `--validate` headlessly. The
+  analytics panel grown into executable specs: models with tests,
+  runnable in CI, writable by agents.
+- **Morphological open/close (printability filter).** close(f,r) =
+  offset(offset(f,r),-r) erases features smaller than r; open() does
+  the inverse. "Show me what my printer will actually produce" as a
+  preview node — design-for-manufacture as two nested offsets.
+- **Projected footprint node (project_z).** F(x,y) = min over z of
+  f(x,y,z): the true shadow of a 3D part as a first-class 2D shape —
+  straight into the SVG/DXF pipeline for baseplates, gaskets, and
+  laser-cut cradles matched to 3D parts.
+
 - **Color propagation fix.** Color currently vanishes when a colored shape
   merges with any uncolored node. Rule: CSG results inherit color from
   colored operand(s) (union of colored+uncolored keeps the color;
@@ -122,6 +153,15 @@ were named for the element symbol all along).
   contours per layer; the field gives exact contours for free. Start with
   "show me layer N" in the viewport; unhinged endgame is math → gcode
   with no mesh in between.
+- **Proven clearances (interval-verified fit).** eval_i gives
+  guaranteed bounds, not samples: subdivide until the interval proves
+  min(gap) ≥ tolerance over the whole domain — a mathematical proof
+  that parts mate, that threads clear, that nothing collides. No
+  sampling tool can promise this; interval arithmetic can. CAD with
+  certificates.
+- **Shape morphing.** lerp(f_a, f_b, t) renders every intermediate of
+  two models — tweened geometry for free. Pairs with the kinematic
+  scrubber for animation, and prints as a physical morph sequence.
 - **Differentiable-CAD optimization.** Fields are closed-form and exactly
   differentiable: "minimize material s.t. wall ≥ 0.8mm", "solve for the
   parameter where these parts stop colliding." Gradient descent over the
