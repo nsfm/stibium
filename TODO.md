@@ -10,6 +10,16 @@ were named for the element symbol all along).
   (trilinear interpolation). Design around existing parts: PCB models,
   scans, vendor STEP-derived meshes. Upstream's most-requested feature
   (mkeeter/antimony#153), never landed.
+  Design state (2026-07-13): open questions are (a) voxel data embed
+  as base64 in .sb (self-contained, large) vs sidecar file (small,
+  path-fragile) — leaning sidecar-with-relative-path + hash; (b) a new
+  opcode carrying a heap payload (Results arrays can't hold a grid;
+  clone_tree must share the grid read-only across threads — refcount
+  it); (c) eval backends: trilinear for f/g, per-cell min/max
+  precompute for a conservative interval backend (keeps all the
+  pruning machinery working); (d) sign: compute at import via winding
+  number (robust to non-watertight scans) into a signed grid, so the
+  runtime is pure interpolation.
 
 ## Tier 2 — strong wants
 
