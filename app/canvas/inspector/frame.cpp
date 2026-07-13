@@ -36,6 +36,11 @@ InspectorFrame::InspectorFrame(Node* node, QGraphicsScene* scene)
 
 QRectF InspectorFrame::tightBoundingRect() const
 {
+    // In low-detail mode the children are hidden; use the rect
+    // captured when the mode was entered.
+    if (low_detail)
+        return low_detail_rect;
+
     QRectF b;
     for (auto c : childItems())
     {
@@ -156,6 +161,11 @@ void InspectorFrame::setLowDetail(bool low)
 {
     if (low == low_detail)
         return;
+
+    if (low)
+        low_detail_rect = tightBoundingRect();  // capture while visible
+
+    prepareGeometryChange();
     low_detail = low;
 
     for (auto c : childItems())
