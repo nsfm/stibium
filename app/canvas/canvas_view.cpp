@@ -95,6 +95,16 @@ void CanvasView::wheelEvent(QWheelEvent* event)
     const float zoom = transform().m11();
     s = fmax(0.08 / zoom, fmin(4 / zoom, s));
     scale(s, s);
+
+    // Below the readability threshold, nodes collapse to name cards
+    const bool low = transform().m11() < 0.4;
+    if (low != low_detail_mode)
+    {
+        low_detail_mode = low;
+        for (auto i : scene()->items())
+            if (auto f = dynamic_cast<InspectorFrame*>(i))
+                f->setLowDetail(low);
+    }
     auto d = a - mapToScene(event->position().toPoint());
     setSceneRect(sceneRect().translated(d.x(), d.y()));
 }

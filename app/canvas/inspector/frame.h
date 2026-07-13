@@ -61,11 +61,23 @@ public:
     void setExportWorker(ExportWorker* worker);
 
     /*
+     *  Low-detail mode for zoomed-out views: hides child rows and
+     *  paints a solid name card instead. Item geometry is unchanged,
+     *  so connections keep their endpoints.
+     */
+    void setLowDetail(bool low);
+
+    /*
      *  Sets the dragging flag
      *  (should only be called on first insertion, see comment
      *   below for why this is necessary)
      */
     void setDragging(bool d) { dragging = d; }
+
+protected:
+    bool low_detail=false;
+
+public:
 
 signals:
     /*
