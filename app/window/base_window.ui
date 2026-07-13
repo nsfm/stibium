@@ -230,8 +230,11 @@
    <property name="checkable">
     <bool>true</bool>
    </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
    <property name="text">
-    <string>Hide bounding boxes</string>
+    <string>Bounding boxes</string>
    </property>
   </action>
   <action name="actionSectionSlider">
