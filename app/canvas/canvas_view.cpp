@@ -556,19 +556,31 @@ void CanvasView::drawFloatingLabels(QPainter* painter)
     placed.reserve(labels.size());
     size_t drawn = 0;
 
+    // When the crowd would blanket the viewport, auto-named labels
+    // sit out entirely: they were first to be dropped anyway, and
+    // skipping them wholesale keeps the layout stable while zooming
+    // (no per-frame slot reshuffling = no jitter).
+    const float est_coverage = labels.size() * (fm.height() + 4) * 90;
+    const bool defaults_ok =
+            est_coverage < 0.25f * vp.width() * vp.height();
+
     for (const auto& l : labels)
     {
         if (drawn > 150)
             break;
+        if (!l.custom && !defaults_ok)
+            continue;
 
         const QSizeF size(fm.horizontalAdvance(l.name) + 10,
                           fm.height() + 4);
 
-        // Try above the node, then below, then progressively further
-        // up and down, keeping the label near its anchor.
+        // Custom names try above, below, then progressively further
+        // out; auto-named labels get exactly one seat (above) and
+        // yield if it's taken - stable placement beats persistence.
         QRectF rect;
         bool ok = false;
-        for (int attempt = 0; attempt < 6 && !ok; ++attempt)
+        const int max_attempts = l.custom ? 6 : 1;
+        for (int attempt = 0; attempt < max_attempts && !ok; ++attempt)
         {
             const float dy = (attempt % 2 ? 1 : -1)
                            * (12 + (attempt / 2) * (size.height() + 2));
