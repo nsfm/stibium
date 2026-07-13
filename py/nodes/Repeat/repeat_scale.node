@@ -9,4 +9,4 @@ input('x', float, 0)
 input('y', float, 0)
 input('r0', float, 1)
 
-output('shape', fab.shapes.repeat_scale_xy(shape, factor, x, y, r0))
+output('repeated', fab.shapes.repeat_scale_xy(shape, factor, x, y, r0))

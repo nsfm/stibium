@@ -3034,26 +3034,26 @@ def repeat_x(a, spacing, x0=0):
         one cell of the given spacing, centered on x0.
     """
     if spacing <= 0:
-        return a
+        return Shape(a.math, a.bounds)
     return _remap_shape(a, xexpr=_rep_expr('X', spacing, x0),
                         xmin=float('-inf'), xmax=float('inf'))
 
 def repeat_y(a, spacing, y0=0):
     if spacing <= 0:
-        return a
+        return Shape(a.math, a.bounds)
     return _remap_shape(a, yexpr=_rep_expr('Y', spacing, y0),
                         ymin=float('-inf'), ymax=float('inf'))
 
 def repeat_z(a, spacing, z0=0):
     if spacing <= 0:
-        return a
+        return Shape(a.math, a.bounds)
     return _remap_shape(a, zexpr=_rep_expr('Z', spacing, z0),
                         zmin=float('-inf'), zmax=float('inf'))
 
 def repeat_xy(a, spacing_x, spacing_y, x0=0, y0=0):
     """ Infinite 2D grid repetition. """
     if spacing_x <= 0 or spacing_y <= 0:
-        return a
+        return Shape(a.math, a.bounds)
     return _remap_shape(a, xexpr=_rep_expr('X', spacing_x, x0),
                         yexpr=_rep_expr('Y', spacing_y, y0),
                         xmin=float('-inf'), xmax=float('inf'),
@@ -3063,13 +3063,13 @@ def repeat_mirror_x(a, spacing, x0=0):
     """ Infinite repetition along X where neighboring cells are mirror
         images (seamless for asymmetric shapes). """
     if spacing <= 0:
-        return a
+        return Shape(a.math, a.bounds)
     return _remap_shape(a, xexpr=_rep_mirror_expr('X', spacing, x0),
                         xmin=float('-inf'), xmax=float('inf'))
 
 def repeat_mirror_y(a, spacing, y0=0):
     if spacing <= 0:
-        return a
+        return Shape(a.math, a.bounds)
     return _remap_shape(a, yexpr=_rep_mirror_expr('Y', spacing, y0),
                         ymin=float('-inf'), ymax=float('inf'))
 
@@ -3080,7 +3080,7 @@ def repeat_x_finite(a, spacing, count, x0=0):
     """
     count = int(count)
     if spacing <= 0 or count < 2:
-        return a
+        return Shape(a.math, a.bounds)
     b = a.bounds
     return _remap_shape(a,
             xexpr=_rep_finite_expr('X', spacing, count, x0 - spacing/2.),
@@ -3089,7 +3089,7 @@ def repeat_x_finite(a, spacing, count, x0=0):
 def repeat_y_finite(a, spacing, count, y0=0):
     count = int(count)
     if spacing <= 0 or count < 2:
-        return a
+        return Shape(a.math, a.bounds)
     b = a.bounds
     return _remap_shape(a,
             yexpr=_rep_finite_expr('Y', spacing, count, y0 - spacing/2.),
@@ -3102,7 +3102,7 @@ def repeat_polar(a, n, x=0, y=0):
     """
     n = int(n)
     if n < 2:
-        return a
+        return Shape(a.math, a.bounds)
     import math as _m
     sector = 2 * _m.pi / n
     theta = ('mod(atan2(Y-%g,X-%g)+%g,%g)-%g'
@@ -3125,11 +3125,15 @@ def repeat_scale_xy(a, factor, x=0, y=0, r0=1.0):
         unlimited at O(1) field cost. (Note: the remapped field is
         non-euclidean away from the source band; sign is exact.)
     """
-    if factor <= 1 or r0 <= 0:
-        return a
+    if r0 <= 0 or factor == 1 or factor <= 0:
+        return Shape(a.math, a.bounds)
+    if factor < 1:
+        factor = 1.0 / factor
     import math as _m
     lnk = _m.log(factor)
-    r = 'sqrt((X-%g)*(X-%g)+(Y-%g)*(Y-%g))' % (x, x, y, y)
+    # Clamp r away from the fixed point so the field stays finite there
+    eps = r0 * 1e-4
+    r = 'max(sqrt((X-%g)*(X-%g)+(Y-%g)*(Y-%g)),%g)' % (x, x, y, y, eps)
     q = 'exp(mod(log(%s/%g),%g))*%g/%s' % (r, r0, lnk, r0, r)
     xexpr = '=%g+(X-%g)*%s;' % (x, x, q)
     yexpr = '=%g+(Y-%g)*%s;' % (y, y, q)

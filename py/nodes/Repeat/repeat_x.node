@@ -7,4 +7,4 @@ input('shape', fab.types.Shape)
 input('spacing', float, 3)
 input('x0', float, 0)
 
-output('shape', fab.shapes.repeat_x(shape, spacing, x0))
+output('repeated', fab.shapes.repeat_x(shape, spacing, x0))

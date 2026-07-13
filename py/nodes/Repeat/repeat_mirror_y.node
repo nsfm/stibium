@@ -7,4 +7,4 @@ input('shape', fab.types.Shape)
 input('spacing', float, 3)
 input('y0', float, 0)
 
-output('shape', fab.shapes.repeat_mirror_y(shape, spacing, y0))
+output('repeated', fab.shapes.repeat_mirror_y(shape, spacing, y0))
