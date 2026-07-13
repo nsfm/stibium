@@ -216,16 +216,20 @@ void shaded8(struct MathTree_ *tree, Region region, uint16_t **depth,
 
         for (unsigned i=0; i < region.ni && !*halt; ++i)
         {
-            // Load this pixel into the set of pixels to render
-            if (depth[j][i])
+            // Load this pixel into the set of pixels to render.
+            // (Image buffers are indexed absolutely, matching
+            // render16, so sub-regions shade the right pixels.)
+            const unsigned row = region.jmin + j;
+            const unsigned col = region.imin + i;
+            if (depth[row][col])
             {
                 X[count] = region.X[i];
                 Y[count] = region.Y[j];
-                Z[count] = region.Z[0] + depth[j][i] / 65535.0f *
+                Z[count] = region.Z[0] + depth[row][col] / 65535.0f *
                             (region.Z[region.nk] - region.Z[0]);
 
-                is[count] = i;
-                js[count] = j;
+                is[count] = col;
+                js[count] = row;
                 count++;
             }
 

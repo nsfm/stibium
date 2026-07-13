@@ -45,11 +45,6 @@ were named for the element symbol all along).
   skip empty space entirely. For sparse masks at high resolution
   (most photolithography content is mostly empty), plausibly another
   5-10x on top of the threading.
-- **Viewport render parallelism.** Each shape's RenderTask runs on
-  one core; a monster single-shape model renders single-threaded
-  while 15 cores idle. Same row-chunking treatment contour_field got
-  (render16/shaded8 over cloned trees). The affordable sibling of
-  the GPU-eval moonshot, available now.
 - **`--describe-nodes` + `--render --node NAME`.** Layer 2 of
   doc/AGENT-SURFACE.md and the visual-bisection verb: the node
   library as JSON (same generator can feed the wiki), and per-node
@@ -254,6 +249,14 @@ library -> MCP server on the live session):
 
 
 ## Done
+- 2026-07-13 — viewport render parallelism: render16_mt/shaded8_mt
+  chunk the region xy-only (image cells stay disjoint; z intact so
+  depth is exact) across cloned trees. Wired into the viewport, the
+  headless --render, and heightmap export. Gyroid ball @900px:
+  1.79s → 0.55s, byte-identical output. Found + fixed shaded8's
+  relative image indexing (mismatched render16's absolute convention;
+  latent upstream, only visible with sub-regions).
+  STIBIUM_RENDER_THREADS overrides the physical-core default.
 - 2026-07-13 — cross-section preview: press X in any viewport for a
   section slider that pulls a screen-parallel cut plane through the
   model (rotate the view to choose the cut direction; hiding the
