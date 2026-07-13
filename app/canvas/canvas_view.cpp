@@ -95,16 +95,7 @@ void CanvasView::wheelEvent(QWheelEvent* event)
     const float zoom = transform().m11();
     s = fmax(0.08 / zoom, fmin(4 / zoom, s));
     scale(s, s);
-
-    // Below the readability threshold, nodes collapse to name cards
-    const bool low = transform().m11() < 0.4;
-    if (low != low_detail_mode)
-    {
-        low_detail_mode = low;
-        for (auto i : scene()->items())
-            if (auto f = dynamic_cast<InspectorFrame*>(i))
-                f->setLowDetail(low);
-    }
+    updateLOD();
     auto d = a - mapToScene(event->position().toPoint());
     setSceneRect(sceneRect().translated(d.x(), d.y()));
 }
@@ -447,6 +438,30 @@ void CanvasView::zoomTo(Node* n)
     b->start(QPropertyAnimation::DeleteWhenStopped);
 }
 
+void CanvasView::updateLOD()
+{
+    // Below the readability threshold, nodes collapse to name cards
+    const bool low = transform().m11() < 0.4;
+    if (low != low_detail_mode)
+    {
+        low_detail_mode = low;
+        for (auto i : scene()->items())
+            if (auto f = dynamic_cast<InspectorFrame*>(i))
+                f->setLowDetail(low);
+    }
+}
+
+void CanvasView::zoomToFit(QRectF r)
+{
+    const auto vp = viewport()->rect();
+    float fit = 1;
+    if (vp.width() > 0 && r.width() > 0 && r.height() > 0)
+        fit = fmin(1.0, 0.85 * fmin(vp.width() / r.width(),
+                                    vp.height() / r.height()));
+    setZoom(fit);
+    setCenter(r.center());
+}
+
 void CanvasView::setCenter(QPointF p)
 {
     auto t = sceneRect();
@@ -464,6 +479,7 @@ void CanvasView::setZoom(float z)
 {
     auto t = transform();
     scale(z / t.m11(), z / t.m22());
+    updateLOD();
 }
 
 float CanvasView::getZoom() const

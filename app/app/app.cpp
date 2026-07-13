@@ -19,7 +19,9 @@
 #include "app/theme.h"
 #include "app/settings.h"
 #include <QGraphicsView>
+#include <QFileInfo>
 #include "canvas/scene.h"
+#include "canvas/canvas_view.h"
 
 App::App(int& argc, char** argv)
     : QApplication(argc, argv),
@@ -157,7 +159,8 @@ void App::onToggleAutosave(bool enabled)
 
 void App::onSaveAs()
 {
-    QString f = QFileDialog::getSaveFileName(NULL, "Save as", "", "*.sb");
+    QString f = QFileDialog::getSaveFileName(NULL, "Save as",
+            Settings::get("files/last_dir", "").toString(), "*.sb");
     if (!f.isEmpty())
     {
 #ifdef Q_OS_LINUX
@@ -175,6 +178,7 @@ void App::onSaveAs()
             return;
         }
         filename = f;
+        Settings::set("files/last_dir", QFileInfo(f).absolutePath());
         emit(filenameChanged(filename));
         return onSave();
     }
@@ -186,7 +190,8 @@ void App::onOpen()
                 NULL, "Discard unsaved changes?",
                 "Discard unsaved changes?") == QMessageBox::Yes)
     {
-        QString f = QFileDialog::getOpenFileName(NULL, "Open", "", "*.sb");
+        QString f = QFileDialog::getOpenFileName(NULL, "Open",
+            Settings::get("files/last_dir", "").toString(), "*.sb");
         if (!f.isEmpty())
             loadFile(f);
     }
@@ -266,6 +271,7 @@ bool App::event(QEvent *event)
 
 void App::loadFile(QString f)
 {
+    Settings::set("files/last_dir", QFileInfo(f).absolutePath());
     filename = f;
     graph->clear();
 
@@ -303,23 +309,20 @@ void App::loadFile(QString f)
         emit(filenameChanged(filename));
 
         // Center canvas views on the loaded graph, which may live far
-        // from the origin, zooming out (never in) to fit if needed.
-        if (auto scene = proxy->canvasScene())
-        {
+        // from the origin. Deferred one event-loop turn so windows are
+        // laid out and inspector positions applied; uses the view's own
+        // zoom/center properties (the same machinery as zoom-to-node).
+        QTimer::singleShot(0, this, [this]{
+            auto scene = proxy->canvasScene();
+            if (!scene)
+                return;
             const auto r = scene->itemsBoundingRect();
-            if (!r.isNull())
-                for (auto v : scene->views())
-                {
-                    const float fit = fmin(1.0,
-                        0.85 * fmin(v->sceneRect().width() / r.width(),
-                                    v->sceneRect().height() / r.height()));
-                    if (fit < 1.0)
-                        v->scale(fit, fit);
-                    auto sr = v->sceneRect();
-                    sr.moveCenter(r.center());
-                    v->setSceneRect(sr);
-                }
-        }
+            if (r.isNull())
+                return;
+            for (auto v : scene->views())
+                if (auto c = dynamic_cast<CanvasView*>(v))
+                    c->zoomToFit(r);
+        });
     }
 }
 

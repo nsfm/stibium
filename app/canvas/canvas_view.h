@@ -34,6 +34,12 @@ public slots:
      */
     void zoomTo(Node* n);
 
+    /*
+     *  Centers the view on the given scene rect, zooming out
+     *  (never in) to fit it with a margin.
+     */
+    void zoomToFit(QRectF r);
+
 protected:
     /*
      *  Overload draw events for background and selection rectangle.
@@ -94,6 +100,12 @@ protected:
 
     QPointF click_pos;
     QPointF drag_pos;
+    /*
+     *  Toggles low-detail mode on inspector frames when the zoom level
+     *  crosses the readability threshold (called on any zoom change).
+     */
+    void updateLOD();
+
     bool selecting;
     bool low_detail_mode=false;
 };

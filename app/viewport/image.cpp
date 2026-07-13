@@ -8,6 +8,8 @@
 
 #include "app/app.h"
 #include "window/base.h"
+#include <QVector3D>
+#include "app/settings.h"
 #include "viewport/image.h"
 #include "viewport/view.h"
 #include "viewport/render/instance.h"
@@ -192,6 +194,18 @@ void DepthImage::paintEnhanced(
     glUniform2f(shader->uniformLocation("pixel_size"),
                 tex_size.width() ? 1.0f / tex_size.width() : 0,
                 tex_size.height() ? 1.0f / tex_size.height() : 0);
+
+    {   // Key-light direction, configurable as render/key_light = "x,y,z"
+        const auto parts = Settings::get(
+                "render/key_light", "0.57,-0.57,0.57").toString().split(',');
+        QVector3D l(0.57, -0.57, 0.57);
+        if (parts.size() == 3)
+            l = QVector3D(parts[0].toFloat(), parts[1].toFloat(),
+                          parts[2].toFloat());
+        l.normalize();
+        glUniform3f(shader->uniformLocation("key_light"),
+                    l.x(), l.y(), l.z());
+    }
 
     glActiveTexture(GL_TEXTURE0 + 1);
     glBindTexture(GL_TEXTURE_2D, shaded_tex);
