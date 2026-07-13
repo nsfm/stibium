@@ -6,6 +6,14 @@
 #include <QActionGroup>
 
 #include <QToolButton>
+#include <QFileDialog>
+#include <QFutureWatcher>
+#include <QMessageBox>
+#include <QtConcurrent>
+
+#include "export/export_image.h"
+#include "dialog/exporting.h"
+#include "dialog/render_image_dialog.h"
 
 #include "window/base_viewport_window.h"
 
@@ -50,6 +58,47 @@ BaseViewportWindow::BaseViewportWindow(QList<ViewportView*> views)
         connect(ui->actionHideUI, &QAction::toggled,
                 view->hideUIButton(), &QToolButton::setChecked);
     }
+
+    // Render > Export image: view-matched shaded render to a file
+    connect(ui->actionExportImage, &QAction::triggered, this, [=]{
+        auto view = views.first();
+
+        RenderImageDialog dialog(view->getSection() < 1, this);
+        if (!dialog.exec())
+            return;
+
+        const QString filename = QFileDialog::getSaveFileName(
+                this, "Export image", "", "Images (*.png)");
+        if (filename.isEmpty())
+            return;
+
+        ImageExport::Options opt;
+        opt.M = view->getMatrix(ViewportView::ROT);
+        opt.section = dialog.applySection() ? view->getSection() : 1;
+        opt.fit_px = dialog.imageSize();
+        opt.transparent = dialog.transparentBackground();
+        opt.filename = filename.endsWith(".png", Qt::CaseInsensitive)
+                ? filename : filename + ".png";
+
+        // Render in the background behind the busy dialog
+        auto exporting = new ExportingDialog(this);
+        exporting->setStatus("Rendering...");
+        auto graph = App::instance()->getGraph();
+        auto future = QtConcurrent::run([=]{
+            return ImageExport::render(graph, opt);
+        });
+        QFutureWatcher<QString> watcher;
+        watcher.setFuture(future);
+        connect(&watcher, &QFutureWatcher<QString>::finished,
+                exporting, &QDialog::accept);
+        exporting->exec();
+        delete exporting;
+
+        const QString err = future.result();
+        if (!err.isEmpty())
+            QMessageBox::critical(this, "Export error",
+                    "<b>Export error:</b><br>" + err);
+    });
 
     show();
 }

@@ -85,6 +85,10 @@ release; newest work at the top of each section.
 
 ## UI
 
+- **Render ▸ Export image**: render the current view to a PNG from
+  the viewport window - orientation-matched, optional section cut,
+  size and transparent-background options. Same engine as the
+  headless `--render`.
 - **Parallel viewport rendering**: the raymarched render fans out
   across physical cores (~3× on heavy models), in the viewport,
   `--render`, and heightmap export. Output is byte-identical to
@@ -138,6 +142,9 @@ release; newest work at the top of each section.
 
 ## App & infrastructure
 
+- **App-level test suite**: CTest drives the real binary over every
+  example (validate, render, deterministic resave round-trip) - CI
+  now asserts behavior, not just compilation.
 - **Headless render**: `--render out.png [--view iso|top|front]
   [--size N]` draws the model's shapes shaded on a transparent
   background with no display or GL — gallery scripts, CI previews,
