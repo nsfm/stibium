@@ -95,6 +95,14 @@ release; newest work at the top of each section.
 - **Recent files & directory memory**: File ▸ Open Recent, and all
   export dialogs open in the last export directory (kept separate
   from the model directory).
+- **Export nodes glow at low zoom**: render/mesh/export nodes get
+  amber skeleton cards with halos and role-based floating labels
+  ("Mesh 0" instead of "m0") with top priority — the nodes new users
+  hunt for announce themselves.
+- **Export dialog shows real dimensions**: model size in mm replaces
+  the voxel-count readout; a live "min feature ≈" line (mm/µm) shows
+  what the chosen resolution can resolve; simplification deviation
+  follows at a tenth of a voxel (empirically tuned on real prints).
 - **Saner export defaults**: mesh dialogs start at 7 voxels/unit,
   vector/raster at 60 (the old content-scaled default suggested 1 -
   a useless mesh), and the dialog now shows the minimum feature size
@@ -160,6 +168,11 @@ release; newest work at the top of each section.
 
 ## Fixes
 
+- **Stale-UI-header builds fixed at the root**: AUTOUIC under Ninja
+  ran one build behind on .ui edits (mismatched dialog layouts,
+  startup segfaults, ritual clean rebuilds). The .ui files are now
+  explicitly wrapped (qt6_wrap_ui); a plain `ninja` is always
+  sufficient.
 - **Undo-after-open crash**: the undo stack survived file loads,
   so undoing after File ▸ Open replayed commands into the freed
   previous graph. The stack now clears on every load.
