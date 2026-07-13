@@ -6,22 +6,23 @@ were named for the element symbol all along).
 
 ## Tier 1 — would die on these hills
 
-- **Mesh import as a distance field.** STL/3MF in → sampled voxel SDF node
-  (trilinear interpolation). Design around existing parts: PCB models,
-  scans, vendor STEP-derived meshes. Upstream's most-requested feature
-  (mkeeter/antimony#153), never landed.
-  Design state (2026-07-13): open questions are (a) voxel data embed
-  as base64 in .sb (self-contained, large) vs sidecar file (small,
-  path-fragile) — leaning sidecar-with-relative-path + hash; (b) a new
-  opcode carrying a heap payload (Results arrays can't hold a grid;
-  clone_tree must share the grid read-only across threads — refcount
-  it); (c) eval backends: trilinear for f/g, per-cell min/max
-  precompute for a conservative interval backend (keeps all the
-  pruning machinery working); (d) sign: compute at import via winding
-  number (robust to non-watertight scans) into a signed grid, so the
-  runtime is pure interpolation.
+(2026-07-13: emptied. Mesh import — the last resident — landed as the
+Import Mesh node / OP_GRID engine; see CHANGELOG. 🎉)
 
 ## Tier 2 — strong wants
+
+- **Mesh import, round two.** The landed core is STL-only, dense
+  grids, blocking sampling. Follow-ups in rough priority order:
+  3MF import (needs zip reading — reuse zlib, small parser); an
+  import *dialog* (file browser + resolution suggestion from mesh
+  bbox/feature stats, memory estimate readout — today you type into
+  datum fields); progress reporting during sampling (big scans block
+  the graph thread silently); narrow-band grids for memory (dense
+  512³ = 512 MB; band + far-field fallback could be ~10×); script
+  print()/advisory surfacing in headless verbs (--validate swallows
+  script stdout, so the ouroboros advisory only shows in the GUI);
+  a File > "copy mesh into project" helper for the unsaved-project
+  nag; consider exposing `fab.shapes.import_mesh` bounds padding.
 
 - **Antialiased render output.** The raymarch samples once per pixel,
   so exported images have hard staircase edges. Cheapest win:
