@@ -9,6 +9,10 @@ release; newest work at the top of each section.
 - **DXF export**: the same contours as R12 closed POLYLINEs (y-up,
   mm) — the flavor laser-cutter and CAM toolchains read. One
   extension-driven vector exporter covers both (`export.vector`).
+- **Contour tracing skips empty space**: interval evaluation proves
+  regions empty or solid before any sampling, so sparse high-res
+  vector exports (photolithography masks) drop from seconds to
+  milliseconds of evaluation.
 - **SVG export**: 2D shapes trace to resolution-independent vector
   paths (`export.svg`, sharp corners recovered by feature detection to
   ~5× finer than the sampling grid, holes and clipped shapes handled,

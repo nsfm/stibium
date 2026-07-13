@@ -48,11 +48,6 @@ were named for the element symbol all along).
 - **Viewport measurement probe.** Click two points: distance, plus
   the field value under the cursor (= exact distance to surface,
   it's an SDF!). The field is a built-in ruler; expose it.
-- **Interval-pruned contour evaluation.** `contour_field` evaluates
-  the full sample grid; the mesher's quadtree interval-culling would
-  skip empty space entirely. For sparse masks at high resolution
-  (most photolithography content is mostly empty), plausibly another
-  5-10x on top of the threading.
 - **Multi-shape export.** One click → N files (print plates, assemblies).
   The export hook currently hard-rejects multiple export tasks per script.
 - **Node editor QoL.** Fuzzy-search add menu (type "cyl"), minimap for big
@@ -246,6 +241,13 @@ library -> MCP server on the live session):
 
 
 ## Done
+- 2026-07-13 — interval-pruned contour evaluation: a quadtree of
+  eval_i calls proves regions empty/solid before sampling; culled
+  interiors take sign sentinels while a one-sample evaluated ring
+  guarantees no sentinel ever interpolates against an opposite sign.
+  Sparse content at high res: ~9M-sample grid in 0.09s (was seconds);
+  dense content unchanged wall, ~35%% less CPU. All contour tests
+  bit-stable.
 - 2026-07-13 — agent-surface layer 2: `--describe-nodes` dumps the
   node library as JSON (165 nodes: name/title/category, typed inputs
   with defaults, outputs; static text parse, nothing evaluated) and
