@@ -503,3 +503,16 @@ MPR-style GPU renderer (L). Marquee (L): adaptive manifold DC mesher
   construction (Delaunay tetrahedralization), sidestepping manifold
   DC's thin-feature and self-intersection warts. He asked. We're
   considering it. The audacity of it all.
+
+## Foreign project import (2026-07-13) — see doc/FOREIGN-IMPORT.md
+
+Yes: libfive/Fidget projects can become .sb files. Fidget .vm is a
+flat tape that maps onto our math strings with 100% op coverage on
+every shipped model (measured: worst string 74 KB, worst parse depth
+677 vs our 4096 stack — no size wall). Build order: [S] --import-vm
+converter (~200 lines, ships prospero/bear/menger into Stibium day
+one); [S-M] libfive .io via its own tree-dump API (their interpreter
+does the hard part — never parse Scheme); [M] straight-line transpile
+to parametric script nodes once the stdlib raid lands. Exotic ops:
+ceil/round/recip/nth_root rewrite algebraically; compare/and/or/
+nanfill reject with a clear error (unused in the real corpus).
