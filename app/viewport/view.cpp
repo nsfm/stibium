@@ -8,6 +8,8 @@
 #include <QMenu>
 #include <QPropertyAnimation>
 
+#include <QSlider>
+
 #include "viewport/view.h"
 #include "viewport/scene.h"
 #include "viewport/image.h"
@@ -282,7 +284,7 @@ void ViewportView::updateLightFromGizmo(QPointF scene_pos)
 void ViewportView::update()
 {
     scene()->invalidate();
-    emit(changed(getMatrix(), geometry()));
+    emit(changed(getMatrix(), geometry(), section));
 
     emit(centerChanged(center));
     emit(scaleChanged(scale));
@@ -309,7 +311,7 @@ void ViewportView::setScale(float s)
     // Update the view without calling ViewportView::update
     // (because that would lead to infinite recursion)
     scene()->invalidate();
-    emit(changed(getMatrix(), geometry()));
+    emit(changed(getMatrix(), geometry(), section));
 }
 
 void ViewportView::setCenter(QVector3D c)
@@ -319,7 +321,7 @@ void ViewportView::setCenter(QVector3D c)
     // Update the view without calling ViewportView::update
     // (because that would lead to infinite recursion)
     scene()->invalidate();
-    emit(changed(getMatrix(), geometry()));
+    emit(changed(getMatrix(), geometry(), section));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -437,6 +439,9 @@ void ViewportView::wheelEvent(QWheelEvent* event)
 
 void ViewportView::resizeEvent(QResizeEvent* e)
 {
+    if (section_slider)
+        section_slider->setGeometry(width() - 28, 10, 18, height() - 20);
+
     Q_UNUSED(e);
     setSceneRect(-width()/2, -height()/2, width(), height());
 }
@@ -452,6 +457,44 @@ void ViewportView::keyPressEvent(QKeyEvent* event)
         (event->modifiers() & Qt::ShiftModifier))
     {
         openAddMenu();
+    }
+    else if (event->key() == Qt::Key_X && !event->modifiers())
+    {
+        toggleSection();
+    }
+}
+
+void ViewportView::setSection(float s)
+{
+    section = s;
+    scene()->invalidate();
+    emit(changed(getMatrix(), geometry(), section));
+}
+
+void ViewportView::toggleSection()
+{
+    if (!section_slider)
+    {
+        section_slider = new QSlider(Qt::Vertical, this);
+        section_slider->setRange(1, 100);
+        section_slider->setValue(100);
+        section_slider->setToolTip(
+                "Section view: cuts the model on a screen-parallel\n"
+                "plane (rotate the view to choose the cut direction)");
+        connect(section_slider, &QSlider::valueChanged,
+                [this](int v){ this->setSection(v / 100.0f); });
+        section_slider->setGeometry(width() - 28, 10, 18, height() - 20);
+    }
+
+    if (section_slider->isVisible())
+    {
+        section_slider->hide();
+        setSection(1);
+    }
+    else
+    {
+        section_slider->show();
+        setSection(section_slider->value() / 100.0f);
     }
 }
 

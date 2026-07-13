@@ -9,8 +9,8 @@
 #include "fab/tree/render.h"
 
 RenderTask::RenderTask(RenderInstance* parent, PyObject* s, QMatrix4x4 M,
-                       QVector2D clip, int refinement)
-    : shape(s), M(M), clip(clip), refinement(refinement)
+                       QVector2D clip, int refinement, float section)
+    : shape(s), M(M), clip(clip), refinement(refinement), section(section)
 {
     Py_INCREF(shape);
 
@@ -34,7 +34,7 @@ void RenderTask::halt()
 RenderTask* RenderTask::getNext(RenderInstance* parent) const
 {
     return refinement > 1
-        ? new RenderTask(parent, shape, M, clip, refinement - 1)
+        ? new RenderTask(parent, shape, M, clip, refinement - 1, section)
         : NULL;
 }
 
@@ -201,7 +201,11 @@ Bounds RenderTask::render(Shape* shape, Bounds b_, float scale)
     const float ymin = -M(1,3) - clip.y() / 2;
     const float ymax = -M(1,3) + clip.y() / 2;
     const float zmin = -M(2,3) - fmax(clip.x(), clip.y()) / 2;
-    const float zmax = -M(2,3) + fmax(clip.x(), clip.y()) / 2;
+    float zmax = -M(2,3) + fmax(clip.x(), clip.y()) / 2;
+
+    // Section view: pull the near clip plane down through the slab,
+    // exposing interiors on a screen-parallel cut
+    zmax -= (1 - section) * (zmax - zmin);
 
     Bounds b(fmax(xmin, b_.xmin), fmax(ymin, b_.ymin),  fmax(zmin, b_.zmin),
              fmin(xmax, b_.xmax), fmin(ymax, b_.ymax),  fmin(zmax, b_.zmax));

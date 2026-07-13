@@ -6,10 +6,6 @@ were named for the element symbol all along).
 
 ## Tier 1 — would die on these hills
 
-- **Cross-section preview.** Draggable slice plane in the viewport showing
-  part interiors (walls, voids, clearances). Nearly free in f-rep — render
-  the field on one plane. Formalizes the accidental z-clip slicing the 2D
-  view path already does (see task.cpp screen-space z clipping).
 - **Mesh import as a distance field.** STL/3MF in → sampled voxel SDF node
   (trilinear interpolation). Design around existing parts: PCB models,
   scans, vendor STEP-derived meshes. Upstream's most-requested feature
@@ -174,6 +170,15 @@ library -> MCP server on the live session):
 
 
 ## Done
+- 2026-07-13 — cross-section preview: press X in any viewport for a
+  section slider that pulls a screen-parallel cut plane through the
+  model (rotate the view to choose the cut direction; hiding the
+  slider restores the full model). Formalizes the accidental z-clip
+  workaround — which was "wandering" with rotation because the clip
+  slab is centered on the view center's rotated z, not a bug. Also
+  `--render --section F` headlessly. Cut faces shade darker than
+  exterior skin (field gradient at the plane), so interiors read
+  clearly.
 - 2026-07-13 — protocol 7: output datums serialize as uid/name/type
   stubs (bare sigil, no geometry repr — scripts regenerate values on
   load; the entry only anchors wire uids). Files 8-35% smaller, diffs

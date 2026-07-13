@@ -37,7 +37,7 @@ public slots:
     /*
      *  Sets M to the current viewport transform matrix
      */
-    void viewChanged(QMatrix4x4 m, QRect clip);
+    void viewChanged(QMatrix4x4 m, QRect clip, float section);
 
     /*
      *  When a render task finishes, load in its image and start the next
@@ -58,6 +58,9 @@ protected:
 
     /*  Set to true if this instance represents a subdatum  */
     bool sub;
+
+    /*  Section fraction from the view (see ViewportView)  */
+    float section=1;
 
     /*  Set to true if the datum or viewport are gone  */
     bool orphan=false;
