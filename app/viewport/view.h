@@ -51,6 +51,14 @@ public:
     void mouseReleaseEvent(QMouseEvent* event) override;
 
     /*
+     *  Key-light gizmo (Enhanced render mode): a small trackball disc
+     *  in the corner; dragging the sun dot re-aims the light.
+     */
+    QPointF lightGizmoCenter() const;
+    void drawLightGizmo(QPainter* painter) const;
+    void updateLightFromGizmo(QPointF scene_pos);
+
+    /*
      *  On mouse wheel, scroll
      */
     void wheelEvent(QWheelEvent* event) override;
@@ -195,6 +203,7 @@ protected:
     QPoint current_pos;
 
     /*  Mouse coordinates at which the click started  */
+    bool gizmo_drag=false;
     QPointF click_pos;
 
     /*  Mouse click coordinates in the world's coordinate frame  */
