@@ -176,10 +176,6 @@ a GUI so agentic tools can contribute to modeling cleanly:
   dangling proxies during batch removal. Needs a repro harness /
   ASan session like the detect-features hunt.
 
-- `v2parse()` leaks scanner/parser/locals on the parse-failure early
-  return (v2parser.cpp) — pre-existing, low priority.
-- `RenderTask::render()` missing-field-initializer warnings for Region.
-- STL writer counts via `sizeof(float)` for an int — works, fragile.
 
 ## Done
 - 2026-07-12 — 3MF export (new default; STL stays). Minimal streaming

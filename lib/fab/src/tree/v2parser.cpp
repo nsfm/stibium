@@ -65,18 +65,19 @@ bool v2parse(Node **result, const char* input, Node* X, Node* Y, Node *Z, NodeCa
     } while (lexCode > 0 &&  locals->valid);
 
 
-    if (-1 == lexCode || !locals->valid) {
+    const bool ok = (-1 != lexCode && locals->valid);
+
+    if (ok) {
+        *result = locals->head;
+
+        #ifdef PARSEDEBUG
+            printf(ANSI_COLOR_GREEN "Parse success:\t" ANSI_COLOR_RESET);
+            print_node(*result);
+            printf("\n");
+        #endif
+    } else {
         printf(ANSI_COLOR_RED "Parse failure on input of:" ANSI_COLOR_RESET " '%s'\n", input);
-        return false;
     }
-
-    *result = locals->head;
-
-    #ifdef PARSEDEBUG
-        printf(ANSI_COLOR_GREEN "Parse success:\t" ANSI_COLOR_RESET);
-        print_node(*result);
-        printf("\n");
-    #endif
 
     yy_delete_buffer(bufferState, scanner);
     yylex_destroy(scanner);
@@ -84,5 +85,5 @@ bool v2parse(Node **result, const char* input, Node* X, Node* Y, Node *Z, NodeCa
     delete locals->nodestack;
     free(locals);
 
-    return true;
+    return ok;
 }

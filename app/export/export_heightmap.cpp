@@ -75,12 +75,10 @@ void ExportHeightmapWorker::run()
 
 void ExportHeightmapWorker::async()
 {
-    Region r =  (Region){
-        .imin=0, .jmin=0, .kmin=0,
-        .ni=uint32_t((bounds.xmax - bounds.xmin) * _resolution),
-        .nj=uint32_t((bounds.ymax - bounds.ymin) * _resolution),
-        .nk=1
-    };
+    Region r = {};
+    r.ni = uint32_t((bounds.xmax - bounds.xmin) * _resolution);
+    r.nj = uint32_t((bounds.ymax - bounds.ymin) * _resolution);
+    r.nk = 1;
 
     if (!std::isinf(bounds.zmin) && !std::isinf(bounds.zmax))
         r.nk = uint32_t((bounds.zmax - bounds.zmin) * _resolution);
