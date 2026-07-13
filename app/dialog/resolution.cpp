@@ -81,12 +81,8 @@ ResolutionDialog::ResolutionDialog(Bounds bounds, bool dimensions, bool has_unit
 
 void ResolutionDialog::onValueChanged(int i)
 {
-    ui->export_size->setText(QString("%1 x %2 x %3")
-            .arg(int((bounds.xmax - bounds.xmin) * i))
-            .arg(int((bounds.ymax - bounds.ymin) * i))
-            .arg(z_bounded
-                    ? int((bounds.zmax - bounds.zmin) * i)
-                    : 1));
+    // (export_size shows the model's real dimensions, set once in
+    // the constructor - resolution doesn't change them)
 
     // Sampling can miss details thinner than ~2 voxels; surface the
     // implied minimum feature size so the tradeoff is visible
