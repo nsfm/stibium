@@ -3,7 +3,7 @@ import fab
 title('Import Mesh')
 
 input('filename', str)
-input('voxels_per_unit', float, 7)
+input('voxels_per_unit', float, 2)
 input('sha256', str)
 
 output('shape', fab.shapes.import_mesh(filename, voxels_per_unit, sha256))

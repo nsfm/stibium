@@ -3182,7 +3182,7 @@ def iterate_scaled(part, n, factor, dx=0, dy=0, x0=0, y0=0):
 ################################################################################
 # Mesh import
 
-def import_mesh(filename, voxels_per_unit=7.0, sha256=''):
+def import_mesh(filename, voxels_per_unit=2.0, sha256=''):
     """ Imports an STL mesh as a solid distance field.
 
         The mesh is sampled onto a signed distance grid (sign from
