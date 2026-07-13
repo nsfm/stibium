@@ -10,6 +10,8 @@
 
 #include "app/app.h"
 #include "app/colors.h"
+#include <QRegularExpression>
+
 #include "canvas/canvas_view.h"
 #include "canvas/scene.h"
 #include "canvas/add_node_popup.h"
@@ -249,6 +251,8 @@ void CanvasView::drawForeground(QPainter* painter, const QRectF& rect)
 {
     Q_UNUSED(rect);
 
+    drawFloatingLabels(painter);
+
     if (selecting)
     {
         auto fill = Colors::amber;
@@ -487,6 +491,133 @@ void CanvasView::zoomTo(Node* n)
 
     a->start(QPropertyAnimation::DeleteWhenStopped);
     b->start(QPropertyAnimation::DeleteWhenStopped);
+}
+
+// Floating labels fade in below this zoom (and reach full opacity
+// at half of it): the LOD cards' scene-scaled names are unreadable
+// by then, so screen-fixed labels take over, web-map style.
+static constexpr float FLOATING_LABEL_ZOOM = 0.18f;
+
+void CanvasView::drawFloatingLabels(QPainter* painter)
+{
+    const float zoom = transform().m11();
+    if (zoom >= FLOATING_LABEL_ZOOM)
+        return;
+
+    const float alpha = fmin(
+            1.f, 2 * (FLOATING_LABEL_ZOOM - zoom) / FLOATING_LABEL_ZOOM);
+
+    struct Label {
+        QString name;
+        QPointF anchor;     // node center, viewport coords
+        bool custom;
+    };
+
+    // Default names are single letter + number (a0, t12, ...);
+    // anything else was named by a person and gets priority.
+    static const QRegularExpression default_name("^[a-z]\\d+$");
+
+    std::vector<Label> labels;
+    const QRectF vp = viewport()->rect();
+    for (auto i : scene()->items())
+    {
+        auto frame = dynamic_cast<InspectorFrame*>(i);
+        if (!frame)
+            continue;
+        const auto center = mapFromScene(frame->sceneBoundingRect().center());
+        if (!vp.contains(center))
+            continue;
+        const auto name = QString::fromStdString(frame->getNode()->getName());
+        labels.push_back({name, QPointF(center),
+                          !default_name.match(name).hasMatch()});
+    }
+
+    // Custom names place first; ties break top-to-bottom for a
+    // deterministic layout while panning.
+    std::sort(labels.begin(), labels.end(),
+              [](const Label& a, const Label& b) {
+                  if (a.custom != b.custom)
+                      return a.custom;
+                  if (a.anchor.y() != b.anchor.y())
+                      return a.anchor.y() < b.anchor.y();
+                  return a.anchor.x() < b.anchor.x();
+              });
+
+    painter->save();
+    painter->resetTransform();
+    painter->setRenderHint(QPainter::Antialiasing);
+
+    QFont font = painter->font();
+    font.setPixelSize(11);
+    painter->setFont(font);
+    const QFontMetricsF fm(font);
+
+    std::vector<QRectF> placed;
+    placed.reserve(labels.size());
+    size_t drawn = 0;
+
+    for (const auto& l : labels)
+    {
+        if (drawn > 150)
+            break;
+
+        const QSizeF size(fm.horizontalAdvance(l.name) + 10,
+                          fm.height() + 4);
+
+        // Try above the node, then below, then progressively further
+        // up and down, keeping the label near its anchor.
+        QRectF rect;
+        bool ok = false;
+        for (int attempt = 0; attempt < 6 && !ok; ++attempt)
+        {
+            const float dy = (attempt % 2 ? 1 : -1)
+                           * (12 + (attempt / 2) * (size.height() + 2));
+            rect = QRectF(l.anchor + QPointF(-size.width() / 2,
+                                             dy - size.height() / 2),
+                          size);
+            ok = true;
+            for (const auto& p : placed)
+                if (rect.intersects(p))
+                {
+                    ok = false;
+                    break;
+                }
+        }
+
+        // Custom names always draw (last attempt stands even if it
+        // overlaps); default names only draw if room was found.
+        if (!ok && !l.custom)
+            continue;
+        placed.push_back(rect);
+        drawn++;
+
+        // Leader line when the label was pushed away from its node
+        const QPointF join(rect.center().x(),
+                           rect.center().y() < l.anchor.y()
+                               ? rect.bottom() : rect.top());
+        if (QLineF(join, l.anchor).length() > 18)
+        {
+            auto leader = Colors::base04;
+            leader.setAlphaF(0.5 * alpha);
+            painter->setPen(QPen(leader, 1));
+            painter->drawLine(join, l.anchor);
+        }
+
+        auto bg = Colors::base01;
+        bg.setAlphaF(0.85 * alpha);
+        auto edge = l.custom ? Colors::amber : Colors::base03;
+        edge.setAlphaF((l.custom ? 0.9 : 0.6) * alpha);
+        auto text = l.custom ? Colors::base07 : Colors::base05;
+        text.setAlphaF(alpha);
+
+        painter->setPen(QPen(edge, 1));
+        painter->setBrush(bg);
+        painter->drawRoundedRect(rect, 4, 4);
+        painter->setPen(text);
+        painter->drawText(rect, Qt::AlignCenter, l.name);
+    }
+
+    painter->restore();
 }
 
 void CanvasView::updateLOD()
