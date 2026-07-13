@@ -23,7 +23,7 @@
 // 5 -> 6: (refactored graph engine)
 //   Store scripts and names at node level
 //   Remove explicit connections array
-int SceneSerializer::PROTOCOL_VERSION = 6;
+int SceneSerializer::PROTOCOL_VERSION = 7;
 
 QJsonObject SceneSerializer::run(Graph* root, CanvasInfo* info)
 {
@@ -87,7 +87,16 @@ QJsonObject SceneSerializer::serializeDatum(Datum* datum, CanvasInfo* info)
 
     out["name"] = QString::fromStdString(datum->getName());
     out["uid"] = int(datum->getUID());
-    out["expr"] = QString::fromStdString(datum->getText());
+
+    // Output datums keep their sigil (and their uid, which wires
+    // reference), but not their value: it's a repr of computed
+    // geometry that the node's script regenerates on load anyway.
+    // Dropping it makes files smaller and diffs meaningful.
+    auto expr = datum->getText();
+    if (!expr.empty() && (expr.front() == Datum::SIGIL_OUTPUT ||
+                          expr.front() == Datum::SIGIL_SUBGRAPH_OUTPUT))
+        expr = expr.substr(0, 1);
+    out["expr"] = QString::fromStdString(expr);
 
     auto t = PyObject_GetAttrString((PyObject*)datum->getType(), "__name__");
     auto m = PyObject_GetAttrString((PyObject*)datum->getType(), "__module__");

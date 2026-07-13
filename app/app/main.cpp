@@ -22,6 +22,10 @@
 #include "graph/proxy/graph.h"
 #include "graph/proxy/node.h"
 #include "export/export_worker.h"
+#include "graph/serialize/serializer.h"
+
+#include <QFile>
+#include <QJsonDocument>
 #include "viewport/render/task.h"
 #include "fab/fab.h"
 #include "fab/types/shape.h"
@@ -250,6 +254,26 @@ static int runHeadless(App& app, bool validate_only,
                                         detect_features) ? 0 : 1;
 }
 
+/*
+ *  Implements --resave: writes the loaded graph back out in the
+ *  current protocol.  Load + resave is also the canonicalizing
+ *  round-trip: a second resave of the output is byte-identical.
+ */
+static int resaveHeadless(App& app, const QString& out)
+{
+    QFile file(out);
+    if (!file.open(QIODevice::WriteOnly))
+    {
+        fprintf(stderr, "resave: could not write %s\n",
+                out.toLocal8Bit().constData());
+        return 1;
+    }
+    auto i = app.getProxy()->canvasInfo();
+    file.write(QJsonDocument(
+                SceneSerializer::run(app.getGraph(), &i)).toJson());
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
     {   // Set the default OpenGL version to be 2.1 with sample buffers
@@ -263,7 +287,8 @@ int main(int argc, char *argv[])
     for (int i = 1; i < argc; ++i)
     {
         const QByteArray arg(argv[i]);
-        if (arg == "--export" || arg == "--validate")
+        if (arg == "--export" || arg == "--validate" ||
+            arg == "--render" || arg == "--resave")
         {
             if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM"))
                 qputenv("QT_QPA_PLATFORM", "offscreen");
@@ -371,6 +396,11 @@ int main(int argc, char *argv[])
                 "Longest image side in pixels for --render when "
                 "--resolution isn't given (default 512)", "N", "512");
         parser.addOption(sizeOpt);
+        QCommandLineOption resaveOpt("resave",
+                "Load the file and save it back out as FILE in the "
+                "current protocol (batch migration / canonicalizing), "
+                "then exit", "FILE");
+        parser.addOption(resaveOpt);
         QCommandLineOption validateOpt("validate",
                 "Load the file, report script and datum errors to "
                 "stderr, and exit (0 = valid)");
@@ -381,6 +411,7 @@ int main(int argc, char *argv[])
 
         const bool headless = parser.isSet(exportOpt) ||
                               parser.isSet(renderOpt) ||
+                              parser.isSet(resaveOpt) ||
                               parser.isSet(validateOpt);
 
         auto args = parser.positionalArguments();
@@ -414,6 +445,8 @@ int main(int argc, char *argv[])
                 code = renderHeadless(app, parser.value(renderOpt), res,
                                       parser.value(viewOpt),
                                       parser.value(sizeOpt).toInt());
+            if (code == 0 && parser.isSet(resaveOpt))
+                code = resaveHeadless(app, parser.value(resaveOpt));
             // Return (rather than exit()) so Qt tears down cleanly
             return code;
         }
