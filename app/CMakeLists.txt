@@ -70,9 +70,11 @@ set(SRC_FILES
     undo/undo_stack.cpp
     dialog/exporting.cpp
     dialog/resolution.cpp
+    dialog/render_image_dialog.cpp
     export/export_mesh.cpp
     export/export_heightmap.cpp
     export/export_svg.cpp
+    export/export_image.cpp
     export/export_worker.cpp
     viewport/scene.cpp
     viewport/gl.cpp
@@ -185,6 +187,33 @@ target_include_directories(${STIBIUM_APP} SYSTEM PRIVATE
 )
 
 ################################################################################
+
+################################################################################
+# App-level integration tests: every example must load, evaluate,
+# render, and round-trip through the serializer deterministically.
+if (NOT APPLE)
+    foreach(example csg gear ring hi label)
+        add_test(NAME app_validate_${example}
+                 COMMAND ${STIBIUM_APP} --validate
+                         ${CMAKE_SOURCE_DIR}/examples/${example}.sb)
+        add_test(NAME app_render_${example}
+                 COMMAND ${STIBIUM_APP}
+                         --render ${CMAKE_CURRENT_BINARY_DIR}/ctest_${example}.png
+                         --size 128
+                         ${CMAKE_SOURCE_DIR}/examples/${example}.sb)
+        add_test(NAME app_resave_roundtrip_${example}
+                 COMMAND bash -c "\
+$<TARGET_FILE:${STIBIUM_APP}> --resave ${CMAKE_CURRENT_BINARY_DIR}/ctest_rt1_${example}.sb ${CMAKE_SOURCE_DIR}/examples/${example}.sb && \
+$<TARGET_FILE:${STIBIUM_APP}> --resave ${CMAKE_CURRENT_BINARY_DIR}/ctest_rt2_${example}.sb ${CMAKE_CURRENT_BINARY_DIR}/ctest_rt1_${example}.sb && \
+$<TARGET_FILE:${STIBIUM_APP}> --validate ${CMAKE_CURRENT_BINARY_DIR}/ctest_rt1_${example}.sb && \
+cmp ${CMAKE_CURRENT_BINARY_DIR}/ctest_rt1_${example}.sb ${CMAKE_CURRENT_BINARY_DIR}/ctest_rt2_${example}.sb")
+        set_tests_properties(
+                app_validate_${example}
+                app_render_${example}
+                app_resave_roundtrip_${example}
+                PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endforeach()
+endif()
 
 set_property(TARGET ${STIBIUM_APP} PROPERTY CXX_STANDARD 17)
 set_property(TARGET ${STIBIUM_APP} PROPERTY C_STANDARD 99)

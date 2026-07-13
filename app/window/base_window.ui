@@ -79,6 +79,12 @@
     <addaction name="actionSectionSlider"/>
     <addaction name="actionLightControl"/>
    </widget>
+   <widget class="QMenu" name="menuRender">
+    <property name="title">
+     <string>Render</string>
+    </property>
+    <addaction name="actionExportImage"/>
+   </widget>
    <widget class="QMenu" name="menuWindow">
     <property name="title">
      <string>Window</string>
@@ -110,6 +116,7 @@
    <addaction name="menuWindow"/>
    <addaction name="menuHelp"/>
    <addaction name="menuReference"/>
+   <addaction name="menuRender"/>
   </widget>
   <action name="actionNew">
    <property name="text">
@@ -235,6 +242,11 @@
    </property>
    <property name="text">
     <string>Bounding boxes</string>
+   </property>
+  </action>
+  <action name="actionExportImage">
+   <property name="text">
+    <string>Export image...</string>
    </property>
   </action>
   <action name="actionSectionSlider">

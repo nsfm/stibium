@@ -201,11 +201,6 @@ library -> MCP server on the live session):
 
 ## Distribution / project health
 
-- App-level integration tests via the headless verbs: every
-  example/*.sb as CTest cases (`--validate` passes, `--resave` twice
-  is byte-identical, `--render` succeeds). The verbs finally make CI
-  assert real behavior - load, evaluate, save, render - not just
-  compilation.
 - freedesktop thumbnailer: .thumbnailer file + shared-mime-info XML
   for .sb in deploy/ - file managers preview models via `--render`.
   Cheap and delightful.
@@ -246,6 +241,12 @@ library -> MCP server on the live session):
 
 
 ## Done
+- 2026-07-13 — app-level CTest: every example runs --validate,
+  --render, and a double --resave byte-compare (17 tests total with
+  the lib suites, ~7s). Plus Render ▸ Export image in viewport
+  windows: view-matched orientation, current section cut, size and
+  transparency options, rendered through the same ImageExport core
+  as the CLI (one code path, no GL).
 - 2026-07-13 — viewport render parallelism: render16_mt/shaded8_mt
   chunk the region xy-only (image cells stay disjoint; z intact so
   depth is exact) across cloned trees. Wired into the viewport, the

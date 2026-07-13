@@ -24,6 +24,7 @@ CanvasWindow::CanvasWindow(CanvasView* view)
 
     ui->menuView->deleteLater();
     ui->menuReference->deleteLater();
+    ui->menuRender->deleteLater();
 
     show();
 }

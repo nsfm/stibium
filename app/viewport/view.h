@@ -79,6 +79,11 @@ public:
     void setSection(float s);
 
     /*
+     *  Current section fraction (1 = no cut)
+     */
+    float getSection() const { return section; }
+
+    /*
      *  Shows / hides the section slider; hiding restores the full
      *  model.  On by default (View menu > Section slider).
      */
