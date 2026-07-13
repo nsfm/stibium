@@ -76,6 +76,8 @@
     <addaction name="actionEnhanced"/>
     <addaction name="separator"/>
     <addaction name="actionHideUI"/>
+    <addaction name="actionSectionSlider"/>
+    <addaction name="actionLightControl"/>
    </widget>
    <widget class="QMenu" name="menuWindow">
     <property name="title">
@@ -229,7 +231,29 @@
     <bool>true</bool>
    </property>
    <property name="text">
-    <string>Hide UI</string>
+    <string>Hide bounding boxes</string>
+   </property>
+  </action>
+  <action name="actionSectionSlider">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Section slider</string>
+   </property>
+  </action>
+  <action name="actionLightControl">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Light control</string>
    </property>
   </action>
   <action name="actionShapes">

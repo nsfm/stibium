@@ -5,6 +5,8 @@
 
 #include <QActionGroup>
 
+#include <QToolButton>
+
 #include "window/base_viewport_window.h"
 
 BaseViewportWindow::BaseViewportWindow(QList<ViewportView*> views)
@@ -33,8 +35,19 @@ BaseViewportWindow::BaseViewportWindow(QList<ViewportView*> views)
                 [=]{ view->scene()->invalidate(); });
         connect(ui->actionHeightmap, &QAction::triggered,
                 [=]{ view->scene()->invalidate(); });
-        connect(ui->actionHideUI, &QAction::triggered,
+        connect(ui->actionHideUI, &QAction::toggled,
                 [=](bool b){ view->hideUI(b); });
+        connect(ui->actionSectionSlider, &QAction::toggled,
+                [=](bool b){ view->setSectionVisible(b); });
+        connect(ui->actionLightControl, &QAction::toggled,
+                [=](bool b){ view->setLightGizmoVisible(b); });
+
+        // The viewport's eye button and the menu action stay in sync
+        // (setChecked only emits toggled on change, so no feedback loop)
+        connect(view->hideUIButton(), &QToolButton::toggled,
+                ui->actionHideUI, &QAction::setChecked);
+        connect(ui->actionHideUI, &QAction::toggled,
+                view->hideUIButton(), &QToolButton::setChecked);
     }
 
     show();
