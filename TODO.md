@@ -13,6 +13,11 @@ were named for the element symbol all along).
 
 ## Tier 2 — strong wants
 
+- **Antialiased render output.** The raymarch samples once per pixel,
+  so exported images have hard staircase edges. Cheapest win:
+  supersample (render at 2x, smooth-downscale - 4x cost, so a dialog
+  checkbox); nicer later: edge-aware refinement only where depth or
+  normals step.
 - **Render menu growth.** Backgrounds beyond transparent/dark (solid
   color picker, gradients); an exact-viewport-crop option (match pan/
   zoom framing, not just orientation); and the future residents:

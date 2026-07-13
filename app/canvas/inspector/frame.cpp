@@ -96,20 +96,22 @@ void InspectorFrame::paint(QPainter *painter,
 
     painter->setRenderHint(QPainter::Antialiasing);
 
-    // Zoomed way out: draw a skeleton card instead of the full body.
-    // No text (the canvas's floating labels own naming out here) -
-    // just the type tint plus datum-row stubs, react-skeleton style,
-    // so a node's shape reads without its detail.
+    // Zoomed way out: draw a skeleton card echoing the full node's
+    // anatomy - type-tinted title band (slightly enlarged), body in a
+    // much darker shade of the same tint, light stub lines where the
+    // datum rows live. Shape without detail, react-skeleton style;
+    // naming is the floating labels' job out here.
     if (low_detail)
     {
         const float px = painter->worldTransform().m11();  // screen px per unit
+        const QColor tint = typeTint();
 
         // Sub-8px cards: a single flat rect is all anyone can see
         if (r.height() * px < 8)
         {
             painter->setRenderHint(QPainter::Antialiasing, false);
             painter->setPen(Qt::NoPen);
-            painter->setBrush(typeTint());
+            painter->setBrush(tint);
             painter->drawRect(r);
             if (isSelected())
             {
@@ -120,29 +122,45 @@ void InspectorFrame::paint(QPainter *painter,
             return;
         }
 
+        // (No shadows out here: at 150+ cards they're a per-frame
+        // fill pass nobody can see)
         painter->setPen(Qt::NoPen);
-        painter->setBrush(QColor(0, 0, 0, 40));
-        painter->drawRoundedRect(r.translated(0, 3), 10, 10);
-        painter->setBrush(typeTint());
+
+        // Body: the tint, pulled way down
+        painter->setBrush(Colors::adjust(tint, 1 / 2.6f));
         painter->drawRoundedRect(r, 10, 10);
 
-        // Datum-row stubs: one soft bar per (visible) input row,
-        // skipped when rows would land under ~3 screen pixels
+        // Title band, rounded only on top, a touch taller than life
+        const float band_h = fmin(r.height() * 0.5f,
+                                  fmax(24.f, r.height() * 0.22f));
+        {
+            const QRectF band_r(r.left(), r.top(), r.width(), band_h);
+            QPainterPath band;
+            band.setFillRule(Qt::WindingFill);
+            band.addRoundedRect(band_r, 10, 10);
+            band.addRect(band_r.adjusted(0, band_h / 2, 0, 0));
+            painter->setBrush(tint);
+            painter->drawPath(band.simplified());
+        }
+
+        // Datum-row stubs: light tint bars on the dark body,
+        // skipped when they'd land under ~3 screen pixels
         int rows = 0;
         for (auto d : node->childDatums())
             if (!d->getName().empty() && d->getName().front() != '_')
                 rows++;
-        rows = std::min(rows, 6);
         const float row_h = 8;
         const float row_gap = 6;
-        if (rows > 0 && (row_h + row_gap) * px >= 3 &&
-            rows * (row_h + row_gap) < r.height() - 16)
+        const float body_top = r.top() + band_h + 10;
+        rows = std::min({rows, 6,
+                         int((r.bottom() - 8 - body_top) / (row_h + row_gap))});
+        if (rows > 0 && (row_h + row_gap) * px >= 3)
         {
-            auto stub = Colors::base06;
-            stub.setAlphaF(0.25);
+            auto stub = Colors::adjust(tint, 1.6f);
+            stub.setAlphaF(0.55);
             painter->setBrush(stub);
             const float x0 = r.left() + 10;
-            float y = r.top() + 12;
+            float y = body_top;
             for (int i = 0; i < rows; ++i)
             {
                 // Vary widths a touch so it reads as content, not bars
@@ -154,7 +172,7 @@ void InspectorFrame::paint(QPainter *painter,
 
         painter->setBrush(Qt::NoBrush);
         painter->setPen(isSelected() ? QPen(Colors::amber, 2)
-                                     : QPen(Colors::base03, 1));
+                                     : QPen(Colors::base02, 1));
         painter->drawRoundedRect(r, 10, 10);
         return;
     }
