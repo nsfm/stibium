@@ -53,11 +53,6 @@ were named for the element symbol all along).
   skip empty space entirely. For sparse masks at high resolution
   (most photolithography content is mostly empty), plausibly another
   5-10x on top of the threading.
-- **`--describe-nodes` + `--render --node NAME`.** Layer 2 of
-  doc/AGENT-SURFACE.md and the visual-bisection verb: the node
-  library as JSON (same generator can feed the wiki), and per-node
-  renders so agents (and humans) can see intermediate geometry
-  when the final shape is wrong.
 - **Multi-shape export.** One click → N files (print plates, assemblies).
   The export hook currently hard-rejects multiple export tasks per script.
 - **Node editor QoL.** Fuzzy-search add menu (type "cyl"), minimap for big
@@ -251,6 +246,13 @@ library -> MCP server on the live session):
 
 
 ## Done
+- 2026-07-13 — agent-surface layer 2: `--describe-nodes` dumps the
+  node library as JSON (165 nodes: name/title/category, typed inputs
+  with defaults, outputs; static text parse, nothing evaluated) and
+  `--render --node NAME` renders one node's shape outputs alone even
+  when they feed other nodes — visual bisection for wrong models.
+  Also: undo stack now clears on every file load (File ▸ Open never
+  cleared it — a long-standing undo-into-freed-graph crash).
 - 2026-07-13 — floating node labels: below ~18% zoom, constant-size
   labels fade in near nodes (viewport-space, drawn in the canvas
   foreground pass). Custom-named nodes place first with amber edges;

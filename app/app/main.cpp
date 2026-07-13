@@ -34,11 +34,93 @@
 #include "fab/tree/render_mt.h"
 #include "fab/util/region.h"
 
+#include <QDirIterator>
 #include <QImage>
+#include <QJsonArray>
 #include <QMatrix4x4>
 
 #include <cstring>
 #include <memory>
+
+/*
+ *  Implements --describe-nodes: dumps the node library as JSON
+ *  (name, title, category, inputs with types and defaults, outputs).
+ *  Static text parse of the .node scripts - nothing is evaluated.
+ */
+static int describeNodes(App& app)
+{
+    static const QList<QRegularExpression> title_res = {
+        QRegularExpression("title\\('+([^']+)'+\\)"),
+        QRegularExpression("title\\(\"+([^\"]+)\"+\\)")};
+    static const QRegularExpression input_re(
+        "^\\s*input\\('([^']+)'\\s*,\\s*([A-Za-z_][A-Za-z0-9_.]*)"
+        "(?:\\s*,\\s*(.*))?\\)\\s*$");
+    static const QRegularExpression output_re(
+        "^\\s*output\\('([^']+)'");
+
+    QJsonArray out;
+    for (auto path : app.nodePaths())
+    {
+        QDirIterator itr(path, QDirIterator::Subdirectories);
+        while (itr.hasNext())
+        {
+            const auto fname = itr.next();
+            if (!fname.endsWith(".node"))
+                continue;
+            QFile file(fname);
+            if (!file.open(QIODevice::ReadOnly))
+                continue;
+            const QString txt = QTextStream(&file).readAll();
+
+            auto split = fname.split('/');
+            while (!split.isEmpty() && split.first() != "nodes")
+                split.removeFirst();
+            if (!split.isEmpty())
+                split.removeFirst();
+            const QString base = split.isEmpty()
+                ? fname : QString(split.takeLast()).replace(".node", "");
+            const QString category = split.join("/");
+
+            QString title = base;
+            for (const auto& re : title_res)
+            {
+                const auto match = re.match(txt);
+                if (match.hasMatch())
+                    title = match.captured(1);
+            }
+
+            QJsonArray inputs, outputs;
+            for (const auto& line : txt.split('\n'))
+            {
+                if (auto match = input_re.match(line); match.hasMatch())
+                {
+                    QJsonObject in;
+                    in["name"] = match.captured(1);
+                    in["type"] = match.captured(2);
+                    auto def = match.captured(3).trimmed();
+                    if (!def.isEmpty())
+                        in["default"] = def;
+                    inputs.append(in);
+                }
+                else if (auto o = output_re.match(line); o.hasMatch())
+                {
+                    outputs.append(o.captured(1));
+                }
+            }
+
+            QJsonObject node;
+            node["name"] = base;
+            node["title"] = title;
+            node["category"] = category;
+            node["inputs"] = inputs;
+            node["outputs"] = outputs;
+            out.append(node);
+        }
+    }
+
+    printf("%s", QJsonDocument(out).toJson().constData());
+    return 0;
+}
 
 /*
  *  Implements --validate and --export: reports script/datum errors,
@@ -133,9 +215,11 @@ static int resaveHeadless(App& app, const QString& out)
  *  Implements --render: canned views over the shared image exporter.
  */
 static int renderHeadless(App& app, const QString& out, float resolution,
-                          const QString& view, int size, float section)
+                          const QString& view, int size, float section,
+                          const QString& node)
 {
     ImageExport::Options opt;
+    opt.node_name = node;
     if (view == "front")
     {
         opt.M.rotate(-90, 1, 0, 0);
@@ -173,7 +257,8 @@ int main(int argc, char *argv[])
     {
         const QByteArray arg(argv[i]);
         if (arg == "--export" || arg == "--validate" ||
-            arg == "--render" || arg == "--resave")
+            arg == "--render" || arg == "--resave" ||
+            arg == "--describe-nodes")
         {
             if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM"))
                 qputenv("QT_QPA_PLATFORM", "offscreen");
@@ -288,6 +373,14 @@ int main(int argc, char *argv[])
                 "Longest image side in pixels for --render when "
                 "--resolution isn't given (default 512)", "N", "512");
         parser.addOption(sizeOpt);
+        QCommandLineOption describeOpt("describe-nodes",
+                "Dump the node library (names, categories, inputs, "
+                "outputs) as JSON and exit");
+        parser.addOption(describeOpt);
+        QCommandLineOption nodeOpt("node",
+                "With --render: render only the named node's shape "
+                "outputs (visual bisection)", "NAME");
+        parser.addOption(nodeOpt);
         QCommandLineOption resaveOpt("resave",
                 "Load the file and save it back out as FILE in the "
                 "current protocol (batch migration / canonicalizing), "
@@ -300,6 +393,9 @@ int main(int argc, char *argv[])
         parser.addPositionalArgument("file", "File to open", "[file]");
 
         parser.process(app);
+
+        if (parser.isSet(describeOpt))
+            return describeNodes(app);
 
         const bool headless = parser.isSet(exportOpt) ||
                               parser.isSet(renderOpt) ||
@@ -337,7 +433,8 @@ int main(int argc, char *argv[])
                 code = renderHeadless(app, parser.value(renderOpt), res,
                                       parser.value(viewOpt),
                                       parser.value(sizeOpt).toInt(),
-                                      parser.value(sectionOpt).toFloat());
+                                      parser.value(sectionOpt).toFloat(),
+                                      parser.value(nodeOpt));
             if (code == 0 && parser.isSet(resaveOpt))
                 code = resaveHeadless(app, parser.value(resaveOpt));
             // Return (rather than exit()) so Qt tears down cleanly
