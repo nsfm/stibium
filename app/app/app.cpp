@@ -23,6 +23,7 @@
 #include "graph/graph.h"
 #include "app/theme.h"
 #include "app/settings.h"
+#include "fab/fab.h"
 #include <QGraphicsView>
 #include <QFileInfo>
 #include "canvas/scene.h"
@@ -124,6 +125,7 @@ void App::onNew()
     {
         graph->clear();
         filename.clear();
+        fab::setProjectDir("");
         undo_stack->clear();
 
         emit(filenameChanged(""));
@@ -185,6 +187,7 @@ void App::onSaveAs()
             return;
         }
         filename = f;
+        fab::setProjectDir(QFileInfo(f).absolutePath().toStdString());
         Settings::set("files/last_dir", QFileInfo(f).absolutePath());
         emit(filenameChanged(filename));
         return onSave();
@@ -394,6 +397,10 @@ void App::loadFile(QString f)
 {
     Settings::set("files/last_dir", QFileInfo(f).absolutePath());
     filename = f;
+
+    // Relative mesh-import paths resolve against the project dir,
+    // so it must be current before deserialization runs any scripts
+    fab::setProjectDir(QFileInfo(f).absolutePath().toStdString());
 
     // Drop undo history before demolishing the graph: stale commands
     // hold pointers into the old nodes, and undoing across a load

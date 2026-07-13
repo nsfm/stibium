@@ -225,6 +225,29 @@ cmp ${CMAKE_CURRENT_BINARY_DIR}/ctest_rt1_${example}.sb ${CMAKE_CURRENT_BINARY_D
                 app_resave_roundtrip_${example}
                 PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     endforeach()
+
+    # Mesh import example: its relative asset path resolves against
+    # the project file, so the roundtrip copy needs meshes/ beside it
+    add_test(NAME app_validate_import_bead
+             COMMAND ${STIBIUM_APP} --validate
+                     ${CMAKE_SOURCE_DIR}/examples/import_bead.sb)
+    add_test(NAME app_render_import_bead
+             COMMAND ${STIBIUM_APP}
+                     --render ${CMAKE_CURRENT_BINARY_DIR}/ctest_import_bead.png
+                     --size 128
+                     ${CMAKE_SOURCE_DIR}/examples/import_bead.sb)
+    add_test(NAME app_resave_roundtrip_import_bead
+             COMMAND bash -c "\
+mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/meshes && \
+cp ${CMAKE_SOURCE_DIR}/examples/meshes/pebble.stl ${CMAKE_CURRENT_BINARY_DIR}/meshes/ && \
+$<TARGET_FILE:${STIBIUM_APP}> --resave ${CMAKE_CURRENT_BINARY_DIR}/ctest_rt1_import_bead.sb ${CMAKE_SOURCE_DIR}/examples/import_bead.sb && \
+$<TARGET_FILE:${STIBIUM_APP}> --resave ${CMAKE_CURRENT_BINARY_DIR}/ctest_rt2_import_bead.sb ${CMAKE_CURRENT_BINARY_DIR}/ctest_rt1_import_bead.sb && \
+cmp ${CMAKE_CURRENT_BINARY_DIR}/ctest_rt1_import_bead.sb ${CMAKE_CURRENT_BINARY_DIR}/ctest_rt2_import_bead.sb")
+    set_tests_properties(
+            app_validate_import_bead
+            app_render_import_bead
+            app_resave_roundtrip_import_bead
+            PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
 set_property(TARGET ${STIBIUM_APP} PROPERTY CXX_STANDARD 17)

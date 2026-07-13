@@ -4,8 +4,56 @@
 #include "fab/fab.h"
 #include "fab/types/shape.h"
 #include "fab/types/transform.h"
+#include "fab/mesh/mesh_import.h"
+#include "fab/tree/grid.h"
 
 using namespace boost::python;
+
+////////////////////////////////////////////////////////////////////////////////
+
+static std::string _project_dir;
+
+void fab::setProjectDir(std::string dir)
+{
+    _project_dir = dir;
+}
+
+std::string fab::projectDir()
+{
+    return _project_dir;
+}
+
+static std::string project_dir_py()
+{
+    return _project_dir;
+}
+
+/*  Backend for fab.shapes.import_mesh (see py/fab/shapes.py, which
+ *  owns path resolution and user-facing checks).
+ *  Returns (Shape, stibium_stamp, sha256, from_cache). */
+static tuple import_mesh_py(std::string path, float voxels_per_unit,
+                            std::string cache_dir)
+{
+    /*  Grids abandoned by superseded imports (e.g. an earlier
+     *  resolution of the same file) are only referenced by the
+     *  registry now; drop them before allocating another. */
+    grid_registry_trim();
+
+    const auto res = fab_mesh::import_mesh_grid(
+            path, voxels_per_unit, cache_dir);
+    if (!res.grid_id)
+    {
+        PyErr_SetString(PyExc_RuntimeError,
+                ("import_mesh: " + res.error).c_str());
+        throw_error_already_set();
+    }
+
+    Shape s("g" + std::to_string(res.grid_id),
+            Bounds(res.bounds[0], res.bounds[1], res.bounds[2],
+                   res.bounds[3], res.bounds[4], res.bounds[5]));
+    return boost::python::make_tuple(s, res.stibium_stamp,
+                                     res.sha256, res.from_cache);
+}
 
 void fab::onParseError(const fab::ParseError &e)
 {
@@ -61,6 +109,12 @@ BOOST_PYTHON_MODULE(_fabtypes)
             .def_readonly("z_reverse", &Transform::z_reverse)
             .def_readonly("y_reverse", &Transform::y_reverse)
             .def_readonly("z_reverse", &Transform::z_reverse);
+
+    def("project_dir", &project_dir_py,
+        "Directory of the current project file ('' if unsaved)");
+    def("_import_mesh", &import_mesh_py,
+        "Backend for fab.shapes.import_mesh; "
+        "returns (Shape, stibium_stamp, sha256, from_cache)");
 
     register_exception_translator<fab::ParseError>(fab::onParseError);
     register_exception_translator<fab::ShapeError>(fab::onShapeError);

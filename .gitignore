@@ -14,3 +14,6 @@
 build
 build-*
 __pycache__/
+
+# Derived mesh-import caches (regenerable)
+.stibium-cache/

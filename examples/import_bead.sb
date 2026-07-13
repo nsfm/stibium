@@ -1,0 +1,147 @@
+{
+ "type": "sb",
+ "protocol": 7,
+ "nodes": [
+  {
+   "uid": 0,
+   "name": "pebble",
+   "inspector": [
+    -300,
+    -100
+   ],
+   "script": [
+    "import fab",
+    "",
+    "title('Import Mesh')",
+    "",
+    "input('filename', str)",
+    "input('voxels_per_unit', float, 7)",
+    "input('sha256', str)",
+    "",
+    "output('shape', fab.shapes.import_mesh(filename, voxels_per_unit, sha256))"
+   ],
+   "datums": [
+    {
+     "uid": 0,
+     "name": "filename",
+     "expr": "'meshes/pebble.stl'",
+     "type": "str"
+    },
+    {
+     "uid": 1,
+     "name": "voxels_per_unit",
+     "expr": "4.0",
+     "type": "float"
+    },
+    {
+     "uid": 2,
+     "name": "sha256",
+     "expr": "''",
+     "type": "str"
+    },
+    {
+     "uid": 3,
+     "name": "shape",
+     "expr": "\u0012",
+     "type": "_fabtypes.Shape"
+    }
+   ]
+  },
+  {
+   "uid": 1,
+   "name": "bore",
+   "inspector": [
+    -300,
+    150
+   ],
+   "script": [
+    "import fab",
+    "",
+    "title('Cylinder')",
+    "",
+    "input('x', float)",
+    "input('y', float)",
+    "input('z0', float)",
+    "input('z1', float)",
+    "input('r', float)",
+    "",
+    "output('shape', fab.shapes.cylinder(x, y, z0, z1, r))"
+   ],
+   "datums": [
+    {
+     "uid": 0,
+     "name": "x",
+     "expr": "0.0",
+     "type": "float"
+    },
+    {
+     "uid": 1,
+     "name": "y",
+     "expr": "0.0",
+     "type": "float"
+    },
+    {
+     "uid": 2,
+     "name": "z0",
+     "expr": "-12.0",
+     "type": "float"
+    },
+    {
+     "uid": 3,
+     "name": "z1",
+     "expr": "12.0",
+     "type": "float"
+    },
+    {
+     "uid": 4,
+     "name": "r",
+     "expr": "3.0",
+     "type": "float"
+    },
+    {
+     "uid": 5,
+     "name": "shape",
+     "expr": "\u0012",
+     "type": "_fabtypes.Shape"
+    }
+   ]
+  },
+  {
+   "uid": 2,
+   "name": "beaded",
+   "inspector": [
+    0,
+    0
+   ],
+   "script": [
+    "import fab.types",
+    "",
+    "title('Difference')",
+    "input('a', fab.types.Shape)",
+    "input('b', fab.types.Shape)",
+    "",
+    "output('shape', a & ~b)"
+   ],
+   "datums": [
+    {
+     "uid": 0,
+     "name": "a",
+     "expr": "\u0011[__0.__3]",
+     "type": "_fabtypes.Shape"
+    },
+    {
+     "uid": 1,
+     "name": "b",
+     "expr": "\u0011[__1.__5]",
+     "type": "_fabtypes.Shape"
+    },
+    {
+     "uid": 2,
+     "name": "shape",
+     "expr": "\u0012",
+     "type": "_fabtypes.Shape"
+    }
+   ]
+  }
+ ]
+}

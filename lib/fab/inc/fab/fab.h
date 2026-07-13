@@ -29,6 +29,13 @@ namespace fab
      */
     void postInit(std::vector<std::string> fab_paths);
 
+    /** Directory against which relative mesh-import paths resolve
+     *  (the directory holding the current .sb file; empty when the
+     *  project has never been saved).  The app updates this on
+     *  open/save/new, before any scripts run. */
+    void setProjectDir(std::string dir);
+    std::string projectDir();
+
     extern PyTypeObject* ShapeType;
 }
 
