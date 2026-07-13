@@ -11,11 +11,19 @@ ExportingDialog::ExportingDialog(QWidget* parent)
 
 void ExportingDialog::setProgress(uint64_t done, uint64_t total)
 {
+    // A total of 0 means "working, duration unknown": show Qt's busy
+    // animation rather than a bar pinned at its last value (phases
+    // like mesh decimation can't report granular progress).
     if (total == 0)
+    {
+        if (ui->progressBar->maximum() != 0)
+        {
+            ui->progressBar->setMaximum(0);
+            ui->progressBar->setValue(-1);
+        }
         return;
+    }
 
-    // Leave the .ui default (maximum == 0, Qt's busy indicator) until
-    // the first real progress report arrives.
     if (ui->progressBar->maximum() == 0)
         ui->progressBar->setMaximum(1000);
 
