@@ -3116,3 +3116,43 @@ def repeat_polar(a, n, x=0, y=0):
     return _remap_shape(a, xexpr=xexpr, yexpr=yexpr,
                         xmin=x - rad, xmax=x + rad,
                         ymin=y - rad, ymax=y + rad)
+
+def repeat_scale_xy(a, factor, x=0, y=0, r0=1.0):
+    """ Infinite self-similar (scale) repetition about the point (x, y):
+        the pattern is copied at every scale factor**k, k in Z. The
+        source shape should live in the annulus r0 <= r < r0*factor.
+        This is log-space domain repetition - recursion depth is
+        unlimited at O(1) field cost. (Note: the remapped field is
+        non-euclidean away from the source band; sign is exact.)
+    """
+    if factor <= 1 or r0 <= 0:
+        return a
+    import math as _m
+    lnk = _m.log(factor)
+    r = 'sqrt((X-%g)*(X-%g)+(Y-%g)*(Y-%g))' % (x, x, y, y)
+    q = 'exp(mod(log(%s/%g),%g))*%g/%s' % (r, r0, lnk, r0, r)
+    xexpr = '=%g+(X-%g)*%s;' % (x, x, q)
+    yexpr = '=%g+(Y-%g)*%s;' % (y, y, q)
+    rmax = r0 * factor * 1.0
+    b = a.bounds
+    return Shape('m%s%s_%s' % (xexpr, yexpr, a.math),
+                 x - rmax, y - rmax, b.zmin, x + rmax, y + rmax, b.zmax)
+
+def iterate_scaled(part, n, factor, dx=0, dy=0, x0=0, y0=0):
+    """ Finite copy -> translate -> scale chain: n copies, each scaled
+        by `factor` about (x0, y0) relative to the previous and offset
+        by (dx, dy) scaled to its generation. Automates the manual
+        recursive-feature loop. O(n) field cost - use repeat_scale_xy
+        for unlimited depth about a fixed point.
+    """
+    n = int(n)
+    out = part
+    s = 1.0
+    px, py = 0.0, 0.0
+    for i in range(1, n):
+        px += dx * s
+        py += dy * s
+        s *= factor
+        copy = scale_xy(part, x0, y0, s)
+        out |= move(copy, px, py, 0)
+    return out

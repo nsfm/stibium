@@ -23,6 +23,7 @@ const char* OPCODE_NAMES[] = {
     "OP_NEG",
     "OP_EXP",
     "OP_FLOOR",
+    "OP_LOG",
 
     "OP_X",
     "OP_Y",
@@ -55,6 +56,7 @@ const char* dot_symbol(Opcode op) {
         case OP_NEG:    return "−";
         case OP_EXP:    return "exp";
         case OP_FLOOR:  return "floor";
+        case OP_LOG:    return "log";
         case OP_X:      return "X";
         case OP_Y:      return "Y";
         case OP_Z:      return "Z";
@@ -83,6 +85,7 @@ const char* dot_color(Opcode op) {
         case OP_EXP:
         case OP_MOD:
         case OP_FLOOR:
+        case OP_LOG:
             return "goldenrod";
         case OP_MIN:
         case OP_MAX:
@@ -127,6 +130,7 @@ int dot_fontsize(Opcode op) {
         case OP_EXP:
         case OP_MOD:
         case OP_FLOOR:
+        case OP_LOG:
             return 14;
         default:
             return 0;

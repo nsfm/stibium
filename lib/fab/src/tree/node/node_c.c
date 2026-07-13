@@ -91,6 +91,7 @@ Node* abs_n(Node* child) { return unary_n(child, abs_f, OP_ABS); }
 Node* square_n(Node* child) { return unary_n(child, square_f, OP_SQUARE); }
 Node* sqrt_n(Node* child) { return unary_n(child, sqrt_f, OP_SQRT); }
 Node* floor_n(Node* child) { return unary_n(child, floor_f, OP_FLOOR); }
+Node* log_n(Node* child) { return unary_n(child, log_f, OP_LOG); }
 Node* sin_n(Node* child) { return unary_n(child, sin_f, OP_SIN); }
 Node* cos_n(Node* child) { return unary_n(child, cos_f, OP_COS); }
 Node* tan_n(Node* child) { return unary_n(child, tan_f, OP_TAN); }

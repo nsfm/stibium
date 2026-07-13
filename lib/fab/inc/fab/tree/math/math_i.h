@@ -29,6 +29,7 @@ Interval pow_i(Interval A, Interval B);
 Interval atan2_i(Interval A, Interval B);
 Interval mod_i(Interval A, Interval B);
 Interval floor_i(Interval A);
+Interval log_i(Interval A);
 
 // Unary functions
 Interval abs_i(Interval A);

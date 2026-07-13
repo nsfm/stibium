@@ -124,3 +124,27 @@ TEST_CASE("mod and floor opcodes")
         free(t);
     }
 }
+
+TEST_CASE("log opcode")
+{
+    MathTree* t;
+
+    SECTION("Prefix log: lX")
+    {
+        t = parse("lX");
+        REQUIRE(t != nullptr);
+        REQUIRE(eval_f(t, 2.71828182f, 0, 0) == Approx(1.0));
+        free(t);
+    }
+
+    SECTION("Infix scale-recursion form")
+    {
+        // exp(mod(log(X), log(2))) folds every octave onto [1, 2)
+        t = parse("=exp(mod(log(X), 0.6931472));");
+        REQUIRE(t != nullptr);
+        REQUIRE(eval_f(t, 3.0f, 0, 0) == Approx(1.5).epsilon(1e-4));
+        REQUIRE(eval_f(t, 12.0f, 0, 0) == Approx(1.5).epsilon(1e-4));
+        REQUIRE(eval_f(t, 0.75f, 0, 0) == Approx(1.5).epsilon(1e-4));
+        free(t);
+    }
+}

@@ -90,6 +90,7 @@ v1_expr(E)	::= V1ABS v1_expr(O).   				{	E = CACHED(abs_n(O)); 	}
 v1_expr(E)	::= V1SQUARE v1_expr(O).				{	E = CACHED(square_n(O)); 	}
 v1_expr(E)	::= V1SQRT v1_expr(O).  				{	E = CACHED(sqrt_n(O)); 	}
 v1_expr(E)	::= V1FLOOR v1_expr(O).  				{	E = CACHED(floor_n(O)); 	}
+v1_expr(E)	::= V1LOG v1_expr(O).  				{	E = CACHED(log_n(O)); 	}
 v1_expr(E)	::= V1NEG v1_expr(O).   				{	E = CACHED(neg_n(O)); 	}
 v1_expr(E)	::= V1EXP v1_expr(O).   				{	E = CACHED(exp_n(O)); 	}
 v1_expr(E)	::= CONSTANT V1MINUS V1FLOAT(F).		{	E = CACHED(constant_n(-atof(F))); 	}
@@ -126,6 +127,7 @@ expr(E)		::= POW LPAREN expr(L) COMMA expr(R) RPAREN.	{	E = CACHED(pow_n(L, R));
 expr(E)		::= ATAN2 LPAREN expr(A) COMMA expr(B) RPAREN.	{	E = CACHED(atan2_n(A, B)); 	}
 expr(E)		::= MOD LPAREN expr(A) COMMA expr(B) RPAREN.	{	E = CACHED(mod_n(A, B)); 	}
 expr(E)		::= FLOOR LPAREN expr(A) RPAREN.			{	E = CACHED(floor_n(A)); 	}
+expr(E)		::= LOG LPAREN expr(A) RPAREN.			{	E = CACHED(log_n(A)); 	}
 
 expr(E)		::= SIN LPAREN expr(O) RPAREN.			{	E = CACHED(sin_n(O)); 	}
 expr(E)		::= COS LPAREN expr(O) RPAREN.			{	E = CACHED(cos_n(O)); 	}

@@ -1,0 +1,14 @@
+import fab.types
+import fab.shapes
+
+title('Iterate Scaled (copy-translate-scale)')
+
+input('shape', fab.types.Shape)
+input('n', int, 4)
+input('factor', float, 0.5)
+input('dx', float, 2)
+input('dy', float, 0)
+input('x0', float, 0)
+input('y0', float, 0)
+
+output('shape', fab.shapes.iterate_scaled(shape, n, factor, dx, dy, x0, y0))

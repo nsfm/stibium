@@ -43,6 +43,13 @@ static std::string mod_pss(Node* n)
     return ss.str();
 }
 
+static std::string log_pss(Node* n)
+{
+    std::stringstream ss;
+    ss << "log(" << print_node_ss(n->lhs) << ")";
+    return ss.str();
+}
+
 static std::string floor_pss(Node* n)
 {
     std::stringstream ss;
@@ -190,6 +197,7 @@ std::string print_node_ss(Node* n)
         case OP_SQUARE: return square_pss(n);
         case OP_SQRT:   return sqrt_pss(n);
         case OP_FLOOR:  return floor_pss(n);
+        case OP_LOG:    return log_pss(n);
         case OP_SIN:    return sin_pss(n);
         case OP_COS:    return cos_pss(n);
         case OP_TAN:    return tan_pss(n);
