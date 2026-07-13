@@ -522,6 +522,8 @@ void CanvasView::drawFloatingLabels(QPainter* painter)
         QString name;
         QPointF anchor;     // node center, viewport coords
         bool custom;
+        bool exportish;     // render/mesh/export nodes: always shown,
+                            // glowing - new users hunt for these
     };
 
     // Default names are single letter + number (a0, t12, ...);
@@ -550,13 +552,29 @@ void CanvasView::drawFloatingLabels(QPainter* painter)
         if (it == custom_cache.end())
             it = custom_cache.insert(name,
                     !default_name.match(name).hasMatch());
-        labels.push_back({name, QPointF(center), it.value()});
+        const bool exportish = frame->getExportWorker() != nullptr;
+
+        // Auto-named export nodes label by role: "Mesh 0", not "m0"
+        QString text = name;
+        if (exportish && !it.value())
+        {
+            QString title = frame->getTitle();
+            const int cut = title.indexOf(" (");
+            if (cut > 0)
+                title = title.left(cut);
+            QString digits = name;
+            digits.remove(QRegularExpression("^[a-z]+"));
+            text = title + " " + digits;
+        }
+        labels.push_back({text, QPointF(center), it.value(), exportish});
     }
 
     // Custom names place first; ties break top-to-bottom for a
     // deterministic layout while panning.
     std::sort(labels.begin(), labels.end(),
               [](const Label& a, const Label& b) {
+                  if (a.exportish != b.exportish)
+                      return a.exportish;
                   if (a.custom != b.custom)
                       return a.custom;
                   if (a.anchor.y() != b.anchor.y())
@@ -592,7 +610,7 @@ void CanvasView::drawFloatingLabels(QPainter* painter)
     {
         if (drawn > 150)
             break;
-        if (!l.custom && !defaults_ok)
+        if (!l.custom && !l.exportish && !defaults_ok)
             continue;
 
         const QSizeF size(fm.horizontalAdvance(l.name) + 10,
@@ -603,7 +621,7 @@ void CanvasView::drawFloatingLabels(QPainter* painter)
         // yield if it's taken - stable placement beats persistence.
         QRectF rect;
         bool ok = false;
-        const int max_attempts = l.custom ? 6 : 1;
+        const int max_attempts = (l.custom || l.exportish) ? 6 : 1;
         for (int attempt = 0; attempt < max_attempts && !ok; ++attempt)
         {
             const float dy = (attempt % 2 ? 1 : -1)
@@ -622,7 +640,7 @@ void CanvasView::drawFloatingLabels(QPainter* painter)
 
         // Custom names always draw (last attempt stands even if it
         // overlaps); default names only draw if room was found.
-        if (!ok && !l.custom)
+        if (!ok && !l.custom && !l.exportish)
             continue;
         placed.push_back(rect);
         drawn++;
@@ -639,17 +657,29 @@ void CanvasView::drawFloatingLabels(QPainter* painter)
             painter->drawLine(join, l.anchor);
         }
 
+        // Export nodes glow: a soft halo behind the card
+        if (l.exportish)
+        {
+            auto halo = Colors::amber;
+            halo.setAlphaF(0.22 * alpha);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(halo);
+            painter->drawRoundedRect(rect.adjusted(-4, -4, 4, 4), 7, 7);
+        }
+
         auto bg = Colors::base01;
         bg.setAlphaF(0.85 * alpha);
-        auto edge = l.custom ? Colors::amber : Colors::base03;
-        edge.setAlphaF((l.custom ? 0.9 : 0.6) * alpha);
-        auto text = l.custom ? Colors::base07 : Colors::base05;
-        text.setAlphaF(alpha);
+        auto edge = (l.custom || l.exportish) ? Colors::amber
+                                              : Colors::base03;
+        edge.setAlphaF(((l.custom || l.exportish) ? 0.9 : 0.6) * alpha);
+        auto text_color = (l.custom || l.exportish) ? Colors::base07
+                                                    : Colors::base05;
+        text_color.setAlphaF(alpha);
 
-        painter->setPen(QPen(edge, 1));
+        painter->setPen(QPen(edge, l.exportish ? 1.4 : 1));
         painter->setBrush(bg);
         painter->drawRoundedRect(rect, 4, 4);
-        painter->setPen(text);
+        painter->setPen(text_color);
         painter->drawText(rect, Qt::AlignCenter, l.name);
     }
 

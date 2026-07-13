@@ -112,7 +112,8 @@ void InspectorFrame::paint(QPainter *painter,
     if (low_detail)
     {
         const float px = painter->worldTransform().m11();  // screen px per unit
-        const QColor tint = typeTint();
+        const bool exportish = export_button->getWorker() != nullptr;
+        const QColor tint = exportish ? Colors::amber : typeTint();
 
         // Sub-8px cards: a single flat rect is all anyone can see
         if (r.height() * px < 8)
@@ -184,6 +185,14 @@ void InspectorFrame::paint(QPainter *painter,
         }
 
         painter->setBrush(Qt::NoBrush);
+        if (exportish && !isSelected())
+        {
+            // Findable glow for render/mesh/export nodes
+            auto halo = Colors::amber;
+            halo.setAlphaF(0.5);
+            painter->setPen(QPen(halo, 5));
+            painter->drawRoundedRect(r.adjusted(-4, -4, 4, 4), 12, 12);
+        }
         painter->setPen(isSelected() ? QPen(Colors::amber, 2)
                                      : QPen(Colors::base02, 1));
         painter->drawRoundedRect(r, 10, 10);
@@ -500,6 +509,11 @@ void InspectorFrame::hoverLeaveEvent(QGraphicsSceneHoverEvent *event)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+
+QString InspectorFrame::getTitle() const
+{
+    return title_row->getTitle();
+}
 
 ExportWorker* InspectorFrame::getExportWorker() const
 {

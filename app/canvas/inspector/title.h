@@ -31,6 +31,11 @@ public:
     void setTitle(QString title);
 
     /*
+     *  Current title text (for LOD labeling)
+     */
+    QString getTitle() const;
+
+    /*
      *  Returns the minimum width of this row
      *  (used in inspector layout)
      */

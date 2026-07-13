@@ -19,6 +19,11 @@ public:
      */
     ExportWorker* getExportWorker() const;
 
+    /*
+     *  The node's display title ("Spur Gear (involute)")
+     */
+    QString getTitle() const;
+
     explicit InspectorFrame(Node* node, QGraphicsScene* scene);
     ~InspectorFrame();
 
