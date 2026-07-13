@@ -28,15 +28,12 @@ were named for the element symbol all along).
   field itself (walls thinner than nozzle flagged before slicing);
   overhang-angle visualization is plausible too (gradient vs build
   direction). Ends guess-and-check on functional parts.
-- **Smooth CSG (smin blending).** Every SDF playground has organic
-  smooth-union/intersect; our CSG is hard min/max plus fixed chamfer/
-  fillet. The exponential smooth-min needs only exp/log/min — opcodes
-  we already have — so this may be pure node-library work: composable,
-  radius-controlled organic blends. Huge visual payoff per line.
-- **Shell / offset nodes.** offset(f, r) = f - r; shell(f, t) =
-  max(f, -t - f). Exact hollowing at wall thickness t — one node,
-  two opcodes, no mesh in sight. Mesh tools ache doing this; for a
-  field it's arithmetic. The 3D-printing staple we're missing.
+- **Audit + expand the smooth-CSG lineup.** blend/shell/offset/morph
+  nodes already exist (a certain agent dreamed them up before reading
+  the CSG folder~). Double-check blend's falloff quality against the
+  standard polynomial/exponential smin family, add smooth-difference/
+  intersection variants if missing, and make sure all of them are in
+  the wiki showcase.
 - **Viewport measurement probe.** Click two points: distance, plus
   the field value under the cursor (= exact distance to surface,
   it's an SDF!). The field is a built-in ruler; expose it.
@@ -154,9 +151,9 @@ were named for the element symbol all along).
   that parts mate, that threads clear, that nothing collides. No
   sampling tool can promise this; interval arithmetic can. CAD with
   certificates.
-- **Shape morphing.** lerp(f_a, f_b, t) renders every intermediate of
-  two models — tweened geometry for free. Pairs with the kinematic
-  scrubber for animation, and prints as a physical morph sequence.
+- **Shape morphing over time.** morph.node exists for static blends;
+  drive its weight from the kinematic-scrubber timeline for tweened
+  geometry animation, and print physical morph sequences.
 - **Differentiable-CAD optimization.** Fields are closed-form and exactly
   differentiable: "minimize material s.t. wall ≥ 0.8mm", "solve for the
   parameter where these parts stop colliding." Gradient descent over the
