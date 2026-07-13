@@ -3117,28 +3117,46 @@ def repeat_polar(a, n, x=0, y=0):
                         xmin=x - rad, xmax=x + rad,
                         ymin=y - rad, ymax=y + rad)
 
-def repeat_scale_xy(a, factor, x=0, y=0, r0=1.0):
+def repeat_scale_xy(a, factor, x=0, y=0, r0=0):
     """ Infinite self-similar (scale) repetition about the point (x, y):
-        the pattern is copied at every scale factor**k, k in Z. The
-        source shape should live in the annulus r0 <= r < r0*factor.
-        This is log-space domain repetition - recursion depth is
-        unlimited at O(1) field cost. (Note: the remapped field is
-        non-euclidean away from the source band; sign is exact.)
+        the pattern is copied at every scale factor**k, k in Z, giving
+        unlimited recursive depth at O(1) field cost.
+
+        factor is the scale ratio between successive generations. For
+        VISIBLE GAPS between copies, factor must exceed the shape's own
+        radial span (outer_radius / inner_radius): when factor equals
+        that ratio the copies touch and tile into a gapless solid; below
+        it they overlap. A ring spanning radius [1, 2] needs factor > 2.
+
+        r0 anchors which radius is "generation 0"; 0 (the default) derives
+        it from the shape's bounding radius so you never have to. The
+        remapped field is non-euclidean away from the source band, but its
+        sign (inside/outside) is exact.
     """
-    if r0 <= 0 or factor == 1 or factor <= 0:
+    if factor <= 0 or factor == 1:
         return Shape(a.math, a.bounds)
     if factor < 1:
         factor = 1.0 / factor
+
+    b = a.bounds
+    # Outer radius of the shape from the fixed point (farthest AABB corner)
+    r_out = max(abs(b.xmin - x), abs(b.xmax - x)) ** 2
+    r_out = (r_out + max(abs(b.ymin - y), abs(b.ymax - y)) ** 2) ** 0.5
+    if r_out <= 0 or not (r_out < float('inf')):
+        r_out = 1.0
+    if r0 <= 0:
+        # Put the shape's outer edge at the top of generation 0's band
+        r0 = r_out / factor
+
     import math as _m
     lnk = _m.log(factor)
-    # Clamp r away from the fixed point so the field stays finite there
-    eps = r0 * 1e-4
+    eps = r0 * 1e-4     # keep the field finite at the fixed point
     r = 'max(sqrt((X-%g)*(X-%g)+(Y-%g)*(Y-%g)),%g)' % (x, x, y, y, eps)
     q = 'exp(mod(log(%s/%g),%g))*%g/%s' % (r, r0, lnk, r0, r)
     xexpr = '=%g+(X-%g)*%s;' % (x, x, q)
     yexpr = '=%g+(Y-%g)*%s;' % (y, y, q)
-    rmax = r0 * factor * 1.0
-    b = a.bounds
+    # Bound the render window to a couple generations around the source
+    rmax = r_out * factor
     return Shape('m%s%s_%s' % (xexpr, yexpr, a.math),
                  x - rmax, y - rmax, b.zmin, x + rmax, y + rmax, b.zmax)
 
