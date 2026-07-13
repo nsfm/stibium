@@ -72,6 +72,7 @@ set(SRC_FILES
     dialog/resolution.cpp
     export/export_mesh.cpp
     export/export_heightmap.cpp
+    export/export_svg.cpp
     export/export_worker.cpp
     viewport/scene.cpp
     viewport/gl.cpp

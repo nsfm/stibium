@@ -6,10 +6,9 @@ were named for the element symbol all along).
 
 ## Tier 1 — would die on these hills
 
-- **SVG + DXF export for 2D shapes.** Marching squares over the field →
-  paths → SVG/DXF. Serves the vector-graphics workflow (currently
-  massive-resolution PNGs for photolithography) and laser cutting.
-  Resolution-independent litho masks.
+- **DXF export for 2D shapes.** SVG shipped (see Done); DXF is the
+  remaining format for laser-cutter toolchains — LWPOLYLINE entities
+  from the same `contour_field` output.
 - **Cross-section preview.** Draggable slice plane in the viewport showing
   part interiors (walls, voids, clearances). Nearly free in f-rep — render
   the field on one plane. Formalizes the accidental z-clip slicing the 2D
@@ -176,6 +175,15 @@ a GUI so agentic tools can contribute to modeling cleanly:
 
 
 ## Done
+- 2026-07-12 — SVG export for 2D shapes (`export.svg` hook + GUI
+  dialog). Marching squares over one field plane (`contour_field` in
+  lib/fab): exact edge-indexed chaining, saddle cells resolved by
+  center evaluation, padded border so clipped shapes close, and 2D
+  feature detection — tangent-line intersection recovers sharp corners
+  ~5× finer than the grid (<0.002 units on a 0.01 grid). Output in mm,
+  evenodd fill, holes correct. Validated against analytic areas (<1%)
+  and corner positions; 5 new CTest cases. Slices 3D shapes at their
+  z midpoint. Export dialog gained "Contouring..." phase.
 - 2026-07-12 — parallel meshing (`triangulate_indexed_mt`): chunked
   region → worker pool on cloned trees → seam-exact merge (re-intern)
   → global dedup/prune. Provably identical to serial with detect off;

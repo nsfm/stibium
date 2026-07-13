@@ -6,6 +6,11 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **SVG export**: 2D shapes trace to resolution-independent vector
+  paths (`export.svg`, sharp corners recovered by feature detection to
+  ~5× finer than the sampling grid, holes and clipped shapes handled,
+  mm units). Replaces giant raster exports for photolithography masks
+  and laser cutting. 3D shapes export their z-midpoint cross-section.
 - **Parallel meshing**: exports fan out across all CPU cores (chunked
   region, per-thread tree clones, seam-exact merge). 2.57M-triangle
   gyroid: 11.7 s → 2.8 s on 16 threads; combined with the indexed

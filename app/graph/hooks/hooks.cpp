@@ -71,6 +71,23 @@ BOOST_PYTHON_MODULE(_AppHooks)
                 "    resolution=None, detect_features=False, simplify=0)\n"
                 "    Alias of mesh() (kept for compatibility).\n"
                 )
+        .def("svg", raw_function(&ScriptExportHooks::svg),
+                "svg(shape, bounds=None, pad=True, filename=None,\n"
+                "    resolution=None, detect_features=True)\n"
+                "    Registers an .svg exporter for the given shape.\n"
+                "    Contours are traced on the z=0 plane (or the\n"
+                "    z midpoint for 3D shapes); output is in mm.\n"
+                "    Valid kwargs:\n"
+                "    bounds is either a fab.types.Bounds object or None.\n"
+                "      If it is None, bounds are taken from the shape.\n"
+                "    pad sets whether bounds should be padded a small amount\n"
+                "    filename sets the filename.\n"
+                "      If None, a dialog will open to select a file.\n"
+                "    resolution sets the resolution (cells per unit).\n"
+                "      If None, a dialog will open to select it.\n"
+                "    detect_features recovers sharp corners exactly\n"
+                "      (on by default)"
+                )
         .def("heightmap", raw_function(&ScriptExportHooks::heightmap),
                 "heightmap(shape, bounds=None, pad=True, filename=None,\n"
                 "          resolution=None, mm_per_unit=25.4)\n"

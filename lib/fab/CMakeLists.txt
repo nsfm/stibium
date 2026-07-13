@@ -40,7 +40,9 @@ add_library(SbFab STATIC
     src/fab.cpp
     src/formats/png.c
     src/formats/stl.c
+    src/formats/svg.cpp
     src/formats/threemf.cpp
+    src/tree/contour.cpp
     src/tree/eval.c
     src/tree/math/math_f.c
     src/tree/math/math_g.c
@@ -93,6 +95,7 @@ target_include_directories(SbFab SYSTEM PRIVATE
 ################################################################################
 
 add_executable(SbFabTest
+    tests/contour.cpp
     tests/main.cpp
     tests/mesher.cpp
     tests/parser.cpp
