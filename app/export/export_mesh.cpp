@@ -87,6 +87,41 @@ void ExportMeshWorker::run()
 
 ////////////////////////////////////////////////////////////////////////////////
 
+bool ExportMeshWorker::runHeadless(const QString& fname, float res,
+                                   int detect)
+{
+    if (std::isinf(bounds.xmin) || std::isinf(bounds.xmax) ||
+        std::isinf(bounds.ymin) || std::isinf(bounds.ymax) ||
+        std::isinf(bounds.zmin) || std::isinf(bounds.zmax))
+    {
+        fprintf(stderr, "export: shape has infinite bounds\n");
+        return false;
+    }
+
+    _filename = fname.isEmpty() ? filename : fname;
+    _resolution = res > 0 ? res : resolution;
+    _detect_features = detect < 0 ? detect_features : bool(detect);
+    _simplify = simplify;
+
+    if (_filename.isEmpty())
+    {
+        fprintf(stderr, "export: no filename (pass --export FILE or "
+                        "set filename= in the script)\n");
+        return false;
+    }
+    if (_resolution <= 0)
+    {
+        fprintf(stderr, "export: no resolution (pass --resolution R or "
+                        "set resolution= in the script)\n");
+        return false;
+    }
+
+    async();
+    return true;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 void ExportMeshWorker::async()
 {
     Region r = {};

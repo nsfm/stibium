@@ -1,5 +1,7 @@
 #include <Python.h>
 
+#include <cmath>
+
 #include <QFileDialog>
 #include <QMessageBox>
 
@@ -69,6 +71,41 @@ void ExportHeightmapWorker::run()
                             "<b>Writing to png file failed</b><br>"
                             "Check logs for error message with details.");
     }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+bool ExportHeightmapWorker::runHeadless(const QString& fname, float res,
+                                        int detect)
+{
+    (void)detect;  // no feature detection on heightmaps
+
+    if (std::isinf(bounds.xmin) || std::isinf(bounds.xmax) ||
+        std::isinf(bounds.ymin) || std::isinf(bounds.ymax))
+    {
+        fprintf(stderr, "export: shape has infinite XY bounds\n");
+        return false;
+    }
+
+    _filename = fname.isEmpty() ? filename : fname;
+    _resolution = res > 0 ? res : resolution;
+    _mm_per_unit = mm_per_unit;
+
+    if (_filename.isEmpty())
+    {
+        fprintf(stderr, "export: no filename (pass --export FILE or "
+                        "set filename= in the script)\n");
+        return false;
+    }
+    if (_resolution <= 0)
+    {
+        fprintf(stderr, "export: no resolution (pass --resolution R or "
+                        "set resolution= in the script)\n");
+        return false;
+    }
+
+    async();
+    return true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

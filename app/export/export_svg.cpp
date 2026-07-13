@@ -72,8 +72,45 @@ void ExportSvgWorker::run()
     if (_filename.isEmpty())
         return;
 
+    _detect_features = detect_features;
+
     if (checkWritable())
         runAsync();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+bool ExportSvgWorker::runHeadless(const QString& fname, float res,
+                                  int detect)
+{
+    if (std::isinf(bounds.xmin) || std::isinf(bounds.xmax) ||
+        std::isinf(bounds.ymin) || std::isinf(bounds.ymax))
+    {
+        fprintf(stderr, "export: shape has infinite XY bounds\n");
+        return false;
+    }
+
+    _filename = fname.isEmpty() ? filename : fname;
+    _resolution = res > 0 ? res : resolution;
+
+    if (_filename.isEmpty())
+    {
+        fprintf(stderr, "export: no filename (pass --export FILE or "
+                        "set filename= in the script)\n");
+        return false;
+    }
+    if (_resolution <= 0)
+    {
+        fprintf(stderr, "export: no resolution (pass --resolution R or "
+                        "set resolution= in the script)\n");
+        return false;
+    }
+
+    // detect < 0 keeps the script's setting (default on for vectors)
+    _detect_features = detect < 0 ? detect_features : bool(detect);
+
+    async();
+    return true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -95,7 +132,7 @@ void ExportSvgWorker::async()
     std::vector<ContourPath> paths;
     contour_field(shape.tree.get(),
                   bounds.xmin, bounds.ymin, bounds.xmax, bounds.ymax,
-                  nx, ny, z, detect_features, &halt, paths,
+                  nx, ny, z, _detect_features, &halt, paths,
                   -1, &progress_done, &progress_total);
 
     if (halt)

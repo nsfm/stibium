@@ -25,6 +25,9 @@ public:
      */
     void async() override;
 
+    bool runHeadless(const QString& fname, float res,
+                     int detect) override;
+
 protected:
     /*
      *  Recover sharp corners on the traced contours
@@ -37,4 +40,9 @@ protected:
      *  Negative means automatic (a quarter cell); 0 disables.
      */
     const float simplify;
+
+    /*
+     *  Run-time copy of detect_features (overridable headlessly)
+     */
+    bool _detect_features;
 };

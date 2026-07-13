@@ -120,10 +120,13 @@ weigh, and animate the field, upstream of any mesh.*
 Antimony already speaks Python-into-math; make the loop closable without
 a GUI so agentic tools can contribute to modeling cleanly:
 
-- **Headless verbs.** `stibium export model.sb out.3mf`, `stibium render
-  model.sb -o view.png`, `stibium validate model.sb` (parse + evaluate +
-  report errors as structured output). Render = the agent's eyes; export
-  = hands; validate = conscience. (Same plumbing as the CLI renderer.)
+- **Headless render verb.** `--render view.png` — the agent's eyes
+  (export + validate shipped; see Done). Compositing multiple shapes
+  via the pure-C render path (render16/shaded8), no GL needed.
+- **Live-session control (MCP server, stretch).** The file-watcher
+  reload covers agent-edits-on-disk; a socket API into the running
+  session (add/edit nodes, read errors, render viewport) is the full
+  answer.
 - **`fab` as an installable pure-Python package.** The shape library
   already imports standalone with a small Shape/Transform shim (proven
   during chamfer testing). Publish it so scripts/agents can compose
@@ -172,6 +175,13 @@ a GUI so agentic tools can contribute to modeling cleanly:
 
 
 ## Done
+- 2026-07-13 — headless verbs: `antimony --validate model.sb` (script +
+  datum errors to stderr, exit code) and `antimony --export FILE
+  [--resolution R] [--detect-features] model.sb` (runs the file's
+  export node synchronously; offscreen Qt platform auto-selected; no
+  dialogs). Plus live reload: the GUI watches the open .sb and reloads
+  when it changes on disk while the session is clean — agents edit,
+  the viewport follows.
 - 2026-07-12 — DXF export (R12 closed POLYLINEs, y-up, mm) from the
   same contour pipeline; vector node/dialog/hook are extension-driven
   (`export.vector`, `.svg`/`.dxf`; export.svg kept as alias).

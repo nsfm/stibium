@@ -25,6 +25,11 @@ public:
      */
     bool setWorker(ExportWorker* w);
 
+    /*
+     *  Returns the current worker (NULL if none), for headless use
+     */
+    ExportWorker* getWorker() const { return worker.data(); }
+
     void setWidth(float width);
 
     /*

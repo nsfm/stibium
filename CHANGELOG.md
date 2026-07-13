@@ -121,6 +121,14 @@ release; newest work at the top of each section.
 
 ## App & infrastructure
 
+- **Headless CLI verbs**: `--validate` (script/datum errors to stderr,
+  exit code) and `--export FILE [--resolution R] [--detect-features]`
+  run a model's export node with no display or dialogs — CI, batch
+  jobs, and AI agents can drive exports directly.
+- **Live reload**: the open .sb reloads automatically when it changes
+  on disk (only while the session has no unsaved edits), so external
+  tools and agents can edit a model while it's open.
+
 - **Qt6 port** (Qt 6.11 verified; per-monitor HiDPI, modern platform
   support). C++17 across targets.
 - **Autosave** with menu toggle. *(fork era — the founding feature)*

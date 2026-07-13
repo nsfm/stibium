@@ -128,6 +128,11 @@ void NodeProxy::clearExportWorker()
     inspector->clearExportWorker();
 }
 
+ExportWorker* NodeProxy::getExportWorker() const
+{
+    return inspector->getExportWorker();
+}
+
 void NodeProxy::setExportWorker(ExportWorker* worker)
 {
     inspector->setExportWorker(worker);
