@@ -1,4 +1,5 @@
 find_package(PNG REQUIRED)
+find_package(ZLIB REQUIRED)
 find_package(FLEX REQUIRED)
 
 ################################################################################
@@ -38,6 +39,7 @@ add_library(SbFab STATIC
     src/fab.cpp
     src/formats/png.c
     src/formats/stl.c
+    src/formats/threemf.cpp
     src/tree/eval.c
     src/tree/math/math_f.c
     src/tree/math/math_g.c
@@ -80,6 +82,7 @@ target_link_libraries(SbFab
     ${Boost_LIBRARIES}
     ${Python_LIBRARY_RELEASE}
     ${PNG_LIBRARIES}
+    ZLIB::ZLIB
 )
 target_include_directories(SbFab PUBLIC inc)
 target_include_directories(SbFab SYSTEM PRIVATE

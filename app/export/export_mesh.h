@@ -30,9 +30,10 @@ public:
 protected:
     /*
      *  Simplifies the indexed mesh to within _simplify model units of
-     *  deviation, replacing indices with the (much smaller) result.
+     *  deviation, replacing verts / indices with the (much smaller)
+     *  result.
      */
-    void simplifyMesh(const std::vector<float>& verts,
+    void simplifyMesh(std::vector<float>& verts,
                       std::vector<uint32_t>& indices) const;
 
     /*

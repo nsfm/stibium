@@ -10,9 +10,6 @@ were named for the element symbol all along).
   paths → SVG/DXF. Serves the vector-graphics workflow (currently
   massive-resolution PNGs for photolithography) and laser cutting.
   Resolution-independent litho masks.
-- **3MF export.** Zipped + indexed + units; every modern slicer reads it.
-  The simplifier already produces an indexed mesh in memory, so most of
-  the work is done. Default format; STL stays for compatibility.
 - **Cross-section preview.** Draggable slice plane in the viewport showing
   part interiors (walls, voids, clearances). Nearly free in f-rep — render
   the field on one plane. Formalizes the accidental z-clip slicing the 2D
@@ -21,10 +18,6 @@ were named for the element symbol all along).
   (trilinear interpolation). Design around existing parts: PCB models,
   scans, vendor STEP-derived meshes. Upstream's most-requested feature
   (mkeeter/antimony#153), never landed.
-- **Indexed mesh storage in the mesher.** Replace `std::list<Triangle>` +
-  dedup map/set (~275 B/triangle with detect-features on; 43M tris ≈ 12 GB;
-  ~2 min to mesh the 4x5 ground glass holder) with flat vectors + indexed
-  vertices. Halves memory, kills the large-export OOM, big speedup.
 
 ## Tier 2 — strong wants
 
@@ -189,7 +182,23 @@ a GUI so agentic tools can contribute to modeling cleanly:
 - STL writer counts via `sizeof(float)` for an int — works, fragile.
 
 ## Done
-- 2026-07-12 — mod/floor/log opcodes (all four eval backends, prefix +
+- 2026-07-12 — 3MF export (new default; STL stays). Minimal streaming
+  ZIP writer over zlib (already a dep via libpng, no new vendoring) +
+  3MF core-spec model XML in lib/fab/formats/threemf. Extension-driven
+  in ExportMeshWorker, dialog defaults to 3MF; new `export.mesh` script
+  hook (export.stl kept as alias). Simplify now compacts orphaned
+  verts. Verified: python zipfile CRC/topology checks + PrusaSlicer
+  (manifold=yes, correct volume, matches STL of same mesh); ~6× smaller
+  than STL. No color/multi-material yet (color propagation is the
+  prereq, see Tier 2.5).
+- 2026-07-12 — indexed mesh storage in the mesher: interned vertices +
+  3×uint32 triangles (tombstone erases, sort-based dedup/prune), new
+  `triangulate_indexed`/`get_mesh` API, STL export end-to-end indexed
+  (no meshopt re-weld; `save_stl_indexed` streams to disk; also fixed
+  the sizeof(float) count write). ~4.6× less peak RSS, 1.47× faster
+  with detect-features (723→159 MiB, 16.9→11.5 s @ 2.57M tris); 43M-tri
+  export ~12→~3 GB. Output bit-identical (golden-dump verified); new
+  tests/mesher.cpp property + equivalence suite. (all four eval backends, prefix +
   infix syntax, CTest coverage). Repeat node category: infinite/finite/
   mirror/polar domain repetition + self-similar scale recursion
   (repeat_scale, unlimited depth) + Iterate Scaled. All O(1) or

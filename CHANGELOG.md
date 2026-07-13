@@ -6,6 +6,23 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **3MF export** (the new default; STL stays for compatibility). The
+  export dialog and scripted exports pick the format by extension; a
+  new `export.mesh` hook is the documented spelling (`export.stl`
+  remains as an alias). Written by a minimal streaming ZIP writer over
+  zlib - no new dependencies - and verified against PrusaSlicer
+  (manifold, correct volume) and python zipfile CRC/topology checks.
+  Typically ~6× smaller than the same mesh as STL.
+- **Indexed mesh storage in the mesher**: triangles are 12-byte vertex
+  index triples over an interned vertex table instead of a linked list
+  of double-precision corners with tree-based end-of-run dedup. ~4.6×
+  less peak memory and ~1.5× faster on the feature-detection path
+  (gyroid, 2.6M tris: 723 → 159 MiB, 16.9 → 11.5 s); the 43M-triangle
+  export that needed ~12 GB now fits in ~3. STL export consumes the
+  indexed mesh directly (no soup expansion, no meshopt re-weld) via
+  `save_stl_indexed`. Output verified bit-identical to the old mesher;
+  new mesher test suite (topology, analytic volume/area, sharp-corner
+  reconstruction, golden dumps, indexed==soup equivalence).
 - **`mod` and `floor` opcodes** in the math engine (prefix `M`/`F`,
   infix `mod()`/`floor()`), with float, interval, gradient, and region
   backends and CTest coverage.
