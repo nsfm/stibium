@@ -6,6 +6,15 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **Parallel meshing**: exports fan out across all CPU cores (chunked
+  region, per-thread tree clones, seam-exact merge). 2.57M-triangle
+  gyroid: 11.7 s → 2.8 s on 16 threads; combined with the indexed
+  mesher, the full day's delta is 16.9 s / 723 MiB → 2.8 s / 335 MiB.
+  Provably identical output to serial meshing with feature detection
+  off; watertight-verified with it on.
+- **Real export progress**: the exporting dialog's bar now tracks
+  actual meshing progress (exact voxel accounting, including
+  fast-forward over empty space) instead of spinning indeterminately.
 - **3MF export** (the new default; STL stays for compatibility). The
   export dialog and scripted exports pick the format by extension; a
   new `export.mesh` hook is the documented spelling (`export.stl`

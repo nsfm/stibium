@@ -27,8 +27,6 @@ were named for the element symbol all along).
   direction). Ends guess-and-check on functional parts.
 - **Multi-shape export.** One click → N files (print plates, assemblies).
   The export hook currently hard-rejects multiple export tasks per script.
-- **Parallel meshing.** `triangulate_region()` subdivides recursively —
-  natural fork/join; currently single-threaded.
 - **Node editor QoL.** Fuzzy-search add menu (type "cyl"), minimap for big
   graphs, canvas annotations (sticky notes + named zones behind nodes,
   persisted in the .sb JSON like node positions).
@@ -178,6 +176,12 @@ a GUI so agentic tools can contribute to modeling cleanly:
 
 
 ## Done
+- 2026-07-12 — parallel meshing (`triangulate_indexed_mt`): chunked
+  region → worker pool on cloned trees → seam-exact merge (re-intern)
+  → global dedup/prune. Provably identical to serial with detect off;
+  invariant-verified with detect on. Gyroid 2.57M tris: 11.7s → 2.8s
+  (16 threads). Day total: 16.9s/723 MiB → 2.8s/335 MiB. Plus real
+  export progress bar (exact voxel accounting via atomic, 20 Hz poll).
 - 2026-07-12 — 3MF export (new default; STL stays). Minimal streaming
   ZIP writer over zlib (already a dep via libpng, no new vendoring) +
   3MF core-spec model XML in lib/fab/formats/threemf. Extension-driven
