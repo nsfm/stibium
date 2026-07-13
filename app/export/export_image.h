@@ -5,6 +5,10 @@
 #include <QMatrix4x4>
 #include <QString>
 
+#include <memory>
+
+#include "fab/types/shape.h"
+
 class Graph;
 
 namespace ImageExport
@@ -30,5 +34,14 @@ struct Options
  *  Returns an empty string on success, else an error message.
  */
 QString render(Graph* graph, const Options& opt);
+
+/*
+ *  Unions the graph's renderable shapes, 3D and 2D separately
+ *  (terminal outputs only, unless node_name selects one node).
+ *  Returns an error message, or empty on success.
+ */
+QString collectShapes(Graph* graph, const QString& node_name,
+                      std::unique_ptr<Shape>& u3d,
+                      std::unique_ptr<Shape>& u2d);
 
 }  // namespace ImageExport

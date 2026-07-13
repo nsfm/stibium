@@ -29,15 +29,17 @@
 namespace ImageExport
 {
 
-QString render(Graph* graph, const Options& opt)
+QString collectShapes(Graph* graph, const QString& node_name,
+                      std::unique_ptr<Shape>& u3d,
+                      std::unique_ptr<Shape>& u2d)
 {
+
 
     // Union the file's Shape outputs, 3D and 2D separately: when 3D
     // geometry exists, 2D shapes are construction profiles and are
     // left out of the thumbnail rather than flattening it.
-    const std::string want = opt.node_name.toStdString();
+    const std::string want = node_name.toStdString();
     bool node_found = false;
-    std::unique_ptr<Shape> u3d, u2d;
     for (auto n : graph->childNodes())
     {
         if (!want.empty() && n->getName() != want)
@@ -69,7 +71,17 @@ QString render(Graph* graph, const Options& opt)
     }
 
     if (!want.empty() && !node_found)
-        return "no node named '" + opt.node_name + "'";
+        return "no node named '" + node_name + "'";
+
+    return QString();
+}
+
+QString render(Graph* graph, const Options& opt)
+{
+    std::unique_ptr<Shape> u3d, u2d;
+    const QString err = collectShapes(graph, opt.node_name, u3d, u2d);
+    if (!err.isEmpty())
+        return err;
 
     const bool flat = !u3d;
     const std::unique_ptr<Shape>& total = flat ? u2d : u3d;

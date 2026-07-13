@@ -168,6 +168,10 @@ release; newest work at the top of each section.
   load; only the uid-anchoring stub remains). Files shrink 8-35%,
   git diffs show real changes only, and load→save round-trips are
   byte-identical. `--resave FILE` batch-migrates old files.
+- **Field analytics**: `--analyze` integrates the model and reports
+  volume (or area for 2D), center of mass, and tight bounds as JSON
+  — guess-and-check counterweighting ends here. `--node NAME` scopes
+  to a single node.
 - **Node library as JSON**: `--describe-nodes` dumps every node's
   name, category, typed inputs (with defaults), and outputs — the
   vocabulary for tooling and the seed for generated wiki docs.
