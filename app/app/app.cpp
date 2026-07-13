@@ -322,6 +322,13 @@ void App::loadFile(QString f)
 {
     Settings::set("files/last_dir", QFileInfo(f).absolutePath());
     filename = f;
+
+    // Drop undo history before demolishing the graph: stale commands
+    // hold pointers into the old nodes, and undoing across a load
+    // would replay them into freed memory. (File > New always did
+    // this; File > Open and the live-reload path never did.)
+    undo_stack->clear();
+
     graph->clear();
 
     // XXX disable rendering
