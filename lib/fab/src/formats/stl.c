@@ -5,8 +5,12 @@
 
 static void write_header(FILE* stl, uint32_t tris)
 {
-    // 80-character header
-    fprintf(stl, "This is a binary STL file made in Antimony      \n(github.com/mkeeter/antimony)\n\n");
+    // Fixed 80-byte header (remainder zero-filled).  The "Stibium"
+    // stamp lets mesh import recognize our own exports and advise
+    // opening the source .sb instead of re-sampling a frozen copy.
+    static const char header[80] =
+        "Stibium binary STL export (f-rep source; prefer the original .sb)";
+    fwrite(header, 1, sizeof(header), stl);
 
     // Little-endian uint32 triangle count
     fwrite(&tris, sizeof(tris), 1, stl);
