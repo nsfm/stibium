@@ -85,6 +85,15 @@ release; newest work at the top of each section.
 
 ## UI
 
+- **No more zoom clipping**: the render's depth range now always
+  covers the whole model (voxel budget capped instead), so extreme
+  close-ups stop guillotining geometry. Deep zoom is now a quality
+  target, not a wall.
+- **Viewport chrome**: the section slider is permanent (left edge,
+  View ▸ Section slider), the key-light gizmo has a tooltip and a
+  View ▸ Light control toggle, and a corner eye button shows/hides
+  bounding boxes (lit = visible; the old "Hide UI" menu item is now
+  an honest "Bounding boxes" checkbox).
 - **Cross-section view**: press X in a viewport for a slider that
   pulls a screen-parallel cut plane through the model — rotate to aim
   the cut, slide to expose walls, voids, and clearances. Also
