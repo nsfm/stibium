@@ -573,3 +573,65 @@ TEST_CASE("Import: unreadable file fails cleanly", "[mesh]")
     REQUIRE(res.grid_id == 0);
     REQUIRE(!res.error.empty());
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// Long-operation hook
+
+#include "fab/fab.h"
+
+namespace {
+int hook_calls = 0;
+int hook_finishes = 0;
+uint64_t hook_last_done = 0;
+bool hook_monotonic = true;
+
+void counting_hook(const char* label, uint64_t done, uint64_t total)
+{
+    (void)label;
+    if (done >= total) {
+        ++hook_finishes;
+        return;
+    }
+    if (done < hook_last_done)
+        hook_monotonic = false;
+    hook_last_done = done;
+    ++hook_calls;
+}
+}
+
+TEST_CASE("Import: long-operation hook fires during sampling", "[mesh]")
+{
+    Soup sphere = make_icosphere(3, 1.0f);
+    std::string path = tmp_path("import_hook.stl");
+    write_binary_stl(path, sphere, "icosphere");
+
+    hook_calls = 0;
+    hook_finishes = 0;
+    hook_last_done = 0;
+    hook_monotonic = true;
+
+    // Resolution chosen so sampling takes long enough for several
+    // 30ms pump ticks, and unlikely to collide with any cached key
+    fab::longOpHook = counting_hook;
+    auto res = fab_mesh::import_mesh_grid(path, 37.0f, "");
+    fab::longOpHook = NULL;
+
+    CAPTURE(res.error);
+    REQUIRE(res.grid_id != 0);
+    CAPTURE(hook_calls);
+    REQUIRE(hook_calls >= 1);
+    REQUIRE(hook_finishes == 1);        // exactly one done==total call
+    REQUIRE(hook_monotonic);
+
+    // A cache/registry hit must NOT fire the hook (nothing to wait on)
+    hook_calls = 0;
+    hook_finishes = 0;
+    fab::longOpHook = counting_hook;
+    auto again = fab_mesh::import_mesh_grid(path, 37.0f, "");
+    fab::longOpHook = NULL;
+    REQUIRE(again.from_cache == true);
+    REQUIRE(hook_calls == 0);
+    REQUIRE(hook_finishes == 0);
+
+    grid_registry_trim();
+}

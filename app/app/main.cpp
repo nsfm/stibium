@@ -6,6 +6,7 @@
 #include <QStandardPaths>
 #include <QMainWindow>
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QProgressDialog>
 #include <QSurfaceFormat>
 #include <QStringList>
@@ -300,6 +301,7 @@ static int renderHeadless(App& app, const QString& out, float resolution,
 static void guiLongOpHook(const char* label, uint64_t done, uint64_t total)
 {
     static QProgressDialog* dialog = NULL;
+    static QElapsedTimer elapsed;
 
     if (done >= total)
     {
@@ -311,17 +313,29 @@ static void guiLongOpHook(const char* label, uint64_t done, uint64_t total)
             QCoreApplication::processEvents(
                     QEventLoop::ExcludeUserInputEvents);
         }
+        elapsed.invalidate();
         return;
     }
 
+    if (!elapsed.isValid())
+    {
+        elapsed.start();
+        return;             // quick operations never show a dialog
+    }
     if (!dialog)
     {
-        // No cancel button: sampling has no safe abort point today
+        if (elapsed.elapsed() < 350)
+            return;
+
+        // Deterministic show (QProgressDialog's minimumDuration
+        // estimation is unreliable when we're also the event pump).
+        // No cancel button: sampling has no safe abort point today.
         dialog = new QProgressDialog(
                 QString::fromUtf8(label), QString(), 0, 1000);
         dialog->setWindowModality(Qt::ApplicationModal);
-        dialog->setMinimumDuration(400);
+        dialog->setMinimumDuration(0);
         dialog->setWindowTitle("Stibium");
+        dialog->show();
     }
     dialog->setValue(int(1000.0 * done / (total ? total : 1)));
     QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
