@@ -9,4 +9,4 @@ input('spacing_y', float, 3)
 input('x0', float, 0)
 input('y0', float, 0)
 
-output('shape', fab.shapes.repeat_xy(shape, spacing_x, spacing_y, x0, y0))
+output('repeated', fab.shapes.repeat_xy(shape, spacing_x, spacing_y, x0, y0))
