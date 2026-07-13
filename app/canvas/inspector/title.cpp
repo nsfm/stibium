@@ -91,6 +91,11 @@ void InspectorTitle::setNameValid(bool valid)
     name->setDefaultTextColor(valid ? Colors::base06 : Colors::red);
 }
 
+QString InspectorTitle::getTitle() const
+{
+    return title->toPlainText();
+}
+
 void InspectorTitle::setTitle(QString new_title)
 {
     title->setPlainText(new_title);
