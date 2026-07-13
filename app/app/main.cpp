@@ -22,6 +22,159 @@
 #include "graph/proxy/graph.h"
 #include "graph/proxy/node.h"
 #include "export/export_worker.h"
+#include "viewport/render/task.h"
+#include "fab/fab.h"
+#include "fab/types/shape.h"
+#include "fab/tree/render.h"
+#include "fab/util/region.h"
+
+#include <QImage>
+#include <QMatrix4x4>
+
+#include <cstring>
+#include <memory>
+
+/*
+ *  Implements --render: composites every shape in the file (what the
+ *  viewport would show, unioned) into a shaded PNG.  resolution <= 0
+ *  fits the longest side to `size` pixels.  Pure-C render path; no GL.
+ */
+static int renderHeadless(App& app, const QString& out, float resolution,
+                          const QString& view, int size)
+{
+    // Union the file's Shape outputs, 3D and 2D separately: when 3D
+    // geometry exists, 2D shapes are construction profiles and are
+    // left out of the thumbnail rather than flattening it.
+    std::unique_ptr<Shape> u3d, u2d;
+    for (auto n : app.getGraph()->childNodes())
+        for (auto d : n->childDatums())
+        {
+            if (!d->isValid() || d->getType() != fab::ShapeType)
+                continue;
+            boost::python::extract<Shape> es(d->currentValue());
+            if (!es.check())
+                continue;
+            const Shape s = es();
+            if (std::isinf(s.bounds.xmin) || std::isinf(s.bounds.xmax) ||
+                std::isinf(s.bounds.ymin) || std::isinf(s.bounds.ymax))
+                continue;
+            auto& u = (std::isinf(s.bounds.zmin) ||
+                       std::isinf(s.bounds.zmax)) ? u2d : u3d;
+            u.reset(u ? new Shape(*u | s) : new Shape(s));
+        }
+
+    const bool flat = !u3d;
+    const std::unique_ptr<Shape>& total = flat ? u2d : u3d;
+    if (!total)
+    {
+        fprintf(stderr, "render: no renderable shapes in this file\n");
+        return 1;
+    }
+    const Bounds b = total->bounds;
+
+    // View transform (2D content always renders top-down)
+    QMatrix4x4 M;
+    if (!flat && view != "top")
+    {
+        if (view == "front")
+        {
+            M.rotate(-90, 1, 0, 0);
+        }
+        else  // iso
+        {
+            M.rotate(-55, 1, 0, 0);
+            M.rotate(25, 0, 0, 1);
+        }
+    }
+
+    Shape src = flat
+        ? Shape(total->math, Bounds(b.xmin, b.ymin, 0,
+                                    b.xmax, b.ymax, 0.0001f))
+        : *total;
+    Shape transformed = src.map(RenderTask::getTransform(M));
+    const Bounds tb = transformed.bounds;
+
+    float res = resolution;
+    if (res <= 0)
+    {
+        const float extent = fmax(tb.xmax - tb.xmin, tb.ymax - tb.ymin);
+        res = extent > 0 ? size / extent : 1;
+    }
+
+    Region r = {};
+    r.ni = uint32_t(fmax(1, (tb.xmax - tb.xmin) * res));
+    r.nj = uint32_t(fmax(1, (tb.ymax - tb.ymin) * res));
+    r.nk = uint32_t(fmax(1, (tb.zmax - tb.zmin) * res));
+    build_arrays(&r, tb.xmin, tb.ymin, tb.zmin, tb.xmax, tb.ymax, tb.zmax);
+
+    const int W = r.ni, H = r.nj;
+    std::vector<uint16_t> d16(size_t(W) * H, 0);
+    std::vector<uint16_t*> d16_rows(H);
+    auto s8 = new uint8_t[size_t(W) * H][3];
+    memset(s8, 0, size_t(W) * H * 3);
+    auto s8_rows = new decltype(s8)[H];
+    for (int i = 0; i < H; ++i)
+    {
+        d16_rows[i] = &d16[size_t(W) * i];
+        s8_rows[i] = &s8[size_t(W) * i];
+    }
+
+    volatile int halt = 0;
+    render16(transformed.tree.get(), r, d16_rows.data(), &halt, nullptr);
+    if (flat)
+    {
+        // 2D fields have no meaningful z gradient; fill with a
+        // straight-on normal (the viewport does the same)
+        for (int j = 0; j < H; ++j)
+            for (int i = 0; i < W; ++i)
+                if (d16_rows[j][i])
+                {
+                    s8_rows[j][i][0] = 128;
+                    s8_rows[j][i][1] = 128;
+                    s8_rows[j][i][2] = 255;
+                }
+    }
+    else
+    {
+        shaded8(transformed.tree.get(), r, d16_rows.data(), s8_rows,
+                &halt, nullptr);
+    }
+    free_arrays(&r);
+
+    // Compose an ARGB image: decode the packed normals (n*127+128)
+    // and light them (key + ambient, warm material) where depth
+    // exists; transparent elsewhere.  Flip vertically (rows are y-up).
+    const float Lx = 0.33f, Ly = 0.32f, Lz = 0.89f;   // key light
+    const float base[3] = {228, 219, 205};            // warm gray
+    QImage img(W, H, QImage::Format_ARGB32);
+    img.fill(Qt::transparent);
+    for (int j = 0; j < H; ++j)
+        for (int i = 0; i < W; ++i)
+            if (d16_rows[j][i])
+            {
+                const auto& px = s8_rows[j][i];
+                const float nx = (px[0] - 128) / 127.f;
+                const float ny = (px[1] - 128) / 127.f;
+                const float nz = (px[2] - 128) / 127.f;
+                const float diff = fmax(0.f, nx*Lx + ny*Ly + nz*Lz);
+                const float lum = 0.32f + 0.68f * diff;
+                img.setPixel(i, H - 1 - j, qRgba(
+                    int(fmin(255.f, base[0] * lum)),
+                    int(fmin(255.f, base[1] * lum)),
+                    int(fmin(255.f, base[2] * lum)), 255));
+            }
+
+    delete [] s8;
+    delete [] s8_rows;
+
+    if (!img.save(out))
+    {
+        fprintf(stderr, "render: could not write %s\n",
+                out.toLocal8Bit().constData());
+        return 1;
+    }
+    return 0;
+}
 
 /*
  *  Implements --validate and --export: reports script/datum errors,
@@ -30,7 +183,7 @@
  */
 static int runHeadless(App& app, bool validate_only,
                        const QString& export_file, float resolution,
-                       int detect_features)
+                       int detect_features, bool skip_export)
 {
     int errors = 0;
     for (auto n : app.getGraph()->childNodes())
@@ -66,10 +219,12 @@ static int runHeadless(App& app, bool validate_only,
 
     if (errors)
     {
-        fprintf(stderr, "export aborted: %i error(s) in the file\n",
-                errors);
+        fprintf(stderr, "aborted: %i error(s) in the file\n", errors);
         return 1;
     }
+
+    if (skip_export)
+        return 0;
 
     // Find the export worker registered by the file's node scripts
     QList<ExportWorker*> workers;
@@ -198,6 +353,19 @@ int main(int argc, char *argv[])
         QCommandLineOption detectOpt("detect-features",
                 "Force feature detection on for --export");
         parser.addOption(detectOpt);
+        QCommandLineOption renderOpt("render",
+                "Render every shape in the file to an image (PNG "
+                "recommended) and exit; iso view for 3D, top-down "
+                "for 2D", "FILE");
+        parser.addOption(renderOpt);
+        QCommandLineOption viewOpt("view",
+                "View for --render: iso (default), top, or front",
+                "VIEW", "iso");
+        parser.addOption(viewOpt);
+        QCommandLineOption sizeOpt("size",
+                "Longest image side in pixels for --render when "
+                "--resolution isn't given (default 512)", "N", "512");
+        parser.addOption(sizeOpt);
         QCommandLineOption validateOpt("validate",
                 "Load the file, report script and datum errors to "
                 "stderr, and exit (0 = valid)");
@@ -207,6 +375,7 @@ int main(int argc, char *argv[])
         parser.process(app);
 
         const bool headless = parser.isSet(exportOpt) ||
+                              parser.isSet(renderOpt) ||
                               parser.isSet(validateOpt);
 
         auto args = parser.positionalArguments();
@@ -217,7 +386,8 @@ int main(int argc, char *argv[])
         }
         else if (headless && args.length() != 1)
         {
-            fprintf(stderr, "--export/--validate require a file\n");
+            fprintf(stderr,
+                    "--export/--render/--validate require a file\n");
             exit(1);
         }
         else if (args.length() == 1)
@@ -227,12 +397,20 @@ int main(int argc, char *argv[])
         }
 
         if (headless)
-            exit(runHeadless(app, parser.isSet(validateOpt),
-                             parser.value(exportOpt),
-                             parser.isSet(resolutionOpt)
-                                 ? parser.value(resolutionOpt).toFloat()
-                                 : -1,
-                             parser.isSet(detectOpt) ? 1 : -1));
+        {
+            const float res = parser.isSet(resolutionOpt)
+                ? parser.value(resolutionOpt).toFloat() : -1;
+
+            int code = runHeadless(app, parser.isSet(validateOpt),
+                                   parser.value(exportOpt), res,
+                                   parser.isSet(detectOpt) ? 1 : -1,
+                                   !parser.isSet(exportOpt));
+            if (code == 0 && parser.isSet(renderOpt))
+                code = renderHeadless(app, parser.value(renderOpt), res,
+                                      parser.value(viewOpt),
+                                      parser.value(sizeOpt).toInt());
+            exit(code);
+        }
     }
 
     app.makeDefaultWindows();

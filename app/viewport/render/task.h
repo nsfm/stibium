@@ -19,6 +19,12 @@ class RenderTask : public QObject
 {
 Q_OBJECT
 public:
+    /*
+     *  Converts a view matrix into field-space coordinate transforms
+     *  (public: reused by the headless --render path)
+     */
+    static Transform getTransform(QMatrix4x4 m);
+
     RenderTask(RenderInstance* parent, PyObject* s, QMatrix4x4 M,
                QVector2D clip, int refinement=1);
     ~RenderTask();
@@ -55,7 +61,7 @@ protected:
     /*
      *  Converts the given matrix into a Transform
      */
-    static Transform getTransform(QMatrix4x4 m);
+
 
     PyObject* shape;
     QMatrix4x4 M;
