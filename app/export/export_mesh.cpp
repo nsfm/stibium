@@ -109,6 +109,10 @@ void ExportMeshWorker::async()
     triangulate_indexed_mt(shape.tree.get(), r, _detect_features, &halt,
                            verts, indices, -1, &progress_done);
 
+    // Simplification and file writing can't report granular progress;
+    // drop the bar back to its busy animation instead of a full bar.
+    progress_total = 0;
+
     if (_simplify > 0 && indices.size() >= 3 && !halt)
         simplifyMesh(verts, indices);
 
