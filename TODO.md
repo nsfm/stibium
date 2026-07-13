@@ -189,9 +189,23 @@ a GUI so agentic tools can contribute to modeling cleanly:
 - STL writer counts via `sizeof(float)` for an int — works, fragile.
 
 ## Done
-- 2026-07-12 — mod/floor opcodes (all four eval backends, prefix +
-  infix syntax, CTest coverage) and the Repeat node category: nine
-  domain-repetition nodes at O(1) field cost, numerically verified.
+- 2026-07-12 — mod/floor/log opcodes (all four eval backends, prefix +
+  infix syntax, CTest coverage). Repeat node category: infinite/finite/
+  mirror/polar domain repetition + self-similar scale recursion
+  (repeat_scale, unlimited depth) + Iterate Scaled. All O(1) or
+  documented; numerically verified against the real C engine. NOTE:
+  scale-repeat needs factor > shape's radial span for visible gaps
+  (else gapless solid → blank); r0 auto-derives from bounds.
+- 2026-07-12 — Qt6 port (Qt 6.11, C++17, per-monitor HiDPI). Framework
+  verdict: keep Qt, reject QML rewrite. deploy/ + binary rename deferred.
+- 2026-07-12 — UI glow-up (Tiers A+B): warm amber palette + app-wide
+  Fusion theme, gradient wires / round ports / shadowed nodes,
+  type-tinted + operator-tinted headers, enhanced render mode (ambient/
+  rim/AO/gamma) with draggable light gizmo, zoom LOD name-cards, fuzzy
+  add-node palette (Tab/double-click), sticky wires, eased hovers,
+  startup graph-focus, config system (~/.config/Stibium).
+- 2026-07-12 — cleanup: removed dead update checker (dropped QtNetwork),
+  wired SbGraphTest/SbFabTest into CTest, modernized BUILDING.md.
 - 2026-07-12 — Phase 1 node campaign: 46 new nodes / 60+ shape functions
   (primitives, deforms, 2D stroke kit, functional-parts kit with ISO
   tables, ISO threads + involute gears). All numerically verified; new

@@ -54,12 +54,28 @@ release; newest work at the top of each section.
 - **Canvas facelift**: gradient wires with hover glow and shadows,
   circular 14px ports (up from 10px squares) with hover rings, node
   drop shadows + gradient fills + amber selection, zoom-faded two-level
-  dot grid, tinted rubber-band, zoom clamped to [0.08, 4].
+  dot grid, tinted rubber-band.
+- **Type-tinted node headers**: title bands (and zoomed-out cards) tint
+  by output datum type — shape green, float yellow, etc. — and
+  shape-consuming shape-producers (CSG/deforms/transforms) tint violet,
+  so operators read differently from sources at a glance.
+- **Zoom LOD**: below ~32% zoom nodes collapse to solid type-tinted name
+  cards and wires simplify to cosmetic strokes; graphs read as a labeled
+  map instead of gray fuzz. Zoom-out unclamped deep (0.02).
+- **Fuzzy add-node palette**: double-click canvas or press Tab for a
+  type-to-filter popup over all nodes (prefix > word > substring >
+  subsequence); right-click keeps the browsable menu.
+- **Sticky wire connections**: release a wire away from a port and it
+  stays live following the cursor (canvas pans/selects underneath);
+  left-click a valid port to complete, right-click/Escape to cancel.
+  Classic drag-to-connect still works.
 - **Enhanced render mode** (new default, menu-selectable alongside
   Shaded/Height-map): hemispheric ambient, key light, depth-buffer AO,
-  fresnel rim, gamma-correct output.
+  fresnel rim, gamma-correct output. Key-light direction is draggable
+  via a trackball gizmo in the viewport corner (persists in config).
 - **Viewport chrome**: near-black gradient backdrop, labeled X/Y/Z
   axes, monospace coordinate readout.
+- **Eased hover/selection glows** (~120ms) on nodes and wires.
 - **Canvas opens centered on the loaded graph** (zooming out to fit),
   instead of at the origin.
 - Script editor uses the system fixed-width font (was hardcoded
@@ -71,11 +87,15 @@ release; newest work at the top of each section.
   support). C++17 across targets.
 - **Autosave** with menu toggle. *(fork era — the founding feature)*
 - **Config system**: INI at `~/.config/Stibium/Stibium.ini`
-  (platform-appropriate elsewhere); autosave interval and editor font
-  as first settings.
+  (platform-appropriate elsewhere); autosave interval, editor font,
+  last-used directory, and enhanced-mode key-light direction.
 - **Test suites wired into CTest** (SbGraphTest + SbFabTest, 237
   assertions).
-- CMake 4 compatibility.
+- **Removed the update checker** (polled upstream's frozen releases;
+  dropped the QtNetwork dependency with it).
+- Renamed to Stibium in all user-facing surfaces (About box, dialogs);
+  binary/install-path plumbing rename deferred to first release.
+- CMake 4 compatibility; modernized BUILDING.md (Qt6, Arch recipe).
 
 ## Bug fixes
 
