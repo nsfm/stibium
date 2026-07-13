@@ -38,6 +38,7 @@ add_custom_command(
 
 add_library(SbFab STATIC
     src/fab.cpp
+    src/formats/dxf.cpp
     src/formats/png.c
     src/formats/stl.c
     src/formats/svg.cpp

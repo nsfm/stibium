@@ -6,9 +6,6 @@ were named for the element symbol all along).
 
 ## Tier 1 — would die on these hills
 
-- **DXF export for 2D shapes.** SVG shipped (see Done); DXF is the
-  remaining format for laser-cutter toolchains — LWPOLYLINE entities
-  from the same `contour_field` output.
 - **Cross-section preview.** Draggable slice plane in the viewport showing
   part interiors (walls, voids, clearances). Nearly free in f-rep — render
   the field on one plane. Formalizes the accidental z-clip slicing the 2D
@@ -175,6 +172,11 @@ a GUI so agentic tools can contribute to modeling cleanly:
 
 
 ## Done
+- 2026-07-12 — DXF export (R12 closed POLYLINEs, y-up, mm) from the
+  same contour pipeline; vector node/dialog/hook are extension-driven
+  (`export.vector`, `.svg`/`.dxf`; export.svg kept as alias).
+  Validated with ezdxf: closed loops, analytic areas. Tier 1's
+  SVG+DXF item fully closed.
 - 2026-07-12 — SVG export for 2D shapes (`export.svg` hook + GUI
   dialog). Marching squares over one field plane (`contour_field` in
   lib/fab): exact edge-indexed chaining, saddle cells resolved by

@@ -71,10 +71,12 @@ BOOST_PYTHON_MODULE(_AppHooks)
                 "    resolution=None, detect_features=False, simplify=0)\n"
                 "    Alias of mesh() (kept for compatibility).\n"
                 )
-        .def("svg", raw_function(&ScriptExportHooks::svg),
-                "svg(shape, bounds=None, pad=True, filename=None,\n"
-                "    resolution=None, detect_features=True)\n"
-                "    Registers an .svg exporter for the given shape.\n"
+        .def("vector", raw_function(&ScriptExportHooks::svg),
+                "vector(shape, bounds=None, pad=True, filename=None,\n"
+                "       resolution=None, detect_features=True)\n"
+                "    Registers a vector exporter for the given shape.\n"
+                "    The format follows the filename extension:\n"
+                "      .dxf, or anything else for .svg\n"
                 "    Contours are traced on the z=0 plane (or the\n"
                 "    z midpoint for 3D shapes); output is in mm.\n"
                 "    Valid kwargs:\n"
@@ -89,6 +91,11 @@ BOOST_PYTHON_MODULE(_AppHooks)
                 "      (on by default)\n"
                 "    simplify sets the max path-simplification deviation\n"
                 "      in model units (default: a quarter cell; 0 disables)"
+                )
+        .def("svg", raw_function(&ScriptExportHooks::svg),
+                "svg(shape, bounds=None, pad=True, filename=None,\n"
+                "    resolution=None, detect_features=True)\n"
+                "    Alias of vector() (kept for compatibility).\n"
                 )
         .def("heightmap", raw_function(&ScriptExportHooks::heightmap),
                 "heightmap(shape, bounds=None, pad=True, filename=None,\n"

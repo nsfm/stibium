@@ -4,6 +4,7 @@
 #include <fstream>
 #include <string>
 
+#include "fab/formats/dxf.h"
 #include "fab/formats/svg.h"
 #include "fab/tree/contour.h"
 #include "fab/tree/parser.h"
@@ -150,6 +151,36 @@ TEST_CASE("Contour: simplification preserves shape and corners")
             CAPTURE(sy);
             REQUIRE(has_point_near(square, sx, sy, 0.005f));
         }
+}
+
+TEST_CASE("DXF writer: valid document")
+{
+    auto paths = trace(ANNULUS, true);
+    REQUIRE(paths.size() == 2);
+    REQUIRE(save_dxf(paths, -1, -1, 1, 1, "test_out.dxf"));
+
+    std::ifstream f("test_out.dxf");
+    std::string data((std::istreambuf_iterator<char>(f)),
+                      std::istreambuf_iterator<char>());
+
+    const auto count = [&data](const std::string& needle) {
+        size_t n = 0, pos = 0;
+        while ((pos = data.find(needle, pos)) != std::string::npos)
+        {
+            n++;
+            pos += needle.size();
+        }
+        return n;
+    };
+
+    REQUIRE(data.find("AC1009") != std::string::npos);
+    REQUIRE(data.find("ENTITIES") != std::string::npos);
+    // Two loops -> two closed polylines, each properly terminated
+    REQUIRE(count("POLYLINE") == 2);
+    REQUIRE(count("SEQEND") == 2);
+    REQUIRE(count("VERTEX") >= 6);
+    REQUIRE(data.rfind("0\nEOF\n") == data.size() - 6);
+    std::remove("test_out.dxf");
 }
 
 TEST_CASE("SVG writer: valid document")
