@@ -46,4 +46,10 @@ protected:
 
     const QColor base_color;
     bool hover;
+    qreal hover_glow=0;
+
+    /*
+     *  Eases hover_glow toward the given target, repainting each frame
+     */
+    void animateGlow(qreal target);
 };
