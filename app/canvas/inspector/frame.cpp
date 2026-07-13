@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include <QPropertyAnimation>
+
 #include <QGraphicsScene>
 #include <QPainter>
 #include <QGraphicsSceneMouseEvent>
@@ -104,12 +106,17 @@ void InspectorFrame::paint(QPainter *painter,
                                      : QPen(Colors::base03, 1));
         painter->drawRoundedRect(r, 10, 10);
 
+        // Name text sized to fit the card (width and height)
+        const auto name = QString::fromStdString(node->getName());
         auto f = painter->font();
-        f.setPixelSize(fmax(14.0, r.height() * 0.4));
+        f.setPixelSize(16);
+        const QFontMetricsF fm(f);
+        const float s = fmin((r.width() - 12) / fmax(fm.horizontalAdvance(name), 1.0),
+                             (r.height() - 8) / fm.height());
+        f.setPixelSize(fmax(8.0, 16 * fmin(s, 2.5)));
         painter->setFont(f);
         painter->setPen(Colors::base06);
-        painter->drawText(r, Qt::AlignCenter,
-                QString::fromStdString(node->getName()));
+        painter->drawText(r, Qt::AlignCenter, name);
         return;
     }
 
@@ -172,6 +179,14 @@ void InspectorFrame::setLowDetail(bool low)
         c->setVisible(!low);
     if (!low)
         redoLayout();   // restores per-datum hidden rules
+
+    // Soften the swap with a quick opacity pop
+    auto anim = new QPropertyAnimation(this, "opacity");
+    anim->setDuration(130);
+    anim->setStartValue(0.5);
+    anim->setEndValue(1.0);
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
+
     update();
 }
 

@@ -5,6 +5,7 @@
 #include "graph/proxy/node.h"
 
 #include "canvas/connection/connection.h"
+#include "canvas/datum_row.h"
 #include "canvas/datum_port.h"
 #include "canvas/scene.h"
 
@@ -81,6 +82,19 @@ void Connection::onHiddenChanged()
 
 bool Connection::isHidden() const
 {
+    // In canvas low-detail mode the ports are invisible only because
+    // the view is zoomed out; connections should survive. Just the
+    // datum-level "hidden" rules apply there.
+    if (auto s = dynamic_cast<CanvasScene*>(scene()))
+        if (s->lowDetail())
+        {
+            auto rowHidden = [](DatumPort* p){
+                auto r = dynamic_cast<DatumRow*>(p->parentItem());
+                return r && r->shouldBeHidden();
+            };
+            return rowHidden(source_port) || rowHidden(target_port);
+        }
+
     return !source_port->isVisible() ||
            !target_port->isVisible();
 }

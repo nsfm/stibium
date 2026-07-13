@@ -7,15 +7,30 @@ class CanvasView;
 class InputPort;
 class Datum;
 
+// Zoom level below which the canvas switches to low-detail rendering
+static constexpr float CANVAS_LOD_THRESHOLD = 0.32f;
+
 class CanvasScene : public QGraphicsScene
 {
 public:
     CanvasScene(Graph* g, QObject* parent);
 
     /*
+     *  Canvas-wide low-detail (zoomed out) mode; set by views, consulted
+     *  by connections deciding whether hidden ports should hide them.
+     */
+    void setLowDetail(bool low) { low_detail = low; }
+    bool lowDetail() const { return low_detail; }
+
+    /*
      *  Returns a new CanvasView object looking at this scene
      */
     CanvasView* getView(QWidget* parent=NULL);
+
+private:
+    bool low_detail=false;
+
+public:
 
     /*
      *  Returns this scene's graph object
