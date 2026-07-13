@@ -111,9 +111,11 @@ were named for the element symbol all along).
 - **Parametric ISO thread nodes.** Helix = twisted profile; f-rep handles
   it natively. Internal/external, standard pitches, printable clearance
   presets. Every functional-parts tool hits this wall; Stibium doesn't.
-- **Analytics panel.** Field integrals via Monte Carlo: volume, mass per
-  material, center of gravity, stands-upright check, bounding box &
-  projected footprint. Ends guess-and-check counterweighting.
+- **Analytics panel (UI).** The engine + `--analyze` verb shipped
+  (volume, COM, tight bounds); still wanted: a live panel in the app,
+  mass-per-material once color propagation lands, stands-upright
+  check, projected footprint, and octree interval pruning to make
+  integration near-instant (the contour tracer's trick, in 3D).
 - **Procedural noise opcodes.** Perlin/simplex in the C evaluator →
   knurling, stipple, woodgrain-as-a-node (with seed input so "every
   render unique" becomes reproducible-unique). Tactile surfaces on
@@ -247,6 +249,13 @@ library -> MCP server on the live session):
 
 
 ## Done
+- 2026-07-13 — analytics engine + `--analyze` verb: dense grid
+  integration (parallel, ~4M samples default, `--resolution`
+  controls) reporting volume/area, center of mass, and tight bounds
+  as JSON; `--node` filters to one node. parallel_eval extracted to
+  shared infrastructure; shape collection shared with the renderer.
+  Verified against analytic spheres/cubes/circles (<1%%) in 4 new
+  CTest cases.
 - 2026-07-13 — interval-pruned contour evaluation: a quadtree of
   eval_i calls proves regions empty/solid before sampling; culled
   interiors take sign sentinels while a one-sample evaluated ring

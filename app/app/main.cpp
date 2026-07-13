@@ -30,6 +30,7 @@
 #include "viewport/render/task.h"
 #include "fab/fab.h"
 #include "fab/types/shape.h"
+#include "fab/tree/analytics.h"
 #include "fab/tree/render.h"
 #include "fab/tree/render_mt.h"
 #include "fab/util/region.h"
@@ -37,6 +38,7 @@
 #include <QDirIterator>
 #include <QImage>
 #include <QJsonArray>
+#include <QJsonObject>
 #include <QMatrix4x4>
 
 #include <cstring>
@@ -118,6 +120,53 @@ static int describeNodes(App& app)
         }
     }
 
+    printf("%s", QJsonDocument(out).toJson().constData());
+    return 0;
+}
+
+/*
+ *  Implements --analyze: grid-integrates the model's shapes and
+ *  prints volume, center of mass, and tight bounds as JSON.
+ */
+static int analyzeHeadless(App& app, float resolution,
+                           const QString& node)
+{
+    std::unique_ptr<Shape> u3d, u2d;
+    const QString err = ImageExport::collectShapes(
+            app.getGraph(), node, u3d, u2d);
+    if (!err.isEmpty())
+    {
+        fprintf(stderr, "analyze: %s\n", err.toLocal8Bit().constData());
+        return 1;
+    }
+
+    const bool flat = !u3d;
+    const Shape& s = flat ? *u2d : *u3d;
+    const Bounds b = s.bounds;
+
+    volatile int halt = 0;
+    FieldStats stats;
+    if (!analyze_field(s.tree.get(),
+                       b.xmin, b.ymin, flat ? 0 : b.zmin,
+                       b.xmax, b.ymax, flat ? 0 : b.zmax,
+                       resolution, flat, -1, &halt, &stats))
+    {
+        fprintf(stderr, "analyze: field integration failed\n");
+        return 1;
+    }
+
+    QJsonObject out;
+    out[flat ? "area" : "volume"] = stats.volume;
+    out["center_of_mass"] = QJsonArray(
+            {stats.com[0], stats.com[1], stats.com[2]});
+    out["bounds_declared"] = QJsonArray(
+            {b.xmin, b.ymin, b.zmin, b.xmax, b.ymax, b.zmax});
+    out["bounds_tight"] = QJsonArray(
+            {stats.tight[0], stats.tight[1], stats.tight[2],
+             stats.tight[3], stats.tight[4], stats.tight[5]});
+    out["flat"] = flat;
+    out["samples"] = double(stats.samples);
+    out["cell"] = stats.cell;
     printf("%s", QJsonDocument(out).toJson().constData());
     return 0;
 }
@@ -258,7 +307,7 @@ int main(int argc, char *argv[])
         const QByteArray arg(argv[i]);
         if (arg == "--export" || arg == "--validate" ||
             arg == "--render" || arg == "--resave" ||
-            arg == "--describe-nodes")
+            arg == "--analyze" || arg == "--describe-nodes")
         {
             if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM"))
                 qputenv("QT_QPA_PLATFORM", "offscreen");
@@ -381,6 +430,10 @@ int main(int argc, char *argv[])
                 "With --render: render only the named node's shape "
                 "outputs (visual bisection)", "NAME");
         parser.addOption(nodeOpt);
+        QCommandLineOption analyzeOpt("analyze",
+                "Integrate the model's shapes and print volume, "
+                "center of mass, and tight bounds as JSON, then exit");
+        parser.addOption(analyzeOpt);
         QCommandLineOption resaveOpt("resave",
                 "Load the file and save it back out as FILE in the "
                 "current protocol (batch migration / canonicalizing), "
@@ -400,6 +453,7 @@ int main(int argc, char *argv[])
         const bool headless = parser.isSet(exportOpt) ||
                               parser.isSet(renderOpt) ||
                               parser.isSet(resaveOpt) ||
+                              parser.isSet(analyzeOpt) ||
                               parser.isSet(validateOpt);
 
         auto args = parser.positionalArguments();
@@ -435,6 +489,8 @@ int main(int argc, char *argv[])
                                       parser.value(sizeOpt).toInt(),
                                       parser.value(sectionOpt).toFloat(),
                                       parser.value(nodeOpt));
+            if (code == 0 && parser.isSet(analyzeOpt))
+                code = analyzeHeadless(app, res, parser.value(nodeOpt));
             if (code == 0 && parser.isSet(resaveOpt))
                 code = resaveHeadless(app, parser.value(resaveOpt));
             // Return (rather than exit()) so Qt tears down cleanly
