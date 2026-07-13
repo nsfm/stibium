@@ -462,3 +462,17 @@ nate's daily use, so these are audit targets, not known-broken):
 tracker's most-wanted), #148 lattice repetition, #37 chamfer, #61/#72
 polylines, #56 save-dialog extension, #10 file sizes (3MF+simplify),
 #175 zoom clip, #182 AA (still on our own TODO).
+
+## libfive recon (2026-07-13) — see doc/LIBFIVE-RECON.md
+
+Keeter's post-Antimony decade, distilled to a ranked steal-list.
+Headline: libfive is ahead on the kernel, we're ahead on the product,
+and his own retrospective says the node-graph tool is the thing he
+wished someone else would build. Quick wins (S): exact-SDF box/rect
+primitives, log-sum-exp smooth blends + smooth difference (log/exp
+opcodes already landed), half_space, gyroid/TPMS, clearance. Keystone
+(M-L): immutable shared shortened-tape evaluation replacing
+disable_nodes — unlocks a CPU SIMD tile viewport (M) and eventually an
+MPR-style GPU renderer (L). Marquee (L): adaptive manifold DC mesher
+(MPL 2.0, literal port permitted). Also: maybe_nan interval tracking
+(S-M), affine-collapse pass (M), interval-derived bounds (M).
