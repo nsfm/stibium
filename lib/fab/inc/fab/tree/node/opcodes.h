@@ -16,6 +16,7 @@ typedef enum Opcode_ {
     OP_MIN,
     OP_MAX,
     OP_POW,
+    OP_MOD,
 
     OP_ABS,
     OP_SQUARE,
@@ -29,6 +30,7 @@ typedef enum Opcode_ {
     OP_ATAN2,
     OP_NEG,
     OP_EXP,
+    OP_FLOOR,
 
     OP_X,
     OP_Y,

@@ -1,0 +1,11 @@
+import fab.types
+import fab.shapes
+
+title('Repeat Y (finite)')
+
+input('shape', fab.types.Shape)
+input('spacing', float, 3)
+input('count', int, 5)
+input('y0', float, 0)
+
+output('shape', fab.shapes.repeat_y_finite(shape, spacing, count, y0))

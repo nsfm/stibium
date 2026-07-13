@@ -1,0 +1,11 @@
+import fab.types
+import fab.shapes
+
+title('Repeat X (finite)')
+
+input('shape', fab.types.Shape)
+input('spacing', float, 3)
+input('count', int, 5)
+input('x0', float, 0)
+
+output('shape', fab.shapes.repeat_x_finite(shape, spacing, count, x0))

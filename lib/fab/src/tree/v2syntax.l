@@ -29,6 +29,8 @@ real				{integer}*("."{digit}+)?{exponent}?
 "*"				return TOKEN_V1MUL;
 "/"				return TOKEN_V1DIV;
 "i"				return TOKEN_V1MIN;
+"M"				return TOKEN_V1MOD;
+"F"				return TOKEN_V1FLOOR;
 "a"				return TOKEN_V1MAX;
 "p"				return TOKEN_V1POW;
 "s"				return TOKEN_V1SIN;
@@ -81,6 +83,8 @@ real				{integer}*("."{digit}+)?{exponent}?
 	"acos"			return TOKEN_ACOS;
 	"atan"			return TOKEN_ATAN;
 	"atan2"			return TOKEN_ATAN2;
+	"mod"			return TOKEN_MOD;
+	"floor"			return TOKEN_FLOOR;
 	"abs"			return TOKEN_ABS;
 	"sqrt"			return TOKEN_SQRT;
 	"exp"			return TOKEN_EXP;

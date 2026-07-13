@@ -31,6 +31,7 @@ float eval_f(MathTree* tree, const float x, const float y, const float z)
                 case OP_MAX:    node->results.f = max_f(A, B); break;
                 case OP_POW:    node->results.f = pow_f(A, B); break;
                 case OP_ATAN2:   node->results.f = atan2_f(A,B); break;
+                case OP_MOD:   node->results.f = mod_f(A, B); break;
 
                 case OP_ABS:    node->results.f = abs_f(A); break;
                 case OP_SQUARE: node->results.f = square_f(A); break;
@@ -43,6 +44,7 @@ float eval_f(MathTree* tree, const float x, const float y, const float z)
                 case OP_ATAN:   node->results.f = atan_f(A); break;
                 case OP_NEG:    node->results.f = neg_f(A); break;
                 case OP_EXP:    node->results.f = exp_f(A); break;
+                case OP_FLOOR:    node->results.f = floor_f(A); break;
 
                 case OP_X:      node->results.f = X_f(x); break;
                 case OP_Y:      node->results.f = Y_f(y); break;
@@ -84,6 +86,7 @@ Interval eval_i(MathTree* tree, const Interval X,
                 case OP_MAX:    node->results.i = max_i(A, B); break;
                 case OP_POW:    node->results.i = pow_i(A, B); break;
                 case OP_ATAN2:   node->results.i = atan2_i(A,B); break;
+                case OP_MOD:   node->results.i = mod_i(A, B); break;
 
                 case OP_ABS:    node->results.i = abs_i(A); break;
                 case OP_SQUARE: node->results.i = square_i(A); break;
@@ -96,6 +99,7 @@ Interval eval_i(MathTree* tree, const Interval X,
                 case OP_ATAN:   node->results.i = atan_i(A); break;
                 case OP_NEG:    node->results.i = neg_i(A); break;
                 case OP_EXP:    node->results.i = exp_i(A); break;
+                case OP_FLOOR:    node->results.i = floor_i(A); break;
 
                 case OP_CONST:  break;
                 case OP_X:      node->results.i = X_i(X); break;
@@ -135,6 +139,7 @@ float* eval_r(MathTree* tree, const Region r)
                 case OP_MAX:    max_r(A, B, R, c); break;
                 case OP_POW:    pow_r(A, B, R, c); break;
                 case OP_ATAN2:  atan2_r(A, B, R, c); break;
+                case OP_MOD:  mod_r(A, B, R, c); break;
 
                 case OP_ABS:    abs_r(A, R, c); break;
                 case OP_SQUARE: square_r(A, R, c); break;
@@ -147,6 +152,7 @@ float* eval_r(MathTree* tree, const Region r)
                 case OP_ATAN:   atan_r(A, R, c); break;
                 case OP_NEG:    neg_r(A, R, c); break;
                 case OP_EXP:    exp_r(A, R, c); break;
+                case OP_FLOOR:    floor_r(A, R, c); break;
 
                 case OP_CONST:  break;
                 case OP_X:      X_r(r.X, R, c); break;
@@ -188,6 +194,7 @@ derivative* eval_g(MathTree* tree, const Region r)
                 case OP_MAX:    max_g(A, B, R, c); break;
                 case OP_POW:    pow_g(A, B, R, c); break;
                 case OP_ATAN2:  atan2_g(A, B, R, c); break;
+                case OP_MOD:  mod_g(A, B, R, c); break;
 
                 case OP_ABS:    abs_g(A, R, c); break;
                 case OP_SQUARE: square_g(A, R, c); break;
@@ -200,6 +207,7 @@ derivative* eval_g(MathTree* tree, const Region r)
                 case OP_ATAN:   atan_g(A, R, c); break;
                 case OP_NEG:    neg_g(A, R, c); break;
                 case OP_EXP:    exp_g(A, R, c); break;
+                case OP_FLOOR:    floor_g(A, R, c); break;
 
                 case OP_CONST:  break;
                 case OP_X:      X_g(r.X, R, c); break;

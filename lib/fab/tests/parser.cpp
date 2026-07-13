@@ -69,3 +69,58 @@ TEST_CASE("Basic parsing")
         REQUIRE(t != nullptr);
     }
 }
+
+#include "fab/tree/eval.h"
+
+TEST_CASE("mod and floor opcodes")
+{
+    MathTree* t;
+
+    SECTION("Prefix mod: MXf3.0")
+    {
+        t = parse("MXf3.0");
+        REQUIRE(t != nullptr);
+        REQUIRE(eval_f(t, 7.5, 0, 0) == Approx(1.5));
+        REQUIRE(eval_f(t, -0.5, 0, 0) == Approx(2.5));
+        free(t);
+    }
+
+    SECTION("Prefix floor: FX")
+    {
+        t = parse("FX");
+        REQUIRE(t != nullptr);
+        REQUIRE(eval_f(t, 2.75, 0, 0) == Approx(2.0));
+        REQUIRE(eval_f(t, -0.25, 0, 0) == Approx(-1.0));
+        free(t);
+    }
+
+    SECTION("Infix mod and floor")
+    {
+        t = parse("=mod(X, 3.0) + floor(Y);");
+        REQUIRE(t != nullptr);
+        REQUIRE(eval_f(t, 7.5, 1.9, 0) == Approx(2.5));
+        free(t);
+    }
+
+    SECTION("Interval mod within one period")
+    {
+        t = parse("MXf3.0");
+        REQUIRE(t != nullptr);
+        Interval x = {0.5, 1.0}, y = {0, 0}, z = {0, 0};
+        Interval out = eval_i(t, x, y, z);
+        REQUIRE(out.lower == Approx(0.5));
+        REQUIRE(out.upper == Approx(1.0));
+        free(t);
+    }
+
+    SECTION("Interval mod across a period boundary")
+    {
+        t = parse("MXf3.0");
+        REQUIRE(t != nullptr);
+        Interval x = {2.5, 3.5}, y = {0, 0}, z = {0, 0};
+        Interval out = eval_i(t, x, y, z);
+        REQUIRE(out.lower <= 0.0f);
+        REQUIRE(out.upper >= 3.0f - 1e-6f);
+        free(t);
+    }
+}

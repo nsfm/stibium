@@ -58,6 +58,7 @@ Node* mul_n(Node* lhs, Node* rhs) { return binary_n(lhs, rhs, mul_f, OP_MUL); }
 Node* div_n(Node* lhs, Node* rhs) { return binary_n(lhs, rhs, div_f, OP_DIV); }
 
 Node* min_n(Node* lhs, Node* rhs) { return binary_n(lhs, rhs, min_f, OP_MIN); }
+Node* mod_n(Node* lhs, Node* rhs) { return binary_n(lhs, rhs, mod_f, OP_MOD); }
 Node* max_n(Node* lhs, Node* rhs) { return binary_n(lhs, rhs, max_f, OP_MAX); }
 Node* pow_n(Node* lhs, Node* rhs) { return binary_n(lhs, rhs, pow_f, OP_POW); }
 
@@ -89,6 +90,7 @@ Node* unary_n(Node* arg, float (*f)(float), Opcode op)
 Node* abs_n(Node* child) { return unary_n(child, abs_f, OP_ABS); }
 Node* square_n(Node* child) { return unary_n(child, square_f, OP_SQUARE); }
 Node* sqrt_n(Node* child) { return unary_n(child, sqrt_f, OP_SQRT); }
+Node* floor_n(Node* child) { return unary_n(child, floor_f, OP_FLOOR); }
 Node* sin_n(Node* child) { return unary_n(child, sin_f, OP_SIN); }
 Node* cos_n(Node* child) { return unary_n(child, cos_f, OP_COS); }
 Node* tan_n(Node* child) { return unary_n(child, tan_f, OP_TAN); }

@@ -33,6 +33,8 @@ derivative* max_g(const derivative* A, const derivative* B, derivative* R, int c
 derivative* pow_g(const derivative* A, const derivative* B, derivative* R, int c);
 
 derivative* atan2_g(const derivative* A, const derivative* B, derivative* R, int c);
+derivative* mod_g(const derivative* A, const derivative* B, derivative* R, int c);
+derivative* floor_g(const derivative* A, derivative* R, int c);
 
 // Unary functions
 derivative* abs_g(const derivative* A, derivative* R, int c);

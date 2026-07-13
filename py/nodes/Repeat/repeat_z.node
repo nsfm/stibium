@@ -1,0 +1,10 @@
+import fab.types
+import fab.shapes
+
+title('Repeat Z (infinite)')
+
+input('shape', fab.types.Shape)
+input('spacing', float, 3)
+input('z0', float, 0)
+
+output('shape', fab.shapes.repeat_z(shape, spacing, z0))
