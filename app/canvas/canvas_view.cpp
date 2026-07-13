@@ -12,6 +12,7 @@
 #include "app/colors.h"
 #include "canvas/canvas_view.h"
 #include "canvas/scene.h"
+#include "canvas/add_node_popup.h"
 
 #include "canvas/connection/connection.h"
 #include "canvas/inspector/frame.h"
@@ -118,6 +119,26 @@ void CanvasView::keyPressEvent(QKeyEvent* event)
     {
         openAddMenu();
     }
+    else if (event->key() == Qt::Key_Tab)
+    {
+        openAddPalette();
+    }
+}
+
+void CanvasView::mouseDoubleClickEvent(QMouseEvent* event)
+{
+    QGraphicsView::mouseDoubleClickEvent(event);
+    if (!event->isAccepted() && event->button() == Qt::LeftButton)
+        openAddPalette();
+}
+
+void CanvasView::openAddPalette()
+{
+    auto p = new AddNodePopup(
+            static_cast<CanvasScene*>(scene())->getGraph(),
+            [this](Node* n){ this->grabNode(n); },
+            this);
+    p->popUp(QCursor::pos());
 }
 
 void CanvasView::openAddMenu()

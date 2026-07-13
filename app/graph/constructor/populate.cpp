@@ -48,9 +48,14 @@ static void addNodeToMenu(QMenu* menu, QStringList category, QString name,
                        callback(n);  });
 }
 
-static void populateFromFiles(QMenu* menu, Graph* g,
-                              std::function<void(Node*)> callback)
+const QList<NodeEntry>& nodeEntries()
 {
+    static QList<NodeEntry> entries;
+    static bool scanned = false;
+    if (scanned)
+        return entries;
+    scanned = true;
+
     QList<QRegularExpression> title_regexs = {
         QRegularExpression("title\\('+([^']+)'+\\)"),
         QRegularExpression("title\\(\"+([^\"]+)\"+\\)")};
@@ -68,9 +73,6 @@ static void populateFromFiles(QMenu* menu, Graph* g,
         }
     }
 
-    // Sort the list, then populate menus.
-    QMap<QString, QPair<QStringList, NodeConstructorFunction>> nodes;
-    QStringList node_titles;
     for (auto n : node_filenames)
     {
         QFile file(n);
@@ -103,9 +105,21 @@ static void populateFromFiles(QMenu* menu, Graph* g,
         NodeConstructorFunction constructor =
             [=](Graph *r){ return new ScriptNode(name.toStdString(),
                                                  txt.toStdString(), r); };
-        nodes[title] = QPair<QStringList, NodeConstructorFunction>(
-                split, constructor);
-        node_titles.append(title);
+        entries.append({split, title, constructor});
+    }
+    return entries;
+}
+
+static void populateFromFiles(QMenu* menu, Graph* g,
+                              std::function<void(Node*)> callback)
+{
+    QMap<QString, QPair<QStringList, NodeConstructorFunction>> nodes;
+    QStringList node_titles;
+    for (const auto& e : nodeEntries())
+    {
+        nodes[e.title] = QPair<QStringList, NodeConstructorFunction>(
+                e.category, e.constructor);
+        node_titles.append(e.title);
     }
 
     // Put all of the nodes into the Add menu, deferring Export nodes

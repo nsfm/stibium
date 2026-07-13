@@ -18,6 +18,7 @@ set(SRC_FILES
     app/settings.cpp
     canvas/scene.cpp
     canvas/canvas_view.cpp
+    canvas/add_node_popup.cpp
     canvas/info.cpp
     canvas/inspector/frame.cpp
     canvas/inspector/export.cpp
