@@ -21,6 +21,13 @@ DummyConnection::DummyConnection(OutputPort* source, CanvasScene* scene)
     scene->addItem(this);
 }
 
+DummyConnection::~DummyConnection()
+{
+    if (auto s = static_cast<CanvasScene*>(scene()))
+        if (s->activeDummy() == this)
+            s->setActiveDummy(nullptr);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 QPointF DummyConnection::startPos() const
@@ -94,11 +101,15 @@ void DummyConnection::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
     setDragPos(mapToScene(event->pos()));
 }
 
-void DummyConnection::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
+bool DummyConnection::hasValidTarget() const
 {
-    Q_UNUSED(event);
+    return target && target->getDatum()->acceptsLink(source->getDatum());
+}
 
-    if (target && target->getDatum()->acceptsLink(source->getDatum()))
+bool DummyConnection::commit()
+{
+    const bool valid = hasValidTarget();
+    if (valid)
     {
         auto d = target->getDatum();
 
@@ -111,12 +122,45 @@ void DummyConnection::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
         App::instance()->pushUndoStack(cmd);
     }
     deleteLater();
+    return valid;
+}
+
+void DummyConnection::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
+{
+    Q_UNUSED(event);
+
+    if (hasValidTarget())
+    {
+        commit();
+        return;
+    }
+
+    // Released away from a target: switch to sticky mode. The wire
+    // stays live and follows the cursor via the view (which pans and
+    // selects as usual); left-click on a valid port completes it,
+    // right-click or Escape cancels.
+    ungrabMouse();
+    static_cast<CanvasScene*>(scene())->setActiveDummy(this);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
+void DummyConnection::mousePressEvent(QGraphicsSceneMouseEvent* event)
+{
+    // Right-click cancels an in-progress drag
+    if (event->button() == Qt::RightButton)
+        deleteLater();
+    else
+        BaseConnection::mousePressEvent(event);
+}
+
 void DummyConnection::keyPressEvent(QKeyEvent* event)
 {
+    if (event->key() == Qt::Key_Escape)
+    {
+        deleteLater();
+        return;
+    }
     if (event->key() == Qt::Key_Space && !snapping)
     {
         snapping = true;
