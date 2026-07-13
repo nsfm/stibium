@@ -32,10 +32,6 @@ were named for the element symbol all along).
   field itself (walls thinner than nozzle flagged before slicing);
   overhang-angle visualization is plausible too (gradient vs build
   direction). Ends guess-and-check on functional parts.
-- **Domain repetition nodes.** Modulo-space repeat (finite grid / radial),
-  O(1) field cost regardless of copy count — unlike Array nodes, which
-  union N copies at O(N). The recursive/massive-pattern primitive
-  (photolithography masks, lattices, textures).
 - **Multi-shape export.** One click → N files (print plates, assemblies).
   The export hook currently hard-rejects multiple export tasks per script.
 - **Parallel meshing.** `triangulate_region()` subdivides recursively —
@@ -193,6 +189,9 @@ a GUI so agentic tools can contribute to modeling cleanly:
 - STL writer counts via `sizeof(float)` for an int — works, fragile.
 
 ## Done
+- 2026-07-12 — mod/floor opcodes (all four eval backends, prefix +
+  infix syntax, CTest coverage) and the Repeat node category: nine
+  domain-repetition nodes at O(1) field cost, numerically verified.
 - 2026-07-12 — Phase 1 node campaign: 46 new nodes / 60+ shape functions
   (primitives, deforms, 2D stroke kit, functional-parts kit with ISO
   tables, ISO threads + involute gears). All numerically verified; new

@@ -35,6 +35,21 @@ static std::string div_pss(Node* n)
     return ss.str();
 }
 
+static std::string mod_pss(Node* n)
+{
+    std::stringstream ss;
+    ss << "mod(" << print_node_ss(n->lhs) << ", "
+              << print_node_ss(n->rhs) << ")";
+    return ss.str();
+}
+
+static std::string floor_pss(Node* n)
+{
+    std::stringstream ss;
+    ss << "floor(" << print_node_ss(n->lhs) << ")";
+    return ss.str();
+}
+
 static std::string min_pss(Node* n)
 {
     std::stringstream ss;
@@ -168,11 +183,13 @@ std::string print_node_ss(Node* n)
         case OP_MUL:    return mul_pss(n);
         case OP_DIV:    return div_pss(n);
         case OP_MIN:    return min_pss(n);
+        case OP_MOD:    return mod_pss(n);
         case OP_MAX:    return max_pss(n);
         case OP_POW:    return pow_pss(n);
 
         case OP_SQUARE: return square_pss(n);
         case OP_SQRT:   return sqrt_pss(n);
+        case OP_FLOOR:  return floor_pss(n);
         case OP_SIN:    return sin_pss(n);
         case OP_COS:    return cos_pss(n);
         case OP_TAN:    return tan_pss(n);

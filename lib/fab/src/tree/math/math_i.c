@@ -270,3 +270,43 @@ Interval Y_i(Interval Y)
 
 Interval Z_i(Interval Z)
 { return Z; }
+
+Interval mod_i(Interval A, Interval B)
+{
+    Interval i;
+
+    // Exact only for a constant positive modulus: if the input interval
+    // stays within one period, shift it; if it spans a boundary, the
+    // result covers the whole period.
+    if (B.lower == B.upper && B.lower > 0)
+    {
+        const float b = B.lower;
+        const float qa = floor(A.lower / b);
+        const float qb = floor(A.upper / b);
+        if (qa == qb)
+        {
+            i.lower = A.lower - b*qa;
+            i.upper = A.upper - b*qa;
+        }
+        else
+        {
+            i.lower = 0;
+            i.upper = b;
+        }
+        return i;
+    }
+
+    // Varying or non-positive modulus: conservative bound
+    const float m = fmax(fabs(B.lower), fabs(B.upper));
+    i.lower = -m;
+    i.upper = m;
+    return i;
+}
+
+Interval floor_i(Interval A)
+{
+    Interval i;
+    i.lower = floor(A.lower);
+    i.upper = floor(A.upper);
+    return i;
+}

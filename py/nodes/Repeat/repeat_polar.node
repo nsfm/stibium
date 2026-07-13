@@ -1,0 +1,11 @@
+import fab.types
+import fab.shapes
+
+title('Repeat Polar')
+
+input('shape', fab.types.Shape)
+input('n', int, 6)
+input('x', float, 0)
+input('y', float, 0)
+
+output('shape', fab.shapes.repeat_polar(shape, n, x, y))

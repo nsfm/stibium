@@ -21,6 +21,8 @@ extern inline float asin_f(float A);
 extern inline float acos_f(float A);
 extern inline float atan_f(float A);
 extern inline float atan2_f(float A, float B);
+extern inline float mod_f(float A, float B);
+extern inline float floor_f(float A);
 extern inline float neg_f(float A);
 extern inline float exp_f(float A);
 

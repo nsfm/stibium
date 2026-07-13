@@ -6,6 +6,14 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **`mod` and `floor` opcodes** in the math engine (prefix `M`/`F`,
+  infix `mod()`/`floor()`), with float, interval, gradient, and region
+  backends and CTest coverage.
+- **Domain repetition nodes (new Repeat category)**: infinite repeat
+  along X/Y/Z, XY grids, mirrored repeat, exact finite repeat, and
+  polar repeat - all at O(1) field cost regardless of copy count
+  (the Array nodes union N copies at O(N) and crash on large counts).
+
 - **Mesh simplification on STL export**: triangle soup is welded and
   decimated to a user-set "max deviation" (meshoptimizer, vendored).
   Typical exports shrink 94–99% with sub-print-tolerance deviation.

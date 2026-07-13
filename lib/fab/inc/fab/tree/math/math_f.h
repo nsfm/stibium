@@ -49,6 +49,14 @@ inline float acos_f(float A)
 
 inline float atan_f(float A) { return atan(A); }
 inline float atan2_f(float A, float B) { return atan2(A, B); }
+
+// GLSL-style mod: result has the sign of B, mod(A, B) in [0, B) for B > 0
+inline float mod_f(float A, float B)
+{
+    if (B == 0)     return 0;
+    return A - B * floor(A / B);
+}
+inline float floor_f(float A) { return floor(A); }
 inline float neg_f(float A) { return -A; }
 inline float exp_f(float A) { return exp(A); }
 

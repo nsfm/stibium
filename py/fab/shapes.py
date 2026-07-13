@@ -2992,3 +2992,127 @@ def rack(module=2.0, n_teeth=8, pressure_angle=20.0, thickness=6.0,
     """3D involute rack (2D section extruded in Z)."""
     r2 = rack_2d(module, n_teeth, pressure_angle, base_height)
     return extrude_z(r2, zmin, zmin + thickness)
+
+
+################################################################################
+# Domain repetition (O(1) field cost regardless of copy count)
+################################################################################
+
+def _rep_expr(coord, spacing, center):
+    """ mod-space fold: coord' = mod(coord - off, spacing) + off,
+        where off centers the cell on `center`. """
+    off = center - spacing / 2.
+    return '+M-%sf%g' % (coord, off) + 'f%g' % spacing + 'f%g' % off
+
+def _rep_mirror_expr(coord, spacing, center):
+    """ mirrored fold: neighboring cells are reflections.
+        coord' = center + |mod(coord - center + s/2, 2s) - s| - s/2 """
+    s = spacing
+    t = 'M+-%sf%g' % (coord, center) + 'f%g' % (s / 2.) + 'f%g' % (2 * s)
+    return '+f%g' % center + '-b-%s' % t + 'f%g' % s + 'f%g' % (s / 2.)
+
+def _rep_finite_expr(coord, spacing, count, start):
+    """ finite fold: coord' = coord - s * clamp(floor((coord-start)/s),
+        0, count-1); cells [start, start + count*s) collapse onto the
+        first cell. """
+    k = 'F/-%sf%g' % (coord, start) + 'f%g' % spacing
+    k = 'ia%sf0f%g' % (k, count - 1)
+    return '-%s*f%g%s' % (coord, spacing, k)
+
+def _remap_shape(a, xexpr='_', yexpr='_', zexpr='_',
+                 xmin=None, xmax=None, ymin=None, ymax=None,
+                 zmin=None, zmax=None):
+    b = a.bounds
+    pick = lambda v, d: d if v is None else v
+    return Shape('m%s%s%s%s' % (xexpr, yexpr, zexpr, a.math),
+                 pick(xmin, b.xmin), pick(ymin, b.ymin),
+                 pick(zmin, b.zmin), pick(xmax, b.xmax),
+                 pick(ymax, b.ymax), pick(zmax, b.zmax))
+
+def repeat_x(a, spacing, x0=0):
+    """ Repeats a shape infinitely along X. The shape should live within
+        one cell of the given spacing, centered on x0.
+    """
+    if spacing <= 0:
+        return a
+    return _remap_shape(a, xexpr=_rep_expr('X', spacing, x0),
+                        xmin=float('-inf'), xmax=float('inf'))
+
+def repeat_y(a, spacing, y0=0):
+    if spacing <= 0:
+        return a
+    return _remap_shape(a, yexpr=_rep_expr('Y', spacing, y0),
+                        ymin=float('-inf'), ymax=float('inf'))
+
+def repeat_z(a, spacing, z0=0):
+    if spacing <= 0:
+        return a
+    return _remap_shape(a, zexpr=_rep_expr('Z', spacing, z0),
+                        zmin=float('-inf'), zmax=float('inf'))
+
+def repeat_xy(a, spacing_x, spacing_y, x0=0, y0=0):
+    """ Infinite 2D grid repetition. """
+    if spacing_x <= 0 or spacing_y <= 0:
+        return a
+    return _remap_shape(a, xexpr=_rep_expr('X', spacing_x, x0),
+                        yexpr=_rep_expr('Y', spacing_y, y0),
+                        xmin=float('-inf'), xmax=float('inf'),
+                        ymin=float('-inf'), ymax=float('inf'))
+
+def repeat_mirror_x(a, spacing, x0=0):
+    """ Infinite repetition along X where neighboring cells are mirror
+        images (seamless for asymmetric shapes). """
+    if spacing <= 0:
+        return a
+    return _remap_shape(a, xexpr=_rep_mirror_expr('X', spacing, x0),
+                        xmin=float('-inf'), xmax=float('inf'))
+
+def repeat_mirror_y(a, spacing, y0=0):
+    if spacing <= 0:
+        return a
+    return _remap_shape(a, yexpr=_rep_mirror_expr('Y', spacing, y0),
+                        ymin=float('-inf'), ymax=float('inf'))
+
+def repeat_x_finite(a, spacing, count, x0=0):
+    """ Repeats a shape `count` times along X at the given spacing,
+        starting from the cell centered on x0. O(1) field cost (unlike
+        the Array nodes, which union N copies).
+    """
+    count = int(count)
+    if spacing <= 0 or count < 2:
+        return a
+    b = a.bounds
+    return _remap_shape(a,
+            xexpr=_rep_finite_expr('X', spacing, count, x0 - spacing/2.),
+            xmin=b.xmin, xmax=b.xmax + spacing * (count - 1))
+
+def repeat_y_finite(a, spacing, count, y0=0):
+    count = int(count)
+    if spacing <= 0 or count < 2:
+        return a
+    b = a.bounds
+    return _remap_shape(a,
+            yexpr=_rep_finite_expr('Y', spacing, count, y0 - spacing/2.),
+            ymin=b.ymin, ymax=b.ymax + spacing * (count - 1))
+
+def repeat_polar(a, n, x=0, y=0):
+    """ Repeats a shape n times around the point (x, y). The source
+        shape should live in the sector straddling the +X direction.
+        O(1) field cost (unlike iterate_polar, which unions N copies).
+    """
+    n = int(n)
+    if n < 2:
+        return a
+    import math as _m
+    sector = 2 * _m.pi / n
+    theta = ('mod(atan2(Y-%g,X-%g)+%g,%g)-%g'
+             % (y, x, sector / 2., sector, sector / 2.))
+    r = 'sqrt((X-%g)*(X-%g)+(Y-%g)*(Y-%g))' % (x, x, y, y)
+    xexpr = '=%g+%s*cos(%s);' % (x, r, theta)
+    yexpr = '=%g+%s*sin(%s);' % (y, r, theta)
+    b = a.bounds
+    rad = max(abs(b.xmin - x), abs(b.xmax - x),
+              abs(b.ymin - y), abs(b.ymax - y))
+    return _remap_shape(a, xexpr=xexpr, yexpr=yexpr,
+                        xmin=x - rad, xmax=x + rad,
+                        ymin=y - rad, ymax=y + rad)

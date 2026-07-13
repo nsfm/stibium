@@ -1,0 +1,10 @@
+import fab.types
+import fab.shapes
+
+title('Repeat Mirror X')
+
+input('shape', fab.types.Shape)
+input('spacing', float, 3)
+input('x0', float, 0)
+
+output('shape', fab.shapes.repeat_mirror_x(shape, spacing, x0))

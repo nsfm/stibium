@@ -377,3 +377,28 @@ derivative* Z_g(const float* restrict Z,
     }
     return R;
 }
+
+derivative* mod_g(const derivative* A, const derivative* B, derivative* R, int c) {
+    for (int q = 0; q < c; ++q)
+    {
+        const float k = (B[q].v != 0) ? floor(A[q].v / B[q].v) : 0;
+        R[q].v = (B[q].v != 0) ? A[q].v - B[q].v * k : 0;
+
+        // d/dp mod(A, B) = dA - floor(A/B)*dB away from the seams
+        R[q].dx = A[q].dx - k*B[q].dx;
+        R[q].dy = A[q].dy - k*B[q].dy;
+        R[q].dz = A[q].dz - k*B[q].dz;
+    }
+    return R;
+}
+
+derivative* floor_g(const derivative* A, derivative* R, int c) {
+    for (int q = 0; q < c; ++q)
+    {
+        R[q].v = floor(A[q].v);
+        R[q].dx = 0;
+        R[q].dy = 0;
+        R[q].dz = 0;
+    }
+    return R;
+}

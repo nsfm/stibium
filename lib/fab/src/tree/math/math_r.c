@@ -21,6 +21,7 @@ DUAL(min_r, min_f);
 DUAL(max_r, max_f);
 DUAL(pow_r, pow_f);
 DUAL(atan2_r, atan2_f);
+DUAL(mod_r, mod_f);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -33,6 +34,7 @@ float* name(const float* restrict A, float* restrict R, int c)  \
 }
 
 SINGLE(abs_r, abs_f);
+SINGLE(floor_r, floor_f);
 SINGLE(square_r, square_f);
 SINGLE(sqrt_r, sqrt_f);
 SINGLE(sin_r, sin_f);
