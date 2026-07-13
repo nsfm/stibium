@@ -144,6 +144,12 @@ release; newest work at the top of each section.
 - Script editor uses the system fixed-width font (was hardcoded
   Courier), configurable via the config file.
 
+## Fixes
+
+- **Undo-after-open crash**: the undo stack survived file loads,
+  so undoing after File ▸ Open replayed commands into the freed
+  previous graph. The stack now clears on every load.
+
 ## App & infrastructure
 
 - **App-level test suite**: CTest drives the real binary over every
@@ -158,6 +164,12 @@ release; newest work at the top of each section.
   load; only the uid-anchoring stub remains). Files shrink 8-35%,
   git diffs show real changes only, and load→save round-trips are
   byte-identical. `--resave FILE` batch-migrates old files.
+- **Node library as JSON**: `--describe-nodes` dumps every node's
+  name, category, typed inputs (with defaults), and outputs — the
+  vocabulary for tooling and the seed for generated wiki docs.
+- **Per-node renders**: `--render --node NAME` draws one node's
+  geometry alone, construction or not — visual bisection when the
+  final shape is wrong.
 - **Headless CLI verbs**: `--validate` (script/datum errors to stderr,
   exit code) and `--export FILE [--resolution R] [--detect-features]`
   run a model's export node with no display or dialogs — CI, batch

@@ -35,16 +35,25 @@ QString render(Graph* graph, const Options& opt)
     // Union the file's Shape outputs, 3D and 2D separately: when 3D
     // geometry exists, 2D shapes are construction profiles and are
     // left out of the thumbnail rather than flattening it.
+    const std::string want = opt.node_name.toStdString();
+    bool node_found = false;
     std::unique_ptr<Shape> u3d, u2d;
     for (auto n : graph->childNodes())
+    {
+        if (!want.empty() && n->getName() != want)
+            continue;
+        node_found = true;
         for (auto d : n->childDatums())
         {
             // Match the viewport: only terminal shape outputs are
             // drawn (an output feeding another node is construction
-            // geometry, e.g. a cutter feeding a difference)
+            // geometry, e.g. a cutter feeding a difference).  In
+            // single-node mode, that node's shape outputs render
+            // even when they feed other nodes - that's the point.
             if (!d->isValid() || d->getType() != fab::ShapeType ||
-                !d->isOutput() || !d->outgoingLinks().empty() ||
-                !d->currentValue())
+                !d->isOutput() || !d->currentValue())
+                continue;
+            if (want.empty() && !d->outgoingLinks().empty())
                 continue;
             boost::python::extract<Shape> es(d->currentValue());
             if (!es.check())
@@ -57,6 +66,10 @@ QString render(Graph* graph, const Options& opt)
                        std::isinf(s.bounds.zmax)) ? u2d : u3d;
             u.reset(u ? new Shape(*u | s) : new Shape(s));
         }
+    }
+
+    if (!want.empty() && !node_found)
+        return "no node named '" + opt.node_name + "'";
 
     const bool flat = !u3d;
     const std::unique_ptr<Shape>& total = flat ? u2d : u3d;

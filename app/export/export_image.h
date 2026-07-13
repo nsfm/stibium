@@ -19,6 +19,9 @@ struct Options
     int fit_px = 512;       /*  longest image side when fitting  */
     bool transparent = true;/*  transparent vs. theme background  */
     QString filename;       /*  output image (format by extension)  */
+    QString node_name;      /*  non-empty: render only this node's
+                                shape outputs (even non-terminal) -
+                                the visual-bisection mode  */
 };
 
 /*
