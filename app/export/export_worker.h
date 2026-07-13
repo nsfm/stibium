@@ -3,6 +3,9 @@
 #include <Python.h>
 #include <QObject>
 
+#include <atomic>
+#include <cstdint>
+
 #include "fab/types/shape.h"
 #include "fab/types/bounds.h"
 
@@ -57,4 +60,12 @@ protected:
      *  Flag used to abort rendering
      */
     volatile int halt;
+
+    /*
+     *  Progress reporting: async() sets progress_total to the number
+     *  of work units (0 leaves the dialog's bar indeterminate) and
+     *  advances progress_done; the GUI thread polls both.
+     */
+    std::atomic<uint64_t> progress_done{0};
+    std::atomic<uint64_t> progress_total{0};
 };

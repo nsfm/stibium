@@ -8,3 +8,16 @@ ExportingDialog::ExportingDialog(QWidget* parent)
 {
     ui->setupUi(this);
 }
+
+void ExportingDialog::setProgress(uint64_t done, uint64_t total)
+{
+    if (total == 0)
+        return;
+
+    // Leave the .ui default (maximum == 0, Qt's busy indicator) until
+    // the first real progress report arrives.
+    if (ui->progressBar->maximum() == 0)
+        ui->progressBar->setMaximum(1000);
+
+    ui->progressBar->setValue(int((done * 1000) / total));
+}

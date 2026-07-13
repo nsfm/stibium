@@ -56,8 +56,10 @@ static const int EDGE_MAP[16][2][3][2] = {
     {{{-1,-1}, {-1,-1}, {-1,-1}}, {{-1,-1}, {-1,-1}, {-1,-1}}}, // 3210
 };
 
-Mesher::Mesher(MathTree* tree, bool detect_edges, volatile int* halt)
+Mesher::Mesher(MathTree* tree, bool detect_edges, volatile int* halt,
+               std::atomic<uint64_t>* progress)
     : tree(tree), detect_edges(detect_edges), halt(halt),
+      progress(progress),
       data(new float[MIN_VOLUME]), has_data(false),
       X(new float[MIN_VOLUME]),
       Y(new float[MIN_VOLUME]),
@@ -798,7 +800,13 @@ void Mesher::triangulate_region(const Region& r)
                                  (Interval){r.Y[0], r.Y[r.nj]},
                                  (Interval){r.Z[0], r.Z[r.nk]});
     if (interval.lower > 0 || interval.upper < 0)
+    {
+        // Count skipped voxels toward progress, unless we're inside a
+        // packed block (those are counted wholesale when they finish).
+        if (progress && !has_data)
+            progress->fetch_add(r.voxels, std::memory_order_relaxed);
         return;
+    }
 
     // If we can calculate all of the points in this region with a single
     // eval_r call, then do so.  This large chunk will be used in future
@@ -844,6 +852,8 @@ void Mesher::triangulate_region(const Region& r)
     {
         flush_queue();
         unload_packed();
+        if (progress)
+            progress->fetch_add(r.voxels, std::memory_order_relaxed);
     }
 }
 
@@ -875,9 +885,20 @@ float* Mesher::get_verts(unsigned* count)
 }
 
 void Mesher::get_mesh(std::vector<float>& out_verts,
-                      std::vector<uint32_t>& out_indices)
+                      std::vector<uint32_t>& out_indices,
+                      bool run_finalize)
 {
-    finalize();
+    if (run_finalize)
+    {
+        finalize();
+    }
+    else
+    {
+        // Still drop the meshing-time maps, but leave dedup / pruning
+        // to the caller (see the header comment).
+        vertex_ids = decltype(vertex_ids)();
+        swappable = decltype(swappable)();
+    }
 
     out_verts.clear();
     out_indices.clear();
