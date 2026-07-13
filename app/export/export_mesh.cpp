@@ -74,9 +74,6 @@ void ExportMeshWorker::run()
 
 void ExportMeshWorker::async()
 {
-    float* verts;
-    unsigned count;
-
     Region r = (Region){
         .imin=0, .jmin=0, .kmin=0,
         .ni=uint32_t((bounds.xmax - bounds.xmin) * _resolution),
@@ -89,53 +86,39 @@ void ExportMeshWorker::async()
             &r, bounds.xmin, bounds.ymin, bounds.zmin,
                 bounds.xmax, bounds.ymax, bounds.zmax);
 
-    triangulate(shape.tree.get(), r, _detect_features, &halt, &verts, &count);
+    // The mesher produces an indexed mesh directly (unique vertices +
+    // three indices per triangle), so no welding pass is needed.
+    std::vector<float> verts;
+    std::vector<uint32_t> indices;
+    triangulate_indexed(shape.tree.get(), r, _detect_features, &halt,
+                        verts, indices);
 
-    if (_simplify > 0 && count >= 9 && !halt)
-        simplifyMesh(&verts, &count);
+    if (_simplify > 0 && indices.size() >= 3 && !halt)
+        simplifyMesh(verts, indices);
 
-    save_stl(verts, count, _filename.toStdString().c_str());
+    save_stl_indexed(verts.data(), indices.data(), indices.size() / 3,
+                     _filename.toStdString().c_str());
     free_arrays(&r);
-    free(verts);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void ExportMeshWorker::simplifyMesh(float** verts, unsigned* count) const
+void ExportMeshWorker::simplifyMesh(const std::vector<float>& verts,
+                                    std::vector<uint32_t>& indices) const
 {
-    // The mesher emits raw triangle soup (three floats per vertex, three
-    // vertices per triangle, with every vertex duplicated per face), so
-    // weld it into an indexed mesh before simplification.
-    const size_t index_count = *count / 3;
-    std::vector<unsigned int> remap(index_count);
-    const size_t vertex_count = meshopt_generateVertexRemap(
-            remap.data(), NULL, index_count,
-            *verts, index_count, 3 * sizeof(float));
-
-    std::vector<float> vertices(vertex_count * 3);
-    meshopt_remapVertexBuffer(vertices.data(), *verts, index_count,
-                              3 * sizeof(float), remap.data());
-    // Soup has implicit sequential indices, so the remap table is
-    // already the welded index buffer.
+    const size_t vertex_count = verts.size() / 3;
 
     // target_error is relative to mesh extent; _simplify is in model units
     const float scale = meshopt_simplifyScale(
-            vertices.data(), vertex_count, 3 * sizeof(float));
+            verts.data(), vertex_count, 3 * sizeof(float));
     const float target_error = scale > 0 ? _simplify / scale : _simplify;
 
-    std::vector<unsigned int> simplified(index_count);
+    std::vector<uint32_t> simplified(indices.size());
     const size_t out_index_count = meshopt_simplify(
-            simplified.data(), remap.data(), index_count,
-            vertices.data(), vertex_count, 3 * sizeof(float),
+            simplified.data(), indices.data(), indices.size(),
+            verts.data(), vertex_count, 3 * sizeof(float),
             0, target_error, meshopt_SimplifyPrune, NULL);
 
-    // Expand back into flat triangle soup for save_stl
-    const unsigned out_count = out_index_count * 3;
-    float* out = static_cast<float*>(malloc(out_count * sizeof(float)));
-    for (size_t i=0; i < out_index_count; ++i)
-        memcpy(&out[i*3], &vertices[simplified[i]*3], 3 * sizeof(float));
-
-    free(*verts);
-    *verts = out;
-    *count = out_count;
+    simplified.resize(out_index_count);
+    indices = std::move(simplified);
 }

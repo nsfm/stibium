@@ -1,5 +1,7 @@
+#include <algorithm>
+#include <cstring>
 #include <iostream>
-#include <set>
+#include <unordered_set>
 
 #include "fab/tree/triangulate/mesher.h"
 
@@ -20,6 +22,11 @@
  *   Schwanecke, Ulrich and Seidel, Hans-Peter)
  *
  *  SIGGRAPH 2001
+ *
+ *  Triangles are stored as vertex indices into an interned vertex table
+ *  (12 bytes per triangle) rather than as inline coordinates; vertex
+ *  positions are deduplicated on their float bit patterns as they are
+ *  created, so the output is naturally an indexed mesh.
  */
 
 static const uint8_t VERTEX_LOOP[] = {6, 4, 5, 1, 3, 2, 6};
@@ -61,7 +68,8 @@ Mesher::Mesher(MathTree* tree, bool detect_edges, volatile int* halt)
       nx(new float[MIN_VOLUME]),
       ny(new float[MIN_VOLUME]),
       nz(new float[MIN_VOLUME]),
-      voxel_start(triangles.end())
+      finalized(false),
+      voxel_start(NONE), voxel_end(NONE), fan_start(NONE)
 {
     // Nothing to do here
 }
@@ -72,30 +80,46 @@ Mesher::~Mesher()
         delete [] ptr;
 }
 
-
-// Estimate the normals of a set of points.
-std::list<Vec3f> Mesher::get_normals(const std::list<Vec3f>& points)
+uint32_t Mesher::intern(float x, float y, float z)
 {
-    // Find epsilon as the single shortest side length divided by 10.
+    std::array<uint32_t, 3> key;
+    memcpy(&key[0], &x, sizeof(float));
+    memcpy(&key[1], &y, sizeof(float));
+    memcpy(&key[2], &z, sizeof(float));
+
+    auto found = vertex_ids.find(key);
+    if (found != vertex_ids.end())
+        return found->second;
+
+    const uint32_t id = vertices.size();
+    vertices.push_back({{x, y, z}});
+    vertex_ids.emplace(key, id);
+    return id;
+}
+
+Vec3f Mesher::pos(uint32_t v) const
+{
+    return Vec3f(vertices[v][0], vertices[v][1], vertices[v][2]);
+}
+
+// Estimate the normals of a set of contour points.
+std::vector<Vec3f> Mesher::get_normals(const std::vector<uint32_t>& contour)
+{
+    // Find epsilon as the single shortest side length divided by 100.
     float epsilon = INFINITY;
-    auto j = points.begin();
-    j++;
-    for (auto i = points.begin(); j != points.end(); ++i, ++j)
+    for (size_t i = 0; i + 1 < contour.size(); ++i)
     {
-        if (j != points.end())
-        {
-            auto d = *j - *i;
-            epsilon = fmin(epsilon, d.norm() / 100.0f);
-        }
+        const Vec3f d = pos(contour[i+1]) - pos(contour[i]);
+        epsilon = fmin(epsilon, d.norm() / 100.0f);
     }
 
     // We'll be evaluating a dummy region to numerically estimate gradients
     Region dummy;
-    dummy.voxels = points.size() * 7;
+    dummy.voxels = contour.size() * 7;
     if (dummy.voxels >= MIN_VOLUME)
     {
         // The nx/ny/nz scratch buffers hold MIN_VOLUME floats; writing
-        // points.size() * 7 entries past that would overflow them.
+        // contour.size() * 7 entries past that would overflow them.
         // Returning no normals makes check_feature treat this fan as
         // featureless, which is safe (it just isn't sharpened).
         std::cerr << "Error: too many normals to calculate at once!"
@@ -108,8 +132,9 @@ std::list<Vec3f> Mesher::get_normals(const std::list<Vec3f>& points)
 
     // Load position data into the dummy region
     int i=0;
-    for (auto v : points)
+    for (auto c : contour)
     {
+        const Vec3f v = pos(c);
         dummy.X[i]   = v[0];
         dummy.X[i+1] = v[0] + epsilon;
         dummy.X[i+2] = v[0];
@@ -139,9 +164,10 @@ std::list<Vec3f> Mesher::get_normals(const std::list<Vec3f>& points)
     float* out = eval_r(tree, dummy);
 
     // Extract normals from the evaluated data.
-    std::list<Vec3f> normals;
+    std::vector<Vec3f> normals;
+    normals.reserve(contour.size());
     i = 0;
-    for (auto v : points)
+    for (size_t n = 0; n < contour.size(); ++n)
     {
         const float dx = (out[i+1] - out[i]) - (out[i+4] - out[i]);
         const float dy = (out[i+2] - out[i]) - (out[i+5] - out[i]);
@@ -155,13 +181,14 @@ std::list<Vec3f> Mesher::get_normals(const std::list<Vec3f>& points)
 
 // Mark that the first edge of the most recent triangle is swappable
 // (as part of feature detection / extraction).
-void Mesher::push_swappable_triangle(Triangle t)
+void Mesher::push_swappable_triangle(Tri t)
 {
-    auto found = swappable.find(t.ab_());
+    auto found = swappable.find(edge(t.a, t.b));
     if (found != swappable.end())
     {
-        found->second->b = t.c;
-        t.b = found->second->c;
+        Tri& other = triangles[found->second];
+        other.b = t.c;
+        t.b = other.c;
         triangles.push_back(t);
         swappable.erase(found);
     }
@@ -169,115 +196,129 @@ void Mesher::push_swappable_triangle(Triangle t)
     {
         triangles.push_back(t);
 
-        // Store an iterator pointing to the new triangle.
-        auto itr = triangles.end();
-        itr--;
-        swappable[t.ba_()] = itr;
+        // Store the new triangle's position, keyed on its reversed edge.
+        swappable[edge(t.b, t.a)] = triangles.size() - 1;
     }
 
     // Adjust voxel_end so that it points to the first new triangle.
-    if (voxel_end == triangles.end())
-        voxel_end--;
+    if (voxel_end == NONE)
+        voxel_end = triangles.size() - 1;
 }
 
-std::list<Vec3f> Mesher::get_contour()
+std::vector<uint32_t> Mesher::get_contour()
 {
+    const size_t ve = voxel_limit();
+
     // Find all of the singular edges in this fan
     // (edges that aren't shared between multiple triangles).
-    std::set<std::array<float, 6>> valid_edges;
-    for (auto itr=voxel_start; itr != voxel_end; ++itr)
+    std::unordered_set<uint64_t> valid_edges;
+    for (size_t i = voxel_start; i != ve; ++i)
     {
-        if (valid_edges.count(itr->ba_()))
-            valid_edges.erase(itr->ba_());
-        else
-            valid_edges.insert(itr->ab_());
+        const Tri& t = triangles[i];
 
-        if (valid_edges.count(itr->cb_()))
-            valid_edges.erase(itr->cb_());
+        if (valid_edges.count(edge(t.b, t.a)))
+            valid_edges.erase(edge(t.b, t.a));
         else
-            valid_edges.insert(itr->bc_());
+            valid_edges.insert(edge(t.a, t.b));
 
-        if (valid_edges.count(itr->ac_()))
-            valid_edges.erase(itr->ac_());
+        if (valid_edges.count(edge(t.c, t.b)))
+            valid_edges.erase(edge(t.c, t.b));
         else
-            valid_edges.insert(itr->ca_());
+            valid_edges.insert(edge(t.b, t.c));
+
+        if (valid_edges.count(edge(t.a, t.c)))
+            valid_edges.erase(edge(t.a, t.c));
+        else
+            valid_edges.insert(edge(t.c, t.a));
     }
 
-    std::set<std::array<float, 3>> in_fan;
+    std::unordered_set<uint32_t> in_fan;
 
-    std::list<Vec3f> contour = {voxel_start->a};
-    in_fan.insert(voxel_start->a_());
-    in_fan.insert(voxel_start->b_());
-    in_fan.insert(voxel_start->c_());
+    std::vector<uint32_t> contour = {triangles[voxel_start].a};
+    in_fan.insert(triangles[voxel_start].a);
+    in_fan.insert(triangles[voxel_start].b);
+    in_fan.insert(triangles[voxel_start].c);
 
     fan_start = voxel_start;
     voxel_start++;
 
     while (contour.size() == 1 || contour.front() != contour.back())
     {
-        std::list<Triangle>::iterator itr;
-        for (itr=fan_start; itr != voxel_end; ++itr)
+        size_t i;
+        for (i = fan_start; i != ve; ++i)
         {
-            const auto& t = *itr;
-            if (contour.back() == t.a && valid_edges.count(t.ab_()))
+            const Tri& t = triangles[i];
+            if (contour.back() == t.a && valid_edges.count(edge(t.a, t.b)))
             {
                 contour.push_back(t.b);
                 break;
             }
 
-            if (contour.back() == t.b && valid_edges.count(t.bc_()))
+            if (contour.back() == t.b && valid_edges.count(edge(t.b, t.c)))
             {
                 contour.push_back(t.c);
                 break;
             }
 
-            if (contour.back() == t.c && valid_edges.count(t.ca_()))
+            if (contour.back() == t.c && valid_edges.count(edge(t.c, t.a)))
             {
                 contour.push_back(t.a);
                 break;
             }
         }
-        // If we broke out of the loop (meaning itr is pointing to a relevant
-        // triangle which should be moved forward to before voxel_start), then
-        // push the list around and update iterators appropriately.
-        if (itr != voxel_end)
+        // If we broke out of the loop (meaning i points to a relevant
+        // triangle which should be moved to the back of the fan region
+        // [fan_start, voxel_start)), rotate it into place and update
+        // bookmarks appropriately.  Only elements between the triangle's
+        // old and new positions move, so no other stored index is
+        // disturbed.
+        if (i != ve)
         {
-            in_fan.insert(itr->a_());
-            in_fan.insert(itr->b_());
-            in_fan.insert(itr->c_());
+            in_fan.insert(triangles[i].a);
+            in_fan.insert(triangles[i].b);
+            in_fan.insert(triangles[i].c);
 
-            if (itr == voxel_start)
+            if (i == voxel_start)
             {
                 voxel_start++;
             }
-            else if (itr != fan_start)
+            else if (i > voxel_start)
             {
-                const Triangle t = *itr;
-                triangles.insert(voxel_start, t);
-                itr = triangles.erase(itr);
-                itr--;
+                // Move a triangle from beyond the fan region: it lands at
+                // voxel_start's old position and the region grows by one.
+                std::rotate(triangles.begin() + voxel_start,
+                            triangles.begin() + i,
+                            triangles.begin() + i + 1);
+                voxel_start++;
+            }
+            else if (i != fan_start)
+            {
+                // Reorder within the fan region: the triangle moves to the
+                // back of the region, which doesn't change its extent.
+                std::rotate(triangles.begin() + i,
+                            triangles.begin() + i + 1,
+                            triangles.begin() + voxel_start);
             }
         }
     }
 
     // Special case to catch triangles that are part of a particular fan but
     // don't have any edges in the contour (which can happen!).
-    for (auto itr=voxel_start;  itr != voxel_end; ++itr)
+    for (size_t i = voxel_start; i != ve; ++i)
     {
-        if (in_fan.count(itr->a_()) &&
-            in_fan.count(itr->b_()) &&
-            in_fan.count(itr->c_()))
+        const Tri& t = triangles[i];
+        if (in_fan.count(t.a) && in_fan.count(t.b) && in_fan.count(t.c))
         {
-            if (itr == voxel_start)
+            if (i == voxel_start)
             {
                 voxel_start++;
             }
-            else if (itr != fan_start)
+            else if (i != fan_start)
             {
-                const Triangle t = *itr;
-                triangles.insert(voxel_start, t);
-                itr = triangles.erase(itr);
-                itr--;
+                std::rotate(triangles.begin() + voxel_start,
+                            triangles.begin() + i,
+                            triangles.begin() + i + 1);
+                voxel_start++;
             }
         }
     }
@@ -325,12 +366,12 @@ void Mesher::check_feature()
     float phi = 0;
     for (auto n : normals)
         phi = fmax(phi, fabs(nstar.dot(n)));
-    bool edge = phi < 0.7;
+    bool edge_feature = phi < 0.7;
 
     // Find the center of the contour.
     Vec3f center(0, 0, 0);
     for (auto c : contour)
-        center += c;
+        center += pos(c);
     center /= contour.size();
 
     // Construct the matrices for use in our least-square fit.
@@ -346,11 +387,8 @@ void Mesher::check_feature()
     // minimize).
     Eigen::VectorXd B(normals.size(), 1);
     {
-        auto n = normals.begin();
-        auto c = contour.begin();
-        int i=0;
-        while (n != normals.end())
-            B.row(i++) << (n++)->dot(*(c++) - center);
+        for (size_t i = 0; i < normals.size(); ++i)
+            B.row(i) << normals[i].dot(pos(contour[i]) - center);
     }
 
     // Use singular value decomposition to solve the least-squares fit.
@@ -358,7 +396,7 @@ void Mesher::check_feature()
                                               Eigen::ComputeFullV);
 
     // Set the smallest singular value to zero to make fitting happier.
-    if (edge)
+    if (edge_feature)
     {
         auto singular = svd.singularValues();
         svd.setThreshold(singular.minCoeff() / singular.maxCoeff() * 1.01);
@@ -368,85 +406,105 @@ void Mesher::check_feature()
     const Vec3f new_pt = svd.solve(B) + center;
 
     // Erase this triangle fan, as we'll be inserting a vertex in the center.
-    triangles.erase(fan_start, voxel_start);
+    // (Tombstoned rather than removed, so every stored index stays valid.)
+    for (size_t i = fan_start; i != voxel_start; ++i)
+        triangles[i].a = UINT32_MAX;
 
     // Construct a new triangle fan.
+    const uint32_t np = intern(float(new_pt[0]),
+                               float(new_pt[1]),
+                               float(new_pt[2]));
     contour.push_back(contour.front());
-    {
-        auto p0 = contour.begin();
-        auto p1 = contour.begin();
-        p1++;
-        while (p1 != contour.end())
-            push_swappable_triangle(Triangle(*(p0++), *(p1++), new_pt));
-    }
+    for (size_t i = 0; i + 1 < contour.size(); ++i)
+        push_swappable_triangle(Tri{contour[i], contour[i+1], np});
 }
 
 void Mesher::remove_dupes()
 {
-    std::map<std::array<float, 3>, size_t> verts;
-    std::set<std::array<size_t, 3>> tris;
-    size_t vertex_id = 0;
+    // Key each live triangle on its sorted vertex indices, tagged with
+    // its position so that the first copy is the one that survives.
+    struct Key {
+        uint32_t v[3];
+        uint32_t seq;
+    };
+    std::vector<Key> keys;
+    keys.reserve(triangles.size());
 
-    for (auto itr=triangles.begin(); itr != triangles.end();)
+    for (size_t i = 0; i < triangles.size(); ++i)
     {
-        std::array<size_t, 3> t;
-        int i=0;
-        // For each vertex, find whether it's already in our vertex
-        // set.  Create an array t with vertex indicies.
-        for (auto v : {itr->a_(), itr->b_(), itr->c_()})
-        {
-            auto k = verts.find(v);
-            if (k != verts.end())
-            {
-                t[i++] = k->second;
-            }
-            else
-            {
-                verts[v] = vertex_id;
-                t[i++] = vertex_id;
-                vertex_id++;
-            }
-        }
-
-        // Check to see if there are any other triangles that use these
-        // three vertices; if so, delete this triangle.
-        // (erase-then-advance, rather than erase-then-decrement, since
-        // decrementing begin() is undefined behavior)
-        std::sort(t.begin(), t.end());
-        if (tris.count(t))
-        {
-            itr = triangles.erase(itr);
-        }
-        else
-        {
-            tris.insert(t);
-            ++itr;
-        }
+        const Tri& t = triangles[i];
+        if (dead(t))
+            continue;
+        Key k = {{t.a, t.b, t.c}, uint32_t(i)};
+        std::sort(std::begin(k.v), std::end(k.v));
+        keys.push_back(k);
     }
+
+    std::sort(keys.begin(), keys.end(), [](const Key& a, const Key& b) {
+        if (a.v[0] != b.v[0])   return a.v[0] < b.v[0];
+        if (a.v[1] != b.v[1])   return a.v[1] < b.v[1];
+        if (a.v[2] != b.v[2])   return a.v[2] < b.v[2];
+        return a.seq < b.seq;
+    });
+
+    for (size_t i = 1; i < keys.size(); ++i)
+        if (keys[i].v[0] == keys[i-1].v[0] &&
+            keys[i].v[1] == keys[i-1].v[1] &&
+            keys[i].v[2] == keys[i-1].v[2])
+        {
+            triangles[keys[i].seq].a = UINT32_MAX;
+            // Keep comparing against the run's first (surviving) entry
+            keys[i] = keys[i-1];
+        }
 }
 
 void Mesher::prune_flags()
 {
-    std::set<std::array<float, 6>> edges;
-    for (auto t : triangles)
+    // Sorted flat list of every directed edge (duplicates are harmless:
+    // this is only used for membership tests).
+    std::vector<uint64_t> edges;
+    edges.reserve(triangles.size() * 3);
+    for (const auto& t : triangles)
     {
-        edges.insert(t.ab_());
-        edges.insert(t.bc_());
-        edges.insert(t.ca_());
+        if (dead(t))
+            continue;
+        edges.push_back(edge(t.a, t.b));
+        edges.push_back(edge(t.b, t.c));
+        edges.push_back(edge(t.c, t.a));
     }
+    std::sort(edges.begin(), edges.end());
 
-    for (auto itr=triangles.begin(); itr != triangles.end();)
+    const auto has = [&edges](uint64_t e) {
+        return std::binary_search(edges.begin(), edges.end(), e);
+    };
+
+    for (auto& t : triangles)
     {
-        if (!edges.count(itr->ba_()) ||
-            !edges.count(itr->cb_()) ||
-            !edges.count(itr->ac_()))
+        if (dead(t))
+            continue;
+        if (!has(edge(t.b, t.a)) ||
+            !has(edge(t.c, t.b)) ||
+            !has(edge(t.a, t.c)))
         {
-            itr = triangles.erase(itr);
+            t.a = UINT32_MAX;
         }
-        else
-        {
-            ++itr;
-        }
+    }
+}
+
+void Mesher::finalize()
+{
+    if (finalized)
+        return;
+    finalized = true;
+
+    // Nothing is interned or swapped after meshing; drop the maps.
+    vertex_ids = decltype(vertex_ids)();
+    swappable = decltype(swappable)();
+
+    if (detect_edges)
+    {
+        remove_dupes();
+        prune_flags();
     }
 }
 
@@ -454,17 +512,17 @@ void Mesher::prune_flags()
 // If this vertex completes a triangle, check for features.
 void Mesher::push_vert(const float x, const float y, const float z)
 {
-    triangle.push_back(Vec3f(x, y, z));
+    triangle.push_back(intern(x, y, z));
     if (triangle.size() == 3)
     {
-        triangles.push_back(Triangle(triangle[0], triangle[1], triangle[2]));
+        triangles.push_back(Tri{triangle[0], triangle[1], triangle[2]});
         triangle.clear();
 
-        // If this is the first triangle being constructed (or voxel_start has
-        // just been cleared), store an iterator to this triangle so that we
-        // know where the next triangle fan begins.
-        if (voxel_start == triangles.end())
-            voxel_start--;
+        // If this is the first triangle being constructed (or voxel_start
+        // has just been cleared), store its position so that we know where
+        // the next triangle fan begins.
+        if (voxel_start == NONE)
+            voxel_start = triangles.size() - 1;
     }
 }
 
@@ -624,19 +682,20 @@ void Mesher::flush_queue()
             {
                 // Clear voxel_end
                 // (it will be reset when the next triangle is pushed)
-                voxel_end = triangles.end();
+                voxel_end = NONE;
 
                 // Then, iterate until no more features are found in
                 // the current voxel.
-                while (voxel_start != voxel_end &&
-                       voxel_start != triangles.end())
+                while (voxel_start != NONE &&
+                       voxel_start != voxel_limit() &&
+                       voxel_start != triangles.size())
                 {
                     check_feature();
                 }
 
                 // Clear voxel_start
                 // (it will be reset when the next triangle is pushed)
-                voxel_start = triangles.end();
+                voxel_start = NONE;
             }
         }
     }
@@ -774,22 +833,56 @@ void Mesher::triangulate_region(const Region& r)
 
 float* Mesher::get_verts(unsigned* count)
 {
-    if (detect_edges)
-    {
-        remove_dupes();
-        prune_flags();
-    }
+    finalize();
+
+    size_t live = 0;
+    for (const auto& t : triangles)
+        if (!dead(t))
+            live++;
 
     // There are 9 floats in each triangle
-    *count = triangles.size() * 9;
+    *count = live * 9;
 
     float* out = (float*)malloc(sizeof(float) * (*count));
 
     unsigned i = 0;
-    for (auto t : triangles)
+    for (const auto& t : triangles)
+    {
+        if (dead(t))
+            continue;
         for (auto v : {t.a, t.b, t.c})
             for (int j=0; j < 3; ++j)
-                out[i++] = v[j];
+                out[i++] = vertices[v][j];
+    }
 
     return out;
+}
+
+void Mesher::get_mesh(std::vector<float>& out_verts,
+                      std::vector<uint32_t>& out_indices)
+{
+    finalize();
+
+    out_verts.clear();
+    out_indices.clear();
+
+    // Compact the vertex table down to referenced vertices only,
+    // numbered in first-use order.
+    std::vector<uint32_t> remap(vertices.size(), UINT32_MAX);
+    for (const auto& t : triangles)
+    {
+        if (dead(t))
+            continue;
+        for (auto v : {t.a, t.b, t.c})
+        {
+            if (remap[v] == UINT32_MAX)
+            {
+                remap[v] = out_verts.size() / 3;
+                out_verts.push_back(vertices[v][0]);
+                out_verts.push_back(vertices[v][1]);
+                out_verts.push_back(vertices[v][2]);
+            }
+            out_indices.push_back(remap[v]);
+        }
+    }
 }
