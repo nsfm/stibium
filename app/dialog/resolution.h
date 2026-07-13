@@ -63,5 +63,7 @@ protected slots:
 protected:
     Bounds bounds;
     Ui::ResolutionDialog* ui;
+    bool deviation_touched=false;
+    bool updating_deviation=false;
     const bool z_bounded;
 };
