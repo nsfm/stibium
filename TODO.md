@@ -418,7 +418,9 @@ library -> MCP server on the live session):
 172 issues and 69 PRs scanned. ~70% is dead build/packaging noise;
 the signal, ranked:
 
-**Bugs to verify against our rewrites (repro files attached upstream):**
+**Testing surface — upstream crash/geometry reports to verify against
+our rewrites** (repro files attached on the issues; none reproduced in
+nate's daily use, so these are audit targets, not known-broken):
 - #198 parser crash: malformed math expression hits a lemon assert and
   aborts the app. We OWN this parser (extended it twice) — malformed
   input must error, not core-dump. Cheapest safety win on the board.
