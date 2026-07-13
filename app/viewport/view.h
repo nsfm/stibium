@@ -69,15 +69,32 @@ public:
     void resizeEvent(QResizeEvent* e) override;
 
     /*
+     *  Intercepts tooltip events over the light control
+     */
+    bool viewportEvent(QEvent* e) override;
+
+    /*
      *  Applies a section fraction (from the slider) and re-renders
      */
     void setSection(float s);
 
     /*
-     *  Shows / hides the section slider ('X' key); hiding restores
-     *  the full model
+     *  Shows / hides the section slider; hiding restores the full
+     *  model.  On by default (View menu > Section slider).
      */
-    void toggleSection();
+    void setSectionVisible(bool visible);
+
+    /*
+     *  Shows / hides the key-light control
+     *  (View menu > Light control)
+     */
+    void setLightGizmoVisible(bool visible);
+
+    /*
+     *  The eye button in the viewport corner (bound to the window's
+     *  Hide-bounding-boxes action)
+     */
+    class QToolButton* hideUIButton() const { return hide_ui_button; }
 
     /*
      *  Override key events for menu opening
@@ -195,6 +212,8 @@ protected:
      *  side, exposing interiors on a screen-parallel plane)  */
     float section=1;
     class QSlider* section_slider=nullptr;
+    class QToolButton* hide_ui_button=nullptr;
+    bool light_gizmo_visible=true;
 
     QVector3D center;
 

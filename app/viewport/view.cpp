@@ -9,6 +9,8 @@
 #include <QPropertyAnimation>
 
 #include <QSlider>
+#include <QToolButton>
+#include <QToolTip>
 
 #include "viewport/view.h"
 #include "viewport/scene.h"
@@ -36,6 +38,35 @@ ViewportView::ViewportView(QWidget* parent, ViewportScene* scene)
 
     QAbstractScrollArea::setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     QAbstractScrollArea::setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    {   // Section slider (left edge, on by default)
+        section_slider = new QSlider(Qt::Vertical, this);
+        section_slider->setRange(1, 100);
+        section_slider->setValue(100);
+        section_slider->setToolTip(
+                "Section view: cuts the model on a screen-parallel plane.\n"
+                "Rotate the view to aim the cut; slide to set its depth.");
+        connect(section_slider, &QSlider::valueChanged,
+                [this](int v){ this->setSection(v / 100.0f); });
+    }
+
+    {   // Eye button (top right): show / hide bounding boxes
+        hide_ui_button = new QToolButton(this);
+        hide_ui_button->setCheckable(true);
+        hide_ui_button->setText(QString::fromUtf8("\xf0\x9f\x91\x81"));
+        hide_ui_button->setToolTip("Hide bounding boxes");
+        hide_ui_button->setCursor(Qt::PointingHandCursor);
+        hide_ui_button->setStyleSheet(
+                "QToolButton {"
+                "  border: 1px solid rgba(120, 120, 120, 120);"
+                "  border-radius: 12px;"
+                "  background: rgba(40, 40, 40, 140);"
+                "  padding: 1px 8px;"
+                "}"
+                "QToolButton:checked {"
+                "  background: rgba(200, 150, 60, 160);"
+                "}");
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -233,6 +264,9 @@ QPointF ViewportView::lightGizmoCenter() const
 
 void ViewportView::drawLightGizmo(QPainter* painter) const
 {
+    if (!light_gizmo_visible)
+        return;
+
     const float R = 34;
     const auto c = lightGizmoCenter();
 
@@ -332,7 +366,8 @@ void ViewportView::mousePressEvent(QMouseEvent* event)
     if (event->button() == Qt::LeftButton)
     {
         const auto p = mapToScene(event->position().toPoint());
-        if (QLineF(p, lightGizmoCenter()).length() < 42)
+        if (light_gizmo_visible &&
+            QLineF(p, lightGizmoCenter()).length() < 42)
         {
             gizmo_drag = true;
             updateLightFromGizmo(p);
@@ -440,7 +475,9 @@ void ViewportView::wheelEvent(QWheelEvent* event)
 void ViewportView::resizeEvent(QResizeEvent* e)
 {
     if (section_slider)
-        section_slider->setGeometry(width() - 28, 10, 18, height() - 20);
+        section_slider->setGeometry(10, 44, 18, height() - 54);
+    if (hide_ui_button)
+        hide_ui_button->setGeometry(width() - 50, 10, 40, 24);
 
     Q_UNUSED(e);
     setSceneRect(-width()/2, -height()/2, width(), height());
@@ -458,10 +495,6 @@ void ViewportView::keyPressEvent(QKeyEvent* event)
     {
         openAddMenu();
     }
-    else if (event->key() == Qt::Key_X && !event->modifiers())
-    {
-        toggleSection();
-    }
 }
 
 void ViewportView::setSection(float s)
@@ -471,31 +504,36 @@ void ViewportView::setSection(float s)
     emit(changed(getMatrix(), geometry(), section));
 }
 
-void ViewportView::toggleSection()
+void ViewportView::setSectionVisible(bool visible)
 {
-    if (!section_slider)
-    {
-        section_slider = new QSlider(Qt::Vertical, this);
-        section_slider->setRange(1, 100);
-        section_slider->setValue(100);
-        section_slider->setToolTip(
-                "Section view: cuts the model on a screen-parallel\n"
-                "plane (rotate the view to choose the cut direction)");
-        connect(section_slider, &QSlider::valueChanged,
-                [this](int v){ this->setSection(v / 100.0f); });
-        section_slider->setGeometry(width() - 28, 10, 18, height() - 20);
-    }
-
-    if (section_slider->isVisible())
-    {
-        section_slider->hide();
+    section_slider->setVisible(visible);
+    if (!visible)
         setSection(1);
-    }
     else
-    {
-        section_slider->show();
         setSection(section_slider->value() / 100.0f);
+}
+
+void ViewportView::setLightGizmoVisible(bool visible)
+{
+    light_gizmo_visible = visible;
+    scene()->invalidate();
+}
+
+bool ViewportView::viewportEvent(QEvent* e)
+{
+    if (e->type() == QEvent::ToolTip && light_gizmo_visible)
+    {
+        auto he = static_cast<QHelpEvent*>(e);
+        const auto p = mapToScene(he->pos());
+        if (QLineF(p, lightGizmoCenter()).length() < 42)
+        {
+            QToolTip::showText(he->globalPos(),
+                    "Key light: drag the sun to relight the\n"
+                    "Enhanced render mode", this);
+            return true;
+        }
     }
+    return QGraphicsView::viewportEvent(e);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

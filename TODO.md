@@ -13,6 +13,17 @@ were named for the element symbol all along).
 
 ## Tier 2 — strong wants
 
+- **Deep-zoom render quality (micron-scale features as a feature).**
+  Now that extreme zoom no longer clips (28d365ad), surfaces get
+  visually harsh up close: capped depth-voxel budget quantizes the
+  z-buffer, and gradient evaluation epsilons aren't scaled to the
+  zoom. Approach thoughtfully: adaptive z-budget near surfaces,
+  eval epsilon proportional to feature scale, possibly float64 field
+  eval at extreme magnification. F-rep has no meshes to run out of —
+  if deep zoom is nailed, modeling micron-scale detail in
+  large-format 2D work (photolithography) becomes a genuine
+  differentiator no mesh-based tool can follow.
+
 - **Print-centric checks.** Minimum-wall-thickness detection from the
   field itself (walls thinner than nozzle flagged before slicing);
   overhang-angle visualization is plausible too (gradient vs build
