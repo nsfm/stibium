@@ -22,6 +22,11 @@ public:
      */
     void setProgress(uint64_t done, uint64_t total);
 
+    /*
+     *  Updates the status line ("Meshing...", "Simplifying...", ...).
+     */
+    void setStatus(const QString& status);
+
 protected:
     Ui::ExportingDialog* ui;
 };

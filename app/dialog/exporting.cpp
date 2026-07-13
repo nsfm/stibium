@@ -9,6 +9,12 @@ ExportingDialog::ExportingDialog(QWidget* parent)
     ui->setupUi(this);
 }
 
+void ExportingDialog::setStatus(const QString& status)
+{
+    if (ui->statusLabel->text() != status)
+        ui->statusLabel->setText(status);
+}
+
 void ExportingDialog::setProgress(uint64_t done, uint64_t total)
 {
     // A total of 0 means "working, duration unknown": show Qt's busy

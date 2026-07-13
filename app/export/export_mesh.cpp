@@ -103,6 +103,7 @@ void ExportMeshWorker::async()
     // three indices per triangle), so no welding pass is needed.
     // Meshing is chunked across all cores; the progress counters feed
     // the export dialog's bar.
+    progress_phase = PHASE_MESHING;
     progress_total = r.voxels;
     std::vector<float> verts;
     std::vector<uint32_t> indices;
@@ -114,7 +115,12 @@ void ExportMeshWorker::async()
     progress_total = 0;
 
     if (_simplify > 0 && indices.size() >= 3 && !halt)
+    {
+        progress_phase = PHASE_SIMPLIFYING;
         simplifyMesh(verts, indices);
+    }
+
+    progress_phase = PHASE_WRITING;
 
     // Format follows the file extension; STL is the fallback for
     // scripted exports with unrecognized names (the legacy behavior).

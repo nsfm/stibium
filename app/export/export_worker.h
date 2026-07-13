@@ -68,4 +68,14 @@ protected:
      */
     std::atomic<uint64_t> progress_done{0};
     std::atomic<uint64_t> progress_total{0};
+
+    /*
+     *  Which step async() is currently in, shown as the dialog's
+     *  status line.
+     */
+    enum Phase { PHASE_DEFAULT=0, PHASE_MESHING, PHASE_SIMPLIFYING,
+                 PHASE_WRITING, PHASE_CONTOURING };
+    std::atomic<int> progress_phase{PHASE_DEFAULT};
+
+    static QString phaseLabel(int phase);
 };
