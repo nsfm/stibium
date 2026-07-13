@@ -7,6 +7,7 @@
 #include "fab/types/shape.h"
 #include "fab/util/region.h"
 #include "fab/tree/render.h"
+#include "fab/tree/render_mt.h"
 
 RenderTask::RenderTask(RenderInstance* parent, PyObject* s, QMatrix4x4 M,
                        QVector2D clip, int refinement, float section)
@@ -246,8 +247,8 @@ Bounds RenderTask::render(Shape* shape, Bounds b_, float scale)
 
     build_arrays(&r, b.xmin, b.ymin, b.zmin,
                      b.xmax, b.ymax, b.zmax);
-    render16(shape->tree.get(), r, d16_rows, &halt_flag, nullptr);
-    shaded8(shape->tree.get(), r, d16_rows, s8_rows, &halt_flag, nullptr);
+    render16_mt(shape->tree.get(), r, d16_rows, &halt_flag);
+    shaded8_mt(shape->tree.get(), r, d16_rows, s8_rows, &halt_flag);
 
     free_arrays(&r);
 

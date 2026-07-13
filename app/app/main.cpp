@@ -30,6 +30,7 @@
 #include "fab/fab.h"
 #include "fab/types/shape.h"
 #include "fab/tree/render.h"
+#include "fab/tree/render_mt.h"
 #include "fab/util/region.h"
 
 #include <QImage>
@@ -132,7 +133,7 @@ static int renderHeadless(App& app, const QString& out, float resolution,
     }
 
     volatile int halt = 0;
-    render16(transformed.tree.get(), r, d16_rows.data(), &halt, nullptr);
+    render16_mt(transformed.tree.get(), r, d16_rows.data(), &halt);
     if (flat)
     {
         // 2D fields have no meaningful z gradient; fill with a
@@ -148,8 +149,8 @@ static int renderHeadless(App& app, const QString& out, float resolution,
     }
     else
     {
-        shaded8(transformed.tree.get(), r, d16_rows.data(), s8_rows,
-                &halt, nullptr);
+        shaded8_mt(transformed.tree.get(), r, d16_rows.data(), s8_rows,
+                   &halt);
     }
     free_arrays(&r);
 

@@ -85,6 +85,10 @@ release; newest work at the top of each section.
 
 ## UI
 
+- **Parallel viewport rendering**: the raymarched render fans out
+  across physical cores (~3× on heavy models), in the viewport,
+  `--render`, and heightmap export. Output is byte-identical to
+  single-threaded.
 - **No more zoom clipping**: the render's depth range now always
   covers the whole model (voxel budget capped instead), so extreme
   close-ups stop guillotining geometry. Deep zoom is now a quality
