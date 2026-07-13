@@ -1,12 +1,14 @@
 #pragma once
 
 #include <QGraphicsScene>
+#include <QSet>
 
 class Graph;
 class CanvasView;
 class DummyConnection;
 class InputPort;
 class Datum;
+class InspectorFrame;
 
 // Zoom level below which the canvas switches to low-detail rendering
 static constexpr float CANVAS_LOD_THRESHOLD = 0.32f;
@@ -34,7 +36,17 @@ public:
      */
     CanvasView* getView(QWidget* parent=NULL);
 
+    /*
+     *  Inspector registry, maintained by InspectorFrame's ctor/dtor
+     *  so per-frame passes (floating labels) don't have to walk and
+     *  dynamic_cast every item in the scene.
+     */
+    void registerInspector(InspectorFrame* f) { inspectors.insert(f); }
+    void unregisterInspector(InspectorFrame* f) { inspectors.remove(f); }
+    const QSet<InspectorFrame*>& allInspectors() const { return inspectors; }
+
 private:
+    QSet<InspectorFrame*> inspectors;
     bool low_detail=false;
     DummyConnection* active_dummy=nullptr;
 

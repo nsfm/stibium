@@ -517,19 +517,29 @@ void CanvasView::drawFloatingLabels(QPainter* painter)
     // anything else was named by a person and gets priority.
     static const QRegularExpression default_name("^[a-z]\\d+$");
 
+    auto canvas_scene = dynamic_cast<CanvasScene*>(scene());
+    if (!canvas_scene)
+        return;
+
+    // Custom-vs-default is cached per name: the regex only runs when
+    // a name first appears (or after a rename grows the cache)
+    static QHash<QString, bool> custom_cache;
+    if (custom_cache.size() > 4096)
+        custom_cache.clear();
+
     std::vector<Label> labels;
     const QRectF vp = viewport()->rect();
-    for (auto i : scene()->items())
+    for (auto frame : canvas_scene->allInspectors())
     {
-        auto frame = dynamic_cast<InspectorFrame*>(i);
-        if (!frame)
-            continue;
         const auto center = mapFromScene(frame->sceneBoundingRect().center());
         if (!vp.contains(center))
             continue;
         const auto name = QString::fromStdString(frame->getNode()->getName());
-        labels.push_back({name, QPointF(center),
-                          !default_name.match(name).hasMatch()});
+        auto it = custom_cache.find(name);
+        if (it == custom_cache.end())
+            it = custom_cache.insert(name,
+                    !default_name.match(name).hasMatch());
+        labels.push_back({name, QPointF(center), it.value()});
     }
 
     // Custom names place first; ties break top-to-bottom for a
@@ -547,10 +557,13 @@ void CanvasView::drawFloatingLabels(QPainter* painter)
     painter->resetTransform();
     painter->setRenderHint(QPainter::Antialiasing);
 
-    QFont font = painter->font();
-    font.setPixelSize(11);
+    static QFont font = []{
+        QFont f;
+        f.setPixelSize(11);
+        return f;
+    }();
     painter->setFont(font);
-    const QFontMetricsF fm(font);
+    static const QFontMetricsF fm(font);
 
     std::vector<QRectF> placed;
     placed.reserve(labels.size());

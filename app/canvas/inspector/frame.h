@@ -20,6 +20,7 @@ public:
     ExportWorker* getExportWorker() const;
 
     explicit InspectorFrame(Node* node, QGraphicsScene* scene);
+    ~InspectorFrame();
 
     /*
      *  Overloaded QGraphicsObject functions
