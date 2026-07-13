@@ -476,3 +476,30 @@ disable_nodes — unlocks a CPU SIMD tile viewport (M) and eventually an
 MPR-style GPU renderer (L). Marquee (L): adaptive manifold DC mesher
 (MPL 2.0, literal port permitted). Also: maybe_nan interval tracking
 (S-M), affine-collapse pass (M), interval-derived bounds (M).
+
+### Adopted from the raid (quick wins, all S-effort)
+
+- **Exact-SDF primitives.** Port `box_exact` / `rectangle_exact` /
+  `rounded_box` math into shapes.py (true Euclidean fields); today's
+  max-form cube/rectangle make offset/shell/blends misbehave near
+  corners. Highest-leverage single stdlib port.
+- **Log-sum-exp smooth blends.** `blend_expt` / `blend_expt_unit` +
+  `blend_difference` (smooth SUBTRACTION — our blend is union-only).
+  ~3 lines each now that log/exp opcodes exist.
+- **half_space(norm, point).** Arbitrary cut planes; unlocks exact
+  polygons and one-line partial-revolve wedges (pairs with the
+  upstream #165 ask).
+- **gyroid / TPMS lattices.** sin·cos sum + shell, ~5 lines; huge
+  demo/infill value.
+- **clearance(a, b, o)** press-fit gaps, **symmetric_x/y/z** mirrors,
+  **loft_between** skewed lofts.
+- **maybe_nan interval tracking** in math_i.c — silent sqrt/log/acos
+  domain errors currently poison interval bounds; track the flag like
+  libfive's eval/interval.hpp does.
+
+- **Steal Keeter's Meshing Algorithm Idea.** Per his 2026-07-03 post
+  literally titled "Please Steal my Meshing Algorithm Idea": decouple
+  surface-point generation (QEF sampling) from manifold mesh
+  construction (Delaunay tetrahedralization), sidestepping manifold
+  DC's thin-feature and self-intersection warts. He asked. We're
+  considering it. The audacity of it all.
