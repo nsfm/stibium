@@ -4,9 +4,9 @@ import fab.shapes
 title('Repeat Scale (infinite recursion)')
 
 input('shape', fab.types.Shape)
-input('factor', float, 2)
+input('factor', float, 3)   # scale ratio; must exceed shape's radial span for gaps
 input('x', float, 0)
 input('y', float, 0)
-input('r0', float, 1)
+input('r0', float, 0)   # 0 = auto from bounds
 
 output('repeated', fab.shapes.repeat_scale_xy(shape, factor, x, y, r0))
