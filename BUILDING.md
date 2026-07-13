@@ -23,7 +23,7 @@ mkdir build
 cd build
 cmake -GNinja ..
 ninja
-./app/antimony
+./app/stibium
 ```
 
 --------------------------------------------------------------------------------
@@ -42,7 +42,7 @@ mkdir build
 cd build
 cmake -GNinja ..
 ninja
-./app/antimony
+./app/stibium
 ```
 
 --------------------------------------------------------------------------------

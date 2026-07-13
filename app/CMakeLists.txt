@@ -99,7 +99,7 @@ set(PY_FAB_FILES
 )
 
 if (APPLE)
-    set(ANTIMONY_APP Antimony)
+    set(STIBIUM_APP Stibium)
     set(CMAKE_MACOSX_RPATH ON)
 
     # Add the icon file and deploy it to Resources
@@ -113,45 +113,45 @@ if (APPLE)
         PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/fab"
     )
 
-    add_executable(${ANTIMONY_APP} MACOSX_BUNDLE
+    add_executable(${STIBIUM_APP} MACOSX_BUNDLE
         ${SRC_FILES}
         ${SB_ICON}
         ${PY_FAB_FILES}
     )
 
     # Set application Info.plist file
-    set_target_properties(${ANTIMONY_APP} PROPERTIES
+    set_target_properties(${STIBIUM_APP} PROPERTIES
         MACOSX_BUNDLE_INFO_PLIST ../deploy/mac/Info.plist
     )
 
     # Copy node directory into application bundle
-    add_custom_command(TARGET ${ANTIMONY_APP} POST_BUILD
+    add_custom_command(TARGET ${STIBIUM_APP} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/py/nodes
-            ${CMAKE_CURRENT_BINARY_DIR}/${ANTIMONY_APP}.app/Contents/Resources/nodes)
+            ${CMAKE_CURRENT_BINARY_DIR}/${STIBIUM_APP}.app/Contents/Resources/nodes)
 else()
-    set(ANTIMONY_APP antimony)
-    add_executable(${ANTIMONY_APP} ${SRC_FILES})
+    set(STIBIUM_APP stibium)
+    add_executable(${STIBIUM_APP} ${SRC_FILES})
 
     # Copy node and fab directory into build directory
-    add_custom_command(TARGET ${ANTIMONY_APP} POST_BUILD
+    add_custom_command(TARGET ${STIBIUM_APP} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/py/nodes
             ${CMAKE_CURRENT_BINARY_DIR}/sb/nodes)
-    add_custom_command(TARGET ${ANTIMONY_APP} POST_BUILD
+    add_custom_command(TARGET ${STIBIUM_APP} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/py/fab
             ${CMAKE_CURRENT_BINARY_DIR}/sb/fab)
 
-    install(TARGETS antimony
+    install(TARGETS stibium
             DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
     install(DIRECTORY ../py/nodes
-            DESTINATION ${CMAKE_INSTALL_PREFIX}/share/antimony)
+            DESTINATION ${CMAKE_INSTALL_PREFIX}/share/stibium)
     install(DIRECTORY ../py/fab
-            DESTINATION ${CMAKE_INSTALL_PREFIX}/share/antimony)
+            DESTINATION ${CMAKE_INSTALL_PREFIX}/share/stibium)
 endif()
 
-target_link_libraries(${ANTIMONY_APP}
+target_link_libraries(${STIBIUM_APP}
     Qt6::Widgets
     Qt6::Gui
     Qt6::OpenGL
@@ -178,7 +178,7 @@ add_definitions(-D'GITREV="${GITREV}${GITDIFF}"'
 
 ################################################################################
 
-target_include_directories(${ANTIMONY_APP} SYSTEM PRIVATE
+target_include_directories(${STIBIUM_APP} SYSTEM PRIVATE
     ${Python_INCLUDE_DIRS}
     ${Boost_INCLUDE_DIRS}
     ${AUTOGEN_TARGETS_FOLDER}
@@ -186,6 +186,6 @@ target_include_directories(${ANTIMONY_APP} SYSTEM PRIVATE
 
 ################################################################################
 
-set_property(TARGET ${ANTIMONY_APP} PROPERTY CXX_STANDARD 17)
-set_property(TARGET ${ANTIMONY_APP} PROPERTY C_STANDARD 99)
+set_property(TARGET ${STIBIUM_APP} PROPERTY CXX_STANDARD 17)
+set_property(TARGET ${STIBIUM_APP} PROPERTY C_STANDARD 99)
 

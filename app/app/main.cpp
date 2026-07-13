@@ -319,6 +319,7 @@ int main(int argc, char *argv[])
         auto dir = QCoreApplication::applicationDirPath();
         std::vector<std::string> fab_paths =
             {(dir + "/sb").toStdString(),
+             (dir + "/../share/stibium/").toStdString(),
              (dir + "/../share/antimony/").toStdString()};
         for (auto p : QStandardPaths::standardLocations(
                 QStandardPaths::AppDataLocation))
@@ -330,6 +331,7 @@ int main(int argc, char *argv[])
         auto dir = QCoreApplication::applicationDirPath();
         std::vector<std::string> fab_paths =
             {(dir + "/sb").toStdString(),
+             (dir + "/../share/stibium/").toStdString(),
              (dir + "/../share/antimony/").toStdString()};
         for (auto p : QStandardPaths::standardLocations(
                 QStandardPaths::AppDataLocation))
