@@ -53,8 +53,9 @@ ViewportView::ViewportView(QWidget* parent, ViewportScene* scene)
     {   // Eye button (top right): show / hide bounding boxes
         hide_ui_button = new QToolButton(this);
         hide_ui_button->setCheckable(true);
+        hide_ui_button->setChecked(true);   // lit = boxes visible
         hide_ui_button->setText(QString::fromUtf8("\xf0\x9f\x91\x81"));
-        hide_ui_button->setToolTip("Hide bounding boxes");
+        hide_ui_button->setToolTip("Show / hide bounding boxes");
         hide_ui_button->setCursor(Qt::PointingHandCursor);
         hide_ui_button->setStyleSheet(
                 "QToolButton {"

@@ -35,8 +35,9 @@ BaseViewportWindow::BaseViewportWindow(QList<ViewportView*> views)
                 [=]{ view->scene()->invalidate(); });
         connect(ui->actionHeightmap, &QAction::triggered,
                 [=]{ view->scene()->invalidate(); });
+        // Checked means visible (the action reads "Bounding boxes")
         connect(ui->actionHideUI, &QAction::toggled,
-                [=](bool b){ view->hideUI(b); });
+                [=](bool b){ view->hideUI(!b); });
         connect(ui->actionSectionSlider, &QAction::toggled,
                 [=](bool b){ view->setSectionVisible(b); });
         connect(ui->actionLightControl, &QAction::toggled,
