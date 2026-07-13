@@ -118,7 +118,11 @@ weigh, and animate the field, upstream of any mesh.*
 ## Agent-friendly modeling (LLM/automation as a first-class user)
 
 Antimony already speaks Python-into-math; make the loop closable without
-a GUI so agentic tools can contribute to modeling cleanly:
+a GUI so agentic tools can contribute to modeling cleanly. Full design
+plan in [doc/AGENT-SURFACE.md](doc/AGENT-SURFACE.md) (read/verify loop
+shipped 2026-07-13; write surface layered as: deterministic
+serialization -> machine-readable node reference -> Python authoring
+library -> MCP server on the live session):
 
 - **Live-session control (MCP server, stretch).** The file-watcher
   reload covers agent-edits-on-disk; a socket API into the running
