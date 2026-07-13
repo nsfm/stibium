@@ -59,6 +59,15 @@ static void mod_p(Node* n, FILE* f)
     fprintf(f, ")");
 }
 
+static void log_p(Node* n, FILE* f)
+{
+    fprintf(f, "log");
+    base_p(n, f);
+    fprintf(f, "(");
+    fprint_node(n->lhs, f);
+    fprintf(f, ")");
+}
+
 static void floor_p(Node* n, FILE* f)
 {
     fprintf(f, "floor");
@@ -254,6 +263,7 @@ void fprint_node(Node* n, FILE* f)
         case OP_SQUARE: square_p(n, f); break;
         case OP_SQRT:   sqrt_p(n, f); break;
         case OP_FLOOR:  floor_p(n, f); break;
+        case OP_LOG:    log_p(n, f); break;
         case OP_SIN:    sin_p(n, f); break;
         case OP_COS:    cos_p(n, f); break;
         case OP_TAN:    tan_p(n, f); break;

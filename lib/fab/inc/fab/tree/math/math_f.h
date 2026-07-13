@@ -57,6 +57,13 @@ inline float mod_f(float A, float B)
     return A - B * floor(A / B);
 }
 inline float floor_f(float A) { return floor(A); }
+
+// Natural log, clamped at the smallest normal float so non-positive
+// inputs yield a large negative number instead of -inf/NaN
+inline float log_f(float A)
+{
+    return log(A > 1.17549e-38f ? A : 1.17549e-38f);
+}
 inline float neg_f(float A) { return -A; }
 inline float exp_f(float A) { return exp(A); }
 

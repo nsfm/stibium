@@ -1,0 +1,12 @@
+import fab.types
+import fab.shapes
+
+title('Repeat Scale (infinite recursion)')
+
+input('shape', fab.types.Shape)
+input('factor', float, 2)
+input('x', float, 0)
+input('y', float, 0)
+input('r0', float, 1)
+
+output('shape', fab.shapes.repeat_scale_xy(shape, factor, x, y, r0))

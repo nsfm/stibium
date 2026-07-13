@@ -402,3 +402,15 @@ derivative* floor_g(const derivative* A, derivative* R, int c) {
     }
     return R;
 }
+
+derivative* log_g(const derivative* A, derivative* R, int c) {
+    for (int q = 0; q < c; ++q)
+    {
+        const float d = (A[q].v > 1.17549e-38f) ? A[q].v : 1.17549e-38f;
+        R[q].v = log(d);
+        R[q].dx = A[q].dx / d;
+        R[q].dy = A[q].dy / d;
+        R[q].dz = A[q].dz / d;
+    }
+    return R;
+}

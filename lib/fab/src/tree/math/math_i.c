@@ -310,3 +310,12 @@ Interval floor_i(Interval A)
     i.upper = floor(A.upper);
     return i;
 }
+
+Interval log_i(Interval A)
+{
+    // Monotonic; clamp the non-positive domain like log_f does
+    Interval i;
+    i.lower = log(fmax(A.lower, 1.17549e-38));
+    i.upper = log(fmax(A.upper, 1.17549e-38));
+    return i;
+}

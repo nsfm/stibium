@@ -80,6 +80,7 @@ Node* pow_n(Node* left, Node* right);
 Node* atan2_n(Node* a, Node* b);
 Node* mod_n(Node* a, Node* b);
 Node* floor_n(Node* child);
+Node* log_n(Node* child);
 
 // Unary arithmetic operators
 Node* abs_n(Node* n);

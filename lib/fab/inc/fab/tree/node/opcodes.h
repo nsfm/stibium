@@ -31,6 +31,7 @@ typedef enum Opcode_ {
     OP_NEG,
     OP_EXP,
     OP_FLOOR,
+    OP_LOG,
 
     OP_X,
     OP_Y,
