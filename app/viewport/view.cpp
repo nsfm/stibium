@@ -13,6 +13,7 @@
 #include <QToolTip>
 
 #include "viewport/view.h"
+#include "app/app.h"
 #include "viewport/scene.h"
 #include "viewport/image.h"
 #include "viewport/control/control.h"
@@ -256,6 +257,7 @@ void ViewportView::drawForeground(QPainter* painter, const QRectF& rect)
     drawAxes(painter);
     drawCoords(painter);
     drawLightGizmo(painter);
+    drawAnalytics(painter);
 }
 
 QPointF ViewportView::lightGizmoCenter() const
@@ -518,6 +520,74 @@ void ViewportView::setLightGizmoVisible(bool visible)
 {
     light_gizmo_visible = visible;
     scene()->invalidate();
+}
+
+void ViewportView::setAnalyticsVisible(bool visible)
+{
+    show_analytics = visible;
+    scene()->invalidate();
+}
+
+void ViewportView::drawAnalytics(QPainter* painter) const
+{
+    if (!show_analytics || !App::instance()->analyticsValid())
+        return;
+
+    const auto& s = App::instance()->analyticsStats();
+    const bool flat = App::instance()->analyticsFlat();
+
+    // Center-of-mass marker, projected into the scene
+    {
+        const auto m = getMatrix();
+        const QVector3D com = m * QVector3D(s.com[0], s.com[1], s.com[2]);
+        const QPointF p(com.x(), com.y());
+        painter->setPen(QPen(Colors::amber, 1.5));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawEllipse(p, 7, 7);
+        painter->drawLine(p - QPointF(12, 0), p + QPointF(12, 0));
+        painter->drawLine(p - QPointF(0, 12), p + QPointF(0, 12));
+    }
+
+    // Stats card, fixed to the viewport's top-left
+    painter->save();
+    painter->resetTransform();
+
+    QFont font = painter->font();
+    font.setPixelSize(11);
+    painter->setFont(font);
+
+    QStringList lines;
+    lines << QString(flat ? "area    %1" : "volume  %1")
+                .arg(s.volume, 0, 'g', 6);
+    lines << QString("center  %1, %2, %3")
+                .arg(s.com[0], 0, 'g', 4)
+                .arg(s.com[1], 0, 'g', 4)
+                .arg(s.com[2], 0, 'g', 4);
+    lines << QString("size    %1 x %2 x %3")
+                .arg(s.tight[3] - s.tight[0], 0, 'g', 4)
+                .arg(s.tight[4] - s.tight[1], 0, 'g', 4)
+                .arg(s.tight[5] - s.tight[2], 0, 'g', 4);
+
+    const QFontMetricsF fm(font);
+    float wmax = 0;
+    for (const auto& l : lines)
+        wmax = fmax(wmax, fm.horizontalAdvance(l));
+    const QRectF card(10, 10, wmax + 20, lines.size() * fm.height() + 14);
+
+    auto bg = Colors::base01;
+    bg.setAlphaF(0.85);
+    painter->setBrush(bg);
+    painter->setPen(QPen(Colors::amber, 1));
+    painter->drawRoundedRect(card, 5, 5);
+
+    painter->setPen(Colors::base06);
+    float y = card.top() + 7 + fm.ascent();
+    for (const auto& l : lines)
+    {
+        painter->drawText(QPointF(card.left() + 10, y), l);
+        y += fm.height();
+    }
+    painter->restore();
 }
 
 bool ViewportView::viewportEvent(QEvent* e)

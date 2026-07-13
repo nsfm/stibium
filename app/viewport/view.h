@@ -56,6 +56,11 @@ public:
      */
     QPointF lightGizmoCenter() const;
     void drawLightGizmo(QPainter* painter) const;
+
+    /*
+     *  Draws the analytics card + center-of-mass marker
+     */
+    void drawAnalytics(QPainter* painter) const;
     void updateLightFromGizmo(QPointF scene_pos);
 
     /*
@@ -94,6 +99,12 @@ public:
      *  (View menu > Light control)
      */
     void setLightGizmoVisible(bool visible);
+
+    /*
+     *  Shows / hides the analytics overlay (volume, center of mass,
+     *  tight bounds card + COM marker in the scene)
+     */
+    void setAnalyticsVisible(bool visible);
 
     /*
      *  The eye button in the viewport corner (bound to the window's
@@ -219,6 +230,7 @@ protected:
     class QSlider* section_slider=nullptr;
     class QToolButton* hide_ui_button=nullptr;
     bool light_gizmo_visible=true;
+    bool show_analytics=false;
 
     QVector3D center;
 

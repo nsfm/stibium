@@ -5,6 +5,7 @@
 #include <QCloseEvent>
 
 #include "app/app.h"
+#include "app/settings.h"
 #include "window/base.h"
 
 // Initialize global window count (used to detect when last window closes)
@@ -40,6 +41,18 @@ void BaseWindow::connectActions(App* app)
             app, &App::onNew);
     connect(ui->actionOpen, &QAction::triggered,
             app, &App::onOpen);
+    connect(ui->menuRecent, &QMenu::aboutToShow, [=]{
+        ui->menuRecent->clear();
+        const auto recent = Settings::get(
+                "files/recent", QStringList()).toStringList();
+        for (const auto& f : recent)
+            ui->menuRecent->addAction(f, [f]{
+                App::instance()->openFile(f);
+            });
+        if (recent.isEmpty())
+            ui->menuRecent->addAction("(no recent files)")
+                    ->setEnabled(false);
+    });
     connect(ui->actionQuit, &QAction::triggered,
             app, &App::onQuit);
     connect(ui->actionClose, &QAction::triggered,

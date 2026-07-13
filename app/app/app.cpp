@@ -1,6 +1,8 @@
 #include <Python.h>
 
 #include <QFileSystemWatcher>
+#include <QFutureWatcher>
+#include <QtConcurrent>
 #include <QMessageBox>
 #include <QStandardPaths>
 #include <QDir>
@@ -9,6 +11,8 @@
 #include <QJsonDocument>
 
 #include "app/app.h"
+#include "export/export_image.h"
+#include "dialog/exporting.h"
 
 #include "graph/proxy/graph.h"
 #include "graph/serialize/serializer.h"
@@ -318,6 +322,74 @@ void App::onFileChangedOnDisk(const QString& path)
     });
 }
 
+void App::openFile(QString f)
+{
+    if (undo_stack->isClean() || QMessageBox::question(
+                NULL, "Discard unsaved changes?",
+                "Discard unsaved changes?") == QMessageBox::Yes)
+    {
+        loadFile(f);
+    }
+}
+
+void App::touchRecentFile(const QString& f)
+{
+    auto recent = Settings::get("files/recent", QStringList())
+            .toStringList();
+    recent.removeAll(f);
+    recent.prepend(f);
+    while (recent.size() > 10)
+        recent.removeLast();
+    Settings::set("files/recent", recent);
+}
+
+bool App::runAnalytics()
+{
+    std::unique_ptr<Shape> u3d, u2d;
+    const QString err = ImageExport::collectShapes(
+            graph, QString(), u3d, u2d);
+    if (!err.isEmpty())
+    {
+        QMessageBox::information(NULL, "Analytics",
+                "<b>Analytics:</b><br>" + err);
+        return false;
+    }
+
+    const bool flat = !u3d;
+    const Shape s = flat ? *u2d : *u3d;
+    const Bounds b = s.bounds;
+
+    auto dialog = new ExportingDialog();
+    dialog->setStatus("Analyzing...");
+
+    volatile int halt = 0;
+    FieldStats stats;
+    auto future = QtConcurrent::run([&]{
+        return analyze_field(s.tree.get(),
+                b.xmin, b.ymin, flat ? 0 : b.zmin,
+                b.xmax, b.ymax, flat ? 0 : b.zmax,
+                -1, flat, -1, &halt, &stats);
+    });
+    QFutureWatcher<bool> watcher;
+    watcher.setFuture(future);
+    connect(&watcher, &QFutureWatcher<bool>::finished,
+            dialog, &QDialog::accept);
+    if (dialog->exec() == QDialog::Rejected)
+    {
+        halt = 1;
+        future.waitForFinished();
+    }
+    delete dialog;
+
+    if (!future.result())
+        return false;
+
+    analytics_stats = stats;
+    analytics_flat = flat;
+    analytics_valid = true;
+    return true;
+}
+
 void App::loadFile(QString f)
 {
     Settings::set("files/last_dir", QFileInfo(f).absolutePath());
@@ -381,6 +453,7 @@ void App::loadFile(QString f)
 
         proxy->setPositions(ds.frames);
         emit(filenameChanged(filename));
+        touchRecentFile(filename);
 
         if (!headless)
             watchCurrentFile();

@@ -4,6 +4,9 @@
 #include <vector>
 
 #include <QFileDialog>
+#include <QFileInfo>
+
+#include "app/settings.h"
 #include <QMessageBox>
 
 #include "export/export_mesh.h"
@@ -35,7 +38,7 @@ void ExportMeshWorker::run()
     if (resolution == -1)
     {
         auto resolution_dialog = new ResolutionDialog(
-                bounds, RESOLUTION_DIALOG_3D, UNITLESS);
+                bounds, RESOLUTION_DIALOG_3D, UNITLESS, 1 << 22, NULL, 7);
         if (!resolution_dialog->exec())
             return;
         _resolution = resolution_dialog->getResolution();
@@ -63,7 +66,8 @@ void ExportMeshWorker::run()
     {
         QString filter = "3MF (*.3mf)";
         _filename = QFileDialog::getSaveFileName(
-                NULL, "Export mesh", "",
+                NULL, "Export mesh",
+                Settings::get("files/last_export_dir", "").toString(),
                 "3MF (*.3mf);;STL (*.stl)", &filter);
 
         // If no recognized extension was typed, take it from the filter
@@ -80,6 +84,8 @@ void ExportMeshWorker::run()
     }
     if (_filename.isEmpty())
         return;
+    Settings::set("files/last_export_dir",
+                  QFileInfo(_filename).absolutePath());
 
     if (checkWritable())
         runAsync();
