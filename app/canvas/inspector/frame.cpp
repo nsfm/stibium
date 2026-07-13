@@ -434,6 +434,11 @@ void InspectorFrame::hoverLeaveEvent(QGraphicsSceneHoverEvent *event)
 
 ////////////////////////////////////////////////////////////////////////////////
 
+ExportWorker* InspectorFrame::getExportWorker() const
+{
+    return export_button->getWorker();
+}
+
 void InspectorFrame::setExportWorker(ExportWorker* worker)
 {
     if (export_button->setWorker(worker))

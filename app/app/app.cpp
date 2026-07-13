@@ -1,5 +1,6 @@
 #include <Python.h>
 
+#include <QFileSystemWatcher>
 #include <QMessageBox>
 #include <QStandardPaths>
 #include <QDir>
@@ -139,6 +140,8 @@ void App::onSave()
     }
 
     undo_stack->setClean();
+    ignore_next_file_change = true;
+    watchCurrentFile();
 }
 
 void App::onAutosave()
@@ -269,6 +272,52 @@ bool App::event(QEvent *event)
 
 ////////////////////////////////////////////////////////////////////////////////
 
+void App::watchCurrentFile()
+{
+    if (filename.isEmpty())
+        return;
+
+    if (!file_watcher)
+    {
+        file_watcher = new QFileSystemWatcher(this);
+        connect(file_watcher, &QFileSystemWatcher::fileChanged,
+                this, &App::onFileChangedOnDisk);
+    }
+
+    const auto watched = file_watcher->files();
+    if (!watched.isEmpty())
+        file_watcher->removePaths(watched);
+    file_watcher->addPath(filename);
+}
+
+void App::onFileChangedOnDisk(const QString& path)
+{
+    if (ignore_next_file_change)
+    {
+        ignore_next_file_change = false;
+        watchCurrentFile();
+        return;
+    }
+
+    // Editors and tools often replace files (write + rename), which
+    // drops the watch and can fire before the new content lands, so
+    // wait a beat, re-arm, and only then decide whether to reload.
+    QTimer::singleShot(150, this, [this, path]{
+        if (path != filename || !QFile::exists(path))
+            return;
+        watchCurrentFile();
+
+        if (!undo_stack->isClean())
+        {
+            qWarning("%s changed on disk; not reloading "
+                     "(session has unsaved changes)",
+                     path.toLocal8Bit().constData());
+            return;
+        }
+        loadFile(path);
+    });
+}
+
 void App::loadFile(QString f)
 {
     Settings::set("files/last_dir", QFileInfo(f).absolutePath());
@@ -280,6 +329,12 @@ void App::loadFile(QString f)
     QFile file(f);
     if (!file.open(QIODevice::ReadOnly))
     {
+        if (headless)
+        {
+            fprintf(stderr, "loading error: cannot read %s\n",
+                    f.toLocal8Bit().constData());
+            exit(1);
+        }
         QMessageBox::critical(NULL, "Loading error",
                 "<b>Loading error:</b><br>"
                 "File does not exist.");
@@ -294,6 +349,12 @@ void App::loadFile(QString f)
 
     if (!success)
     {
+        if (headless)
+        {
+            fprintf(stderr, "loading error: %s\n",
+                    ds.error_message.toLocal8Bit().constData());
+            exit(1);
+        }
         QMessageBox::critical(NULL, "Loading error",
                 "<b>Loading error:</b><br>" +
                 ds.error_message);
@@ -301,12 +362,21 @@ void App::loadFile(QString f)
     } else {
         // If there's a warning message, show it in a box.
         if (!ds.warning_message.isNull())
-            QMessageBox::information(NULL, "Loading information",
-                    "<b>Loading information:</b><br>" +
-                    ds.warning_message);
+        {
+            if (headless)
+                fprintf(stderr, "loading warning: %s\n",
+                        ds.warning_message.toLocal8Bit().constData());
+            else
+                QMessageBox::information(NULL, "Loading information",
+                        "<b>Loading information:</b><br>" +
+                        ds.warning_message);
+        }
 
         proxy->setPositions(ds.frames);
         emit(filenameChanged(filename));
+
+        if (!headless)
+            watchCurrentFile();
 
         // Center canvas views on the loaded graph, which may live far
         // from the origin. Deferred one event-loop turn so windows are

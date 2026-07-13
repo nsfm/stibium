@@ -8,6 +8,7 @@
 
 class Graph;
 class GraphProxy;
+class QFileSystemWatcher;
 class UndoCommand;
 class UndoStack;
 
@@ -40,6 +41,17 @@ public:
     GraphProxy* getProxy() const { return proxy; }
 
     /*
+     *  Returns the root graph
+     */
+    Graph* getGraph() const { return graph; }
+
+    /*
+     *  In headless mode, load errors go to stderr (and exit) instead
+     *  of popping modal dialogs that nothing can dismiss.
+     */
+    void setHeadless(bool h) { headless = h; }
+
+    /*
      *  Global Undo and Redo operations
      */
     void undo();
@@ -70,6 +82,16 @@ public:
      *  Loads a file specified by name
      */
     void loadFile(QString f);
+
+    /*
+     *  (Re)arms the file watcher on the current filename
+     */
+    void watchCurrentFile();
+
+    /*
+     *  Live reload: handles the open file changing on disk
+     */
+    void onFileChangedOnDisk(const QString& path);
 
     /*
      *  Emits the signals used by windows to set their titles
@@ -126,6 +148,15 @@ protected:
     Graph* graph;
     GraphProxy* proxy;
     UndoStack* undo_stack;
+
+    /*
+     *  Watches the open file and reloads when it changes on disk
+     *  (only while the session has no unsaved edits), so external
+     *  external tools can edit the model live.
+     */
+    QFileSystemWatcher* file_watcher=nullptr;
+    bool ignore_next_file_change=false;
+    bool headless=false;
 
     QString filename;
     QTimer* autosave_timer;

@@ -68,6 +68,11 @@ public:
     void setExportWorker(ExportWorker* worker);
 
     /*
+     *  Returns this node's export worker (NULL if none)
+     */
+    ExportWorker* getExportWorker() const;
+
+    /*
      *  Look up the proxy for the given datum, constructing one if necessary
      */
     DatumProxy* getDatumProxy(Datum* d);

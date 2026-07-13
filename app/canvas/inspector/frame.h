@@ -13,6 +13,12 @@ class InspectorFrame : public QGraphicsObject
 {
     Q_OBJECT
 public:
+    /*
+     *  Returns the export worker registered by this node's script
+     *  (NULL if none); used by the headless CLI path.
+     */
+    ExportWorker* getExportWorker() const;
+
     explicit InspectorFrame(Node* node, QGraphicsScene* scene);
 
     /*

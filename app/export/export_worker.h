@@ -35,6 +35,16 @@ public:
     void runAsync();
 
     /*
+     *  Runs the export synchronously with no dialogs (for CLI use).
+     *  fname / res override the script-provided values when given
+     *  (res <= 0 keeps the script's); detect is -1 to keep the
+     *  script's setting, else 0/1.  Errors go to stderr.
+     *  Returns false if required settings are missing.
+     */
+    virtual bool runHeadless(const QString& fname, float res,
+                             int detect) = 0;
+
+    /*
      *  Checks if _filename is writable.
      *  If so, returns true; otherwise, shows a warning and returns false.
      */

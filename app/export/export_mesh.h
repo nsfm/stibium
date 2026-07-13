@@ -27,6 +27,9 @@ public:
      */
     void async() override;
 
+    bool runHeadless(const QString& fname, float res,
+                     int detect) override;
+
 protected:
     /*
      *  Simplifies the indexed mesh to within _simplify model units of

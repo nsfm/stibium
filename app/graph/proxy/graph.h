@@ -75,6 +75,11 @@ public:
     NodeProxy* getNodeProxy(Node* g);
 
     /*
+     *  All current node proxies (for the headless CLI path)
+     */
+    QList<NodeProxy*> nodeProxies() const { return nodes.values(); }
+
+    /*
      *  Returns a datum for the given datum, constructing one if none exists.
      *
      *  Just-in-time construction is necessary because, when loading a file,

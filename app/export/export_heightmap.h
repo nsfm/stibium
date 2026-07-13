@@ -24,6 +24,9 @@ public:
      */
     void async() override;
 
+    bool runHeadless(const QString& fname, float res,
+                     int detect) override;
+
 protected:
     /*
      *  Call-time settings
