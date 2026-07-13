@@ -96,30 +96,66 @@ void InspectorFrame::paint(QPainter *painter,
 
     painter->setRenderHint(QPainter::Antialiasing);
 
-    // Zoomed way out: draw a solid name card instead of the full body
+    // Zoomed way out: draw a skeleton card instead of the full body.
+    // No text (the canvas's floating labels own naming out here) -
+    // just the type tint plus datum-row stubs, react-skeleton style,
+    // so a node's shape reads without its detail.
     if (low_detail)
     {
+        const float px = painter->worldTransform().m11();  // screen px per unit
+
+        // Sub-8px cards: a single flat rect is all anyone can see
+        if (r.height() * px < 8)
+        {
+            painter->setRenderHint(QPainter::Antialiasing, false);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(typeTint());
+            painter->drawRect(r);
+            if (isSelected())
+            {
+                painter->setBrush(Qt::NoBrush);
+                painter->setPen(QPen(Colors::amber, 2 / px));
+                painter->drawRect(r);
+            }
+            return;
+        }
+
         painter->setPen(Qt::NoPen);
         painter->setBrush(QColor(0, 0, 0, 40));
         painter->drawRoundedRect(r.translated(0, 3), 10, 10);
         painter->setBrush(typeTint());
         painter->drawRoundedRect(r, 10, 10);
+
+        // Datum-row stubs: one soft bar per (visible) input row,
+        // skipped when rows would land under ~3 screen pixels
+        int rows = 0;
+        for (auto d : node->childDatums())
+            if (!d->getName().empty() && d->getName().front() != '_')
+                rows++;
+        rows = std::min(rows, 6);
+        const float row_h = 8;
+        const float row_gap = 6;
+        if (rows > 0 && (row_h + row_gap) * px >= 3 &&
+            rows * (row_h + row_gap) < r.height() - 16)
+        {
+            auto stub = Colors::base06;
+            stub.setAlphaF(0.25);
+            painter->setBrush(stub);
+            const float x0 = r.left() + 10;
+            float y = r.top() + 12;
+            for (int i = 0; i < rows; ++i)
+            {
+                // Vary widths a touch so it reads as content, not bars
+                const float w = (r.width() - 20) * (i % 2 ? 0.55f : 0.8f);
+                painter->drawRoundedRect(QRectF(x0, y, w, row_h), 3, 3);
+                y += row_h + row_gap;
+            }
+        }
+
         painter->setBrush(Qt::NoBrush);
         painter->setPen(isSelected() ? QPen(Colors::amber, 2)
                                      : QPen(Colors::base03, 1));
         painter->drawRoundedRect(r, 10, 10);
-
-        // Name text sized to fit the card (width and height)
-        const auto name = QString::fromStdString(node->getName());
-        auto f = painter->font();
-        f.setPixelSize(16);
-        const QFontMetricsF fm(f);
-        const float s = fmin((r.width() - 12) / fmax(fm.horizontalAdvance(name), 1.0),
-                             (r.height() - 8) / fm.height());
-        f.setPixelSize(fmax(8.0, 16 * fmin(s, 2.5)));
-        painter->setFont(f);
-        painter->setPen(Colors::base06);
-        painter->drawText(r, Qt::AlignCenter, name);
         return;
     }
 
