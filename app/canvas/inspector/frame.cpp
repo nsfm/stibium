@@ -86,6 +86,28 @@ void InspectorFrame::paint(QPainter *painter,
 
     painter->setRenderHint(QPainter::Antialiasing);
 
+    // Zoomed way out: draw a solid name card instead of the full body
+    if (low_detail)
+    {
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(0, 0, 0, 40));
+        painter->drawRoundedRect(r.translated(0, 3), 10, 10);
+        painter->setBrush(Colors::base02);
+        painter->drawRoundedRect(r, 10, 10);
+        painter->setBrush(Qt::NoBrush);
+        painter->setPen(isSelected() ? QPen(Colors::amber, 2)
+                                     : QPen(Colors::base03, 1));
+        painter->drawRoundedRect(r, 10, 10);
+
+        auto f = painter->font();
+        f.setPixelSize(fmax(14.0, r.height() * 0.4));
+        painter->setFont(f);
+        painter->setPen(Colors::base06);
+        painter->drawText(r, Qt::AlignCenter,
+                QString::fromStdString(node->getName()));
+        return;
+    }
+
     // Drop shadow: stacked translucent rects (deliberately not a
     // QGraphicsDropShadowEffect, which rasterizes items on every repaint)
     painter->setPen(Qt::NoPen);
@@ -126,6 +148,21 @@ void InspectorFrame::paint(QPainter *painter,
     painter->setPen(isSelected() ? QPen(Colors::amber, 1.5)
                                  : QPen(Colors::base02, 1));
     painter->drawRoundedRect(r, 8, 8);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void InspectorFrame::setLowDetail(bool low)
+{
+    if (low == low_detail)
+        return;
+    low_detail = low;
+
+    for (auto c : childItems())
+        c->setVisible(!low);
+    if (!low)
+        redoLayout();   // restores per-datum hidden rules
+    update();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

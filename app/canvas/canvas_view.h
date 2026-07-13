@@ -95,4 +95,5 @@ protected:
     QPointF click_pos;
     QPointF drag_pos;
     bool selecting;
+    bool low_detail_mode=false;
 };

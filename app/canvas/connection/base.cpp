@@ -2,6 +2,8 @@
 #include <QPainter>
 
 #include "canvas/connection/base.h"
+#include <QStyleOptionGraphicsItem>
+
 #include "app/colors.h"
 
 BaseConnection::BaseConnection(QColor color)
@@ -27,10 +29,17 @@ void BaseConnection::paint(QPainter *painter,
                            const QStyleOptionGraphicsItem *option,
                            QWidget *widget)
 {
-    Q_UNUSED(option);
     Q_UNUSED(widget);
 
     painter->setRenderHint(QPainter::Antialiasing);
+
+    // Zoomed way out: single cheap stroke, no shadow or glow
+    if (option->levelOfDetailFromTransform(painter->worldTransform()) < 0.4)
+    {
+        painter->setPen(QPen(color(), 2, Qt::SolidLine, Qt::RoundCap));
+        painter->drawPath(path());
+        return;
+    }
 
     // Soft accent glow when hovered or selected
     if (hover || isSelected())
