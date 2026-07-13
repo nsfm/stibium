@@ -8,6 +8,9 @@
 #include <vector>
 
 #include <QImage>
+#include <QVector3D>
+
+#include "app/settings.h"
 
 #include "export/export_image.h"
 
@@ -126,7 +129,24 @@ QString render(Graph* graph, const Options& opt)
     // Compose an ARGB image: decode the packed normals (n*127+128)
     // and light them (key + ambient, warm material) where depth
     // exists; transparent elsewhere.  Flip vertically (rows are y-up).
-    const float Lx = 0.33f, Ly = 0.32f, Lz = 0.89f;   // key light
+    // Key light: honor the user's configured direction (the same
+    // one the viewport gizmo drags), falling back to the default
+    float Lx = 0.33f, Ly = 0.32f, Lz = 0.89f;
+    {
+        const auto parts = Settings::get(
+                "render/key_light", "0.57,-0.57,0.57").toString().split(',');
+        if (parts.size() == 3)
+        {
+            QVector3D l(parts[0].toFloat(), parts[1].toFloat(),
+                        parts[2].toFloat());
+            l.normalize();
+            // The gizmo's y points down in view coords; image space
+            // is y-up here, so flip to match the viewport's lighting
+            Lx = l.x();
+            Ly = -l.y();
+            Lz = l.z();
+        }
+    }
     const float base[3] = {228, 219, 205};            // warm gray
     QImage img(W, H, QImage::Format_ARGB32);
     img.fill(opt.transparent ? QColor(0, 0, 0, 0) : QColor(28, 26, 24));
