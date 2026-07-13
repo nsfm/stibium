@@ -53,8 +53,9 @@ void RenderInstance::datumChanged(Datum* d)
     setPending();
 }
 
-void RenderInstance::viewChanged(QMatrix4x4 m, QRect clip_)
+void RenderInstance::viewChanged(QMatrix4x4 m, QRect clip_, float section_)
 {
+    section = section_;
     M = m;
     clip = {float(clip_.width()), float(clip_.height())};
     setPending();
@@ -141,7 +142,8 @@ void RenderInstance::startNextRender()
     assert(orphan == false);
 
     Q_ASSERT(starting_refinement >= 1);
-    current.reset(new RenderTask(this, shape, M, clip, starting_refinement));
+    current.reset(new RenderTask(this, shape, M, clip, starting_refinement,
+                             section));
 
     pending = false;
 }

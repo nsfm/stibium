@@ -85,6 +85,10 @@ release; newest work at the top of each section.
 
 ## UI
 
+- **Cross-section view**: press X in a viewport for a slider that
+  pulls a screen-parallel cut plane through the model — rotate to aim
+  the cut, slide to expose walls, voids, and clearances. Also
+  available headlessly (`--render --section 0.5`).
 - **Warm dark theme**: new palette (amber accent, warm charcoal ramp),
   Fusion style + app-wide stylesheet so menus/dialogs/scrollbars match
   the canvas. Fixed `Colors::adjust()` so hover highlights work on dark

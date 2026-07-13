@@ -26,7 +26,7 @@ public:
     static Transform getTransform(QMatrix4x4 m);
 
     RenderTask(RenderInstance* parent, PyObject* s, QMatrix4x4 M,
-               QVector2D clip, int refinement=1);
+               QVector2D clip, int refinement=1, float section=1);
     ~RenderTask();
 
     /*
@@ -66,6 +66,7 @@ protected:
     PyObject* shape;
     QMatrix4x4 M;
     QVector2D clip;
+    float section;
 
     QFuture<void> future;
     QFutureWatcher<void> watcher;

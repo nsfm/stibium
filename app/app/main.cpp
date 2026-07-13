@@ -44,7 +44,7 @@
  *  fits the longest side to `size` pixels.  Pure-C render path; no GL.
  */
 static int renderHeadless(App& app, const QString& out, float resolution,
-                          const QString& view, int size)
+                          const QString& view, int size, float section)
 {
     // Union the file's Shape outputs, 3D and 2D separately: when 3D
     // geometry exists, 2D shapes are construction profiles and are
@@ -110,11 +110,14 @@ static int renderHeadless(App& app, const QString& out, float resolution,
         res = extent > 0 ? size / extent : 1;
     }
 
+    // Section view: cut away the near side of the depth range
+    const float tzmax = tb.zmax - (1 - section) * (tb.zmax - tb.zmin);
+
     Region r = {};
     r.ni = uint32_t(fmax(1, (tb.xmax - tb.xmin) * res));
     r.nj = uint32_t(fmax(1, (tb.ymax - tb.ymin) * res));
-    r.nk = uint32_t(fmax(1, (tb.zmax - tb.zmin) * res));
-    build_arrays(&r, tb.xmin, tb.ymin, tb.zmin, tb.xmax, tb.ymax, tb.zmax);
+    r.nk = uint32_t(fmax(1, (tzmax - tb.zmin) * res));
+    build_arrays(&r, tb.xmin, tb.ymin, tb.zmin, tb.xmax, tb.ymax, tzmax);
 
     const int W = r.ni, H = r.nj;
     std::vector<uint16_t> d16(size_t(W) * H, 0);
@@ -394,6 +397,11 @@ int main(int argc, char *argv[])
                 "View for --render: iso (default), top, or front",
                 "VIEW", "iso");
         parser.addOption(viewOpt);
+        QCommandLineOption sectionOpt("section",
+                "Cross-section for --render: fraction of the model's "
+                "depth to keep, cutting from the viewer's side "
+                "(0-1; default 1 = no cut)", "F", "1");
+        parser.addOption(sectionOpt);
         QCommandLineOption sizeOpt("size",
                 "Longest image side in pixels for --render when "
                 "--resolution isn't given (default 512)", "N", "512");
@@ -446,7 +454,8 @@ int main(int argc, char *argv[])
             if (code == 0 && parser.isSet(renderOpt))
                 code = renderHeadless(app, parser.value(renderOpt), res,
                                       parser.value(viewOpt),
-                                      parser.value(sizeOpt).toInt());
+                                      parser.value(sizeOpt).toInt(),
+                                      parser.value(sectionOpt).toFloat());
             if (code == 0 && parser.isSet(resaveOpt))
                 code = resaveHeadless(app, parser.value(resaveOpt));
             // Return (rather than exit()) so Qt tears down cleanly

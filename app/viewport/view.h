@@ -69,6 +69,17 @@ public:
     void resizeEvent(QResizeEvent* e) override;
 
     /*
+     *  Applies a section fraction (from the slider) and re-renders
+     */
+    void setSection(float s);
+
+    /*
+     *  Shows / hides the section slider ('X' key); hiding restores
+     *  the full model
+     */
+    void toggleSection();
+
+    /*
      *  Override key events for menu opening
      */
     void keyPressEvent(QKeyEvent* event) override;
@@ -100,7 +111,7 @@ signals:
     /*
      *  Emitted when the window matrix or clipping box changes
      */
-    void changed(QMatrix4x4 m, QRect clip);
+    void changed(QMatrix4x4 m, QRect clip, float section);
 
     /*
      *  Signal used to request that images adjust zmin and zmax based on
@@ -179,6 +190,12 @@ protected:
     void spinTo(float new_yaw, float new_pitch);
 
     /*  Center of 3D scene  */
+    /*  Section view: fraction of the visible depth slab that is
+     *  rendered (1 = full model; smaller values cut away the near
+     *  side, exposing interiors on a screen-parallel plane)  */
+    float section=1;
+    class QSlider* section_slider=nullptr;
+
     QVector3D center;
 
     /*  Scale of 3D view (higher numbers are closer)  */
