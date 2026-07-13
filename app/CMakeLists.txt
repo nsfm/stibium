@@ -1,7 +1,12 @@
 # Instruct CMake to run moc, uic, and rrc automatically when needed.
 set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
+
+# .ui headers are wrapped explicitly (qt6_wrap_ui) rather than via
+# AUTOUIC: with Ninja, AUTOUIC's timestamp handling ran one build
+# behind on .ui edits, leaving dependents compiled against a stale
+# Ui:: layout (shifted member offsets = startup segfaults). Explicit
+# wrapping makes the generated headers first-class build nodes.
 
 # Make the build directory an include target (for generated moc_ files)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
@@ -93,6 +98,13 @@ set(SRC_FILES
 
     gl/gl.qrc
 )
+
+qt6_wrap_ui(UI_HEADERS
+    window/base_window.ui
+    dialog/resolution_dialog.ui
+    dialog/exporting_dialog.ui
+)
+list(APPEND SRC_FILES ${UI_HEADERS})
 
 set(PY_FAB_FILES
     ../py/fab/__init__.py
