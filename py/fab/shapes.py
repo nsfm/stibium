@@ -3178,3 +3178,66 @@ def iterate_scaled(part, n, factor, dx=0, dy=0, x0=0, y0=0):
         copy = scale_xy(part, x0, y0, s)
         out |= move(copy, px, py, 0)
     return out
+
+################################################################################
+# Mesh import
+
+def import_mesh(filename, voxels_per_unit=7.0, sha256=''):
+    """ Imports an STL mesh as a solid distance field.
+
+        The mesh is sampled onto a signed distance grid (sign from
+        the generalized winding number, so scans with holes still
+        classify inside/outside); the result composes with every
+        other shape and transform. Relative paths resolve against
+        the project file's directory. `voxels_per_unit` sets the
+        sample density: features smaller than a voxel are lost.
+
+        If `sha256` is set, the file's content hash must match it
+        (pin it to catch the source file changing underneath the
+        project).
+    """
+    import os
+    import _fabtypes
+
+    if not filename:
+        raise RuntimeError("import_mesh: no filename given")
+
+    proj = _fabtypes.project_dir()
+    path = filename
+    if not os.path.isabs(path):
+        if not proj:
+            raise RuntimeError(
+                "import_mesh: save the project first - relative mesh "
+                "paths resolve against the project file")
+        path = os.path.join(proj, filename)
+
+    # The processed grid caches next to the project; it's derived
+    # data, safe to gitignore or delete.
+    cache = ''
+    if proj:
+        cache = os.path.join(proj, '.stibium-cache')
+        try:
+            os.makedirs(cache, exist_ok=True)
+        except OSError:
+            cache = ''
+
+    shape, stamped, digest, _ = _fabtypes._import_mesh(
+            path, float(voxels_per_unit), cache)
+
+    if sha256 and sha256 != digest:
+        raise RuntimeError(
+            "import_mesh: '%s' changed since its hash was pinned\n"
+            "(expected %s..., got %s...; clear the sha256 input to "
+            "accept the new file)"
+            % (filename, sha256[:12], digest[:12]))
+
+    if stamped:
+        print("note: '%s' is a Stibium export - prefer opening its "
+              "source .sb; importing gives a frozen sampled copy"
+              % filename)
+    if not proj:
+        print("note: project is unsaved - consider saving and moving "
+              "the mesh next to the project file so the import stays "
+              "portable")
+
+    return shape
