@@ -192,7 +192,7 @@ target_include_directories(${STIBIUM_APP} SYSTEM PRIVATE
 # App-level integration tests: every example must load, evaluate,
 # render, and round-trip through the serializer deterministically.
 if (NOT APPLE)
-    foreach(example csg gear ring hi label)
+    foreach(example csg gear ring hi label showcase_gear)
         add_test(NAME app_validate_${example}
                  COMMAND ${STIBIUM_APP} --validate
                          ${CMAKE_SOURCE_DIR}/examples/${example}.sb)
