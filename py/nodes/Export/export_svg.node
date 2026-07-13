@@ -1,8 +1,8 @@
 import fab
 
-title('Mesh (.3mf, .stl)')
+title('Vector (.svg)')
 
 input('shape', fab.types.Shape)
 output('out', shape)
 
-sb.export.mesh(shape)
+sb.export.svg(shape)
