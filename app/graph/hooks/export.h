@@ -29,6 +29,13 @@ struct ScriptExportHooks
             boost::python::dict kwargs);
 
     /*
+     *  Creates an export task that traces 2D contours to an SVG
+     */
+    static boost::python::object svg(
+            boost::python::tuple args,
+            boost::python::dict kwargs);
+
+    /*
      *  Helper function that retrieves an object of the given type
      *  from the keyword arguments dictionary
      */

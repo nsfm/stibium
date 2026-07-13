@@ -4,6 +4,7 @@
 #include "graph/proxy/node.h"
 #include "export/export_mesh.h"
 #include "export/export_heightmap.h"
+#include "export/export_svg.h"
 
 #include <QString>
 
@@ -76,6 +77,37 @@ object ScriptExportHooks::stl(tuple args, dict kwargs)
     self->proxy->setExportWorker(new ExportMeshWorker(
                 shape, bounds, filename, resolution, detect_features,
                 simplify));
+    return object();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+object ScriptExportHooks::svg(tuple args, dict kwargs)
+{
+    ScriptExportHooks* self = extract<ScriptExportHooks*>(args[0])();
+
+    if (self->called)
+        throw AppHooks::Exception(
+                "Cannot define multiple export tasks in a single script.");
+    self->called = true;
+
+    if (len(args) != 2)
+        throw AppHooks::Exception(
+                "export.svg must be called with shape as first argument.");
+
+    Shape shape = get_shape(args);
+    Bounds bounds = get_object("bounds", kwargs, shape.bounds);
+
+    if (get_object("pad", kwargs, true))
+        bounds = pad_bounds(bounds);
+
+    const QString filename = QString::fromStdString(
+            get_object("filename", kwargs, ""));
+    const float resolution = get_object("resolution", kwargs, -1);
+    const bool detect_features = get_object("detect_features", kwargs, true);
+
+    self->proxy->setExportWorker(new ExportSvgWorker(
+                shape, bounds, filename, resolution, detect_features));
     return object();
 }
 
