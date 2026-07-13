@@ -120,9 +120,6 @@ weigh, and animate the field, upstream of any mesh.*
 Antimony already speaks Python-into-math; make the loop closable without
 a GUI so agentic tools can contribute to modeling cleanly:
 
-- **Headless render verb.** `--render view.png` — the agent's eyes
-  (export + validate shipped; see Done). Compositing multiple shapes
-  via the pure-C render path (render16/shaded8), no GL needed.
 - **Live-session control (MCP server, stretch).** The file-watcher
   reload covers agent-edits-on-disk; a socket API into the running
   session (add/edit nodes, read errors, render viewport) is the full
@@ -175,6 +172,13 @@ a GUI so agentic tools can contribute to modeling cleanly:
 
 
 ## Done
+- 2026-07-13 — headless render verb: `antimony --render out.png
+  [--view iso|top|front] [--size N | --resolution R] model.sb`.
+  Unions the file's 3D shapes (2D construction profiles excluded
+  unless the model is all-2D), renders via the pure-C
+  render16/shaded8 path with a view transform (no GL), applies
+  key+ambient lighting to the packed normals, and writes ARGB with
+  transparent background — thumbnail-ready. The agent's eyes.
 - 2026-07-13 — headless verbs: `antimony --validate model.sb` (script +
   datum errors to stderr, exit code) and `antimony --export FILE
   [--resolution R] [--detect-features] model.sb` (runs the file's

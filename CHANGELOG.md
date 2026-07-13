@@ -121,6 +121,10 @@ release; newest work at the top of each section.
 
 ## App & infrastructure
 
+- **Headless render**: `--render out.png [--view iso|top|front]
+  [--size N]` draws the model's shapes shaded on a transparent
+  background with no display or GL — gallery scripts, CI previews,
+  and file-manager thumbnailers can see models directly.
 - **Headless CLI verbs**: `--validate` (script/datum errors to stderr,
   exit code) and `--export FILE [--resolution R] [--detect-features]`
   run a model's export node with no display or dialogs — CI, batch
