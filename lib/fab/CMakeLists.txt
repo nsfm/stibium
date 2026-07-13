@@ -1,6 +1,7 @@
 find_package(PNG REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(FLEX REQUIRED)
+find_package(Threads REQUIRED)
 
 ################################################################################
 
@@ -83,6 +84,7 @@ target_link_libraries(SbFab
     ${Python_LIBRARY_RELEASE}
     ${PNG_LIBRARIES}
     ZLIB::ZLIB
+    Threads::Threads
 )
 target_include_directories(SbFab PUBLIC inc)
 target_include_directories(SbFab SYSTEM PRIVATE

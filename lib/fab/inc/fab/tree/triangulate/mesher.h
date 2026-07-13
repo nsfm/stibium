@@ -2,6 +2,7 @@
 #define MESHER_H
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <list>
 #include <unordered_map>
@@ -23,7 +24,14 @@ struct InterpolateCommand {
 
 class Mesher {
 public:
-    Mesher(struct MathTree_* tree, bool detect_edges, volatile int* halt);
+    /*
+     *  progress, if given, is incremented by the number of voxels
+     *  completed (empty regions count when skipped; occupied regions
+     *  when their packed block finishes).  It reaches the region's
+     *  total voxel count when triangulate_region returns unhalted.
+     */
+    Mesher(struct MathTree_* tree, bool detect_edges, volatile int* halt,
+           std::atomic<uint64_t>* progress=nullptr);
     ~Mesher();
 
     /*
@@ -42,9 +50,15 @@ public:
      *  Returns the mesh in indexed form: out_verts is a flat list of
      *  unique vertices (3 floats each); out_indices is 3 vertex indices
      *  per triangle.  Vertices are emitted in first-use order.
+     *
+     *  run_finalize=false skips the dedup / flag-pruning passes; used
+     *  by the multithreaded driver, which must run them globally after
+     *  merging (pruning per-chunk would drop valid triangles whose
+     *  reverse edges live in a neighboring chunk's mesh).
      */
     void get_mesh(std::vector<float>& out_verts,
-                  std::vector<uint32_t>& out_indices);
+                  std::vector<uint32_t>& out_indices,
+                  bool run_finalize=true);
 
 protected:
     // Sentinel for the triangle-range bookmarks below (the equivalent of
@@ -183,6 +197,7 @@ protected:
     struct MathTree_* tree;
     bool detect_edges;
     volatile int* halt;
+    std::atomic<uint64_t>* progress;
 
     // Cached region and data from an eval_r call
     Region packed;

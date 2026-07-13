@@ -265,6 +265,81 @@ TEST_CASE("Mesher: indexed mesh matches soup output")
     }
 }
 
+namespace {
+
+Soup expand(const std::vector<float>& verts,
+            const std::vector<uint32_t>& indices)
+{
+    Soup s;
+    s.reserve(indices.size() * 3);
+    for (auto i : indices)
+        for (int j = 0; j < 3; ++j)
+            s.push_back(verts[i*3 + j]);
+    return s;
+}
+
+Soup mesh_mt(const char* math, float half_size, float res,
+             bool detect, int threads)
+{
+    MathTree* tree = parse(math);
+    REQUIRE(tree != nullptr);
+    Region r = {};
+    r.ni = r.nj = r.nk = uint32_t(2 * half_size * res);
+    r.voxels = uint64_t(r.ni) * r.nj * r.nk;
+    build_arrays(&r, -half_size, -half_size, -half_size,
+                     half_size, half_size, half_size);
+    volatile int halt = 0;
+    std::atomic<uint64_t> progress(0);
+
+    std::vector<float> verts;
+    std::vector<uint32_t> indices;
+    triangulate_indexed_mt(tree, r, detect, &halt, verts, indices,
+                           threads, &progress);
+    free_arrays(&r);
+    free_tree(tree);
+
+    // Progress accounting must be exact: every voxel counted once.
+    REQUIRE(progress.load() == r.voxels);
+
+    return expand(verts, indices);
+}
+
+}  // namespace
+
+TEST_CASE("Mesher: multithreaded matches single-threaded (detect off)")
+{
+    // Without feature detection, triangles are voxel-local, so the
+    // multithreaded mesh must be exactly the single-threaded triangle
+    // set (only emission order may differ).
+    for (auto shape : {SPHERE, CUBE})
+    {
+        auto st = mesh_shape(shape, -1.2f, -1.2f, -1.2f,
+                             1.2f, 1.2f, 1.2f, 20, false);
+        auto mt = mesh_mt(shape, 1.2f, 20, false, 4);
+        REQUIRE(mt.size() == st.size());
+        REQUIRE(canonical_dump(mt) == canonical_dump(st));
+    }
+}
+
+TEST_CASE("Mesher: multithreaded invariants (detect on)")
+{
+    // Feature detection makes seam-adjacent edge swaps resolve
+    // differently than a serial run, so require the invariants
+    // rather than exact equality.
+    auto s = mesh_mt(CUBE, 1, 20, true, 4);
+    REQUIRE(unmatched_edges(s) == 0);
+    REQUIRE(signed_volume(s) == Approx(1.2 * 1.2 * 1.2).epsilon(0.03));
+    REQUIRE(surface_area(s) == Approx(6 * 1.2 * 1.2).epsilon(0.03));
+    for (float sx : {-0.6f, 0.6f})
+        for (float sy : {-0.6f, 0.6f})
+            for (float sz : {-0.6f, 0.6f})
+                REQUIRE(has_vertex_near(s, sx, sy, sz, 0.02f));
+
+    auto sphere = mesh_mt(SPHERE, 1.2f, 20, true, 4);
+    REQUIRE(unmatched_edges(sphere) == 0);
+    REQUIRE(signed_volume(sphere) == Approx(4 * M_PI / 3).epsilon(0.03));
+}
+
 TEST_CASE("3MF writer: valid package structure")
 {
     MathTree* tree = parse(SPHERE);
@@ -336,6 +411,9 @@ TEST_CASE("Mesher: gyroid benchmark", "[.bench]")
     if (std::getenv("MESHER_BENCH_INDEXED"))
     {
         // The indexed path, as used by mesh export.
+        // MESHER_BENCH_THREADS > 1 exercises the multithreaded driver.
+        const int threads = std::getenv("MESHER_BENCH_THREADS")
+            ? std::atoi(std::getenv("MESHER_BENCH_THREADS")) : 1;
         MathTree* tree = parse(gyroid);
         REQUIRE(tree != nullptr);
         Region r = {};
@@ -345,12 +423,16 @@ TEST_CASE("Mesher: gyroid benchmark", "[.bench]")
         volatile int halt = 0;
         std::vector<float> verts;
         std::vector<uint32_t> indices;
-        triangulate_indexed(tree, r, detect, &halt, verts, indices);
+        if (threads > 1)
+            triangulate_indexed_mt(tree, r, detect, &halt,
+                                   verts, indices, threads);
+        else
+            triangulate_indexed(tree, r, detect, &halt, verts, indices);
         free_arrays(&r);
         free_tree(tree);
-        printf("gyroid @ res %g, detect=%d: %zu triangles, %zu verts "
-               "(indexed)\n", res, detect, indices.size() / 3,
-               verts.size() / 3);
+        printf("gyroid @ res %g, detect=%d, threads=%d: %zu triangles, "
+               "%zu verts (indexed)\n", res, detect, threads,
+               indices.size() / 3, verts.size() / 3);
         REQUIRE(indices.size() > 0);
     }
     else

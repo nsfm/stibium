@@ -101,10 +101,13 @@ void ExportMeshWorker::async()
 
     // The mesher produces an indexed mesh directly (unique vertices +
     // three indices per triangle), so no welding pass is needed.
+    // Meshing is chunked across all cores; the progress counters feed
+    // the export dialog's bar.
+    progress_total = r.voxels;
     std::vector<float> verts;
     std::vector<uint32_t> indices;
-    triangulate_indexed(shape.tree.get(), r, _detect_features, &halt,
-                        verts, indices);
+    triangulate_indexed_mt(shape.tree.get(), r, _detect_features, &halt,
+                           verts, indices, -1, &progress_done);
 
     if (_simplify > 0 && indices.size() >= 3 && !halt)
         simplifyMesh(verts, indices);

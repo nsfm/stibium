@@ -6,6 +6,7 @@
 #include <QFutureWatcher>
 #include <QMessageBox>
 #include <QDialog>
+#include <QTimer>
 
 #include "export/export_worker.h"
 #include "dialog/exporting.h"
@@ -13,6 +14,8 @@
 void ExportWorker::runAsync()
 {
     auto exporting_dialog = new ExportingDialog();
+    progress_done = 0;
+    progress_total = 0;
 
     auto future = QtConcurrent::run(&ExportWorker::async, this);
     QFutureWatcher<void> watcher;
@@ -20,6 +23,14 @@ void ExportWorker::runAsync()
 
     connect(&watcher, &decltype(watcher)::finished,
             exporting_dialog, &ExportingDialog::accept);
+
+    // Poll the worker's progress counters into the dialog's bar
+    QTimer timer;
+    connect(&timer, &QTimer::timeout, exporting_dialog, [=, this]{
+        exporting_dialog->setProgress(progress_done.load(),
+                                      progress_total.load());
+    });
+    timer.start(50);
 
     // Run until the dialog closes, either because it was accepeted
     // (which indicates that the future has finished) or cancelled
