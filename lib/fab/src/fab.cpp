@@ -11,6 +11,8 @@ using namespace boost::python;
 
 ////////////////////////////////////////////////////////////////////////////////
 
+void (*fab::longOpHook)(const char*, uint64_t, uint64_t) = NULL;
+
 static std::string _project_dir;
 
 void fab::setProjectDir(std::string dir)

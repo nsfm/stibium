@@ -6,6 +6,7 @@
 #include <QStandardPaths>
 #include <QMainWindow>
 #include <QCoreApplication>
+#include <QProgressDialog>
 #include <QSurfaceFormat>
 #include <QStringList>
 #include <QMessageBox>
@@ -292,6 +293,40 @@ static int renderHeadless(App& app, const QString& out, float resolution,
     return 0;
 }
 
+/*  Progress pump for long operations inside script evaluation (mesh
+ *  import sampling).  Evaluation blocks the GUI thread, so this
+ *  repaints a modal progress dialog by hand, with user input
+ *  excluded — the graph can't safely change mid-eval. */
+static void guiLongOpHook(const char* label, uint64_t done, uint64_t total)
+{
+    static QProgressDialog* dialog = NULL;
+
+    if (done >= total)
+    {
+        if (dialog)
+        {
+            dialog->close();
+            dialog->deleteLater();
+            dialog = NULL;
+            QCoreApplication::processEvents(
+                    QEventLoop::ExcludeUserInputEvents);
+        }
+        return;
+    }
+
+    if (!dialog)
+    {
+        // No cancel button: sampling has no safe abort point today
+        dialog = new QProgressDialog(
+                QString::fromUtf8(label), QString(), 0, 1000);
+        dialog->setWindowModality(Qt::ApplicationModal);
+        dialog->setMinimumDuration(400);
+        dialog->setWindowTitle("Stibium");
+    }
+    dialog->setValue(int(1000.0 * done / (total ? total : 1)));
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+}
+
 int main(int argc, char *argv[])
 {
     {   // Set the default OpenGL version to be 2.1 with sample buffers
@@ -457,6 +492,12 @@ int main(int argc, char *argv[])
                               parser.isSet(validateOpt);
 
         auto args = parser.positionalArguments();
+        // GUI sessions get a progress dialog for long script-eval
+        // operations; register before any file loads so imports in
+        // command-line-opened files report too
+        if (!headless)
+            fab::longOpHook = guiLongOpHook;
+
         if (args.length() > 1)
         {
             qCritical("Too many command-line arguments");

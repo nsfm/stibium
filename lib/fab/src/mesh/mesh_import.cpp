@@ -1,10 +1,12 @@
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <thread>
 #include <vector>
 
+#include "fab/fab.h"
 #include "fab/mesh/mesh_import.h"
 #include "fab/mesh/trimesh.h"
 #include "fab/mesh/mesh_query.h"
@@ -304,6 +306,7 @@ ImportResult import_mesh_grid(const std::string& path,
         nt = 1;
 
     std::atomic<uint32_t> next_k(0);
+    std::atomic<uint32_t> planes_done(0);
     auto worker = [&]() {
         for (uint32_t k; (k = next_k.fetch_add(1)) < dims[2]; ) {
             const float z = oz + k * sz;
@@ -314,14 +317,32 @@ ImportResult import_mesh_grid(const std::string& path,
                 for (uint32_t i = 0; i < dims[0]; ++i)
                     row[i] = query.signed_distance(ox + i * sx, y, z);
             }
+            planes_done.fetch_add(1);
         }
     };
+
+    /*  All workers are pool threads so the calling thread is free to
+     *  pump the long-operation hook (the GUI repaints its progress
+     *  dialog there; the graph is blocked mid-eval either way). */
     std::vector<std::thread> pool;
-    for (unsigned i = 1; i < nt; ++i)
+    for (unsigned i = 0; i < nt; ++i)
         pool.emplace_back(worker);
-    worker();
+    if (fab::longOpHook)
+    {
+        char label[128];
+        snprintf(label, sizeof(label),
+                 "Importing mesh (%llu triangles)...",
+                 (unsigned long long)mesh.tri_count());
+        while (planes_done.load() < dims[2])
+        {
+            fab::longOpHook(label, planes_done.load(), dims[2]);
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        }
+    }
     for (auto& t : pool)
         t.join();
+    if (fab::longOpHook)
+        fab::longOpHook("", dims[2], dims[2]);
 
     if (!cfile.empty())
         save_cache(cfile, data, dims, bounds);
