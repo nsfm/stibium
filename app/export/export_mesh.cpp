@@ -14,6 +14,7 @@
 #include "fab/util/region.h"
 #include "fab/tree/triangulate.h"
 #include "fab/formats/stl.h"
+#include "fab/formats/threemf.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -59,10 +60,24 @@ void ExportMeshWorker::run()
 
     //  Get a target filename, either hardcoded or from the user
     if (filename.isEmpty())
+    {
+        QString filter = "3MF (*.3mf)";
         _filename = QFileDialog::getSaveFileName(
-                NULL, "Export STL", "", "*.stl");
+                NULL, "Export mesh", "",
+                "3MF (*.3mf);;STL (*.stl)", &filter);
+
+        // If no recognized extension was typed, take it from the filter
+        if (!_filename.isEmpty() &&
+            !_filename.endsWith(".3mf", Qt::CaseInsensitive) &&
+            !_filename.endsWith(".stl", Qt::CaseInsensitive))
+        {
+            _filename += filter.contains("*.stl") ? ".stl" : ".3mf";
+        }
+    }
     else
+    {
         _filename = filename;
+    }
     if (_filename.isEmpty())
         return;
 
@@ -96,14 +111,21 @@ void ExportMeshWorker::async()
     if (_simplify > 0 && indices.size() >= 3 && !halt)
         simplifyMesh(verts, indices);
 
-    save_stl_indexed(verts.data(), indices.data(), indices.size() / 3,
-                     _filename.toStdString().c_str());
+    // Format follows the file extension; STL is the fallback for
+    // scripted exports with unrecognized names (the legacy behavior).
+    if (_filename.endsWith(".3mf", Qt::CaseInsensitive))
+        save_3mf_indexed(verts.data(), verts.size() / 3,
+                         indices.data(), indices.size() / 3,
+                         _filename.toStdString().c_str());
+    else
+        save_stl_indexed(verts.data(), indices.data(), indices.size() / 3,
+                         _filename.toStdString().c_str());
     free_arrays(&r);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void ExportMeshWorker::simplifyMesh(const std::vector<float>& verts,
+void ExportMeshWorker::simplifyMesh(std::vector<float>& verts,
                                     std::vector<uint32_t>& indices) const
 {
     const size_t vertex_count = verts.size() / 3;
@@ -121,4 +143,22 @@ void ExportMeshWorker::simplifyMesh(const std::vector<float>& verts,
 
     simplified.resize(out_index_count);
     indices = std::move(simplified);
+
+    // Drop the vertices orphaned by simplification (renumbering the
+    // rest in first-use order), so indexed formats don't carry dead
+    // entries.
+    std::vector<uint32_t> remap(vertex_count, UINT32_MAX);
+    std::vector<float> packed;
+    packed.reserve(verts.size());
+    for (auto& i : indices)
+    {
+        if (remap[i] == UINT32_MAX)
+        {
+            remap[i] = packed.size() / 3;
+            packed.insert(packed.end(),
+                          verts.begin() + i*3, verts.begin() + i*3 + 3);
+        }
+        i = remap[i];
+    }
+    verts = std::move(packed);
 }

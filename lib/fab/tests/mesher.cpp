@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "fab/formats/stl.h"
+#include "fab/formats/threemf.h"
 #include "fab/tree/parser.h"
 #include "fab/tree/tree.h"
 #include "fab/tree/triangulate.h"
@@ -262,6 +263,45 @@ TEST_CASE("Mesher: indexed mesh matches soup output")
         std::remove("stl_soup.stl");
         std::remove("stl_indexed.stl");
     }
+}
+
+TEST_CASE("3MF writer: valid package structure")
+{
+    MathTree* tree = parse(SPHERE);
+    REQUIRE(tree != nullptr);
+    Region r = {};
+    r.ni = r.nj = r.nk = 24;
+    r.voxels = uint64_t(r.ni) * r.nj * r.nk;
+    build_arrays(&r, -1.2f, -1.2f, -1.2f, 1.2f, 1.2f, 1.2f);
+    volatile int halt = 0;
+
+    std::vector<float> verts;
+    std::vector<uint32_t> indices;
+    triangulate_indexed(tree, r, true, &halt, verts, indices);
+    free_arrays(&r);
+    free_tree(tree);
+    REQUIRE(indices.size() > 0);
+
+    const bool wrote = save_3mf_indexed(
+            verts.data(), verts.size() / 3,
+            indices.data(), indices.size() / 3, "test_out.3mf");
+    REQUIRE(wrote);
+
+    std::ifstream f("test_out.3mf", std::ios::binary);
+    std::string data((std::istreambuf_iterator<char>(f)),
+                      std::istreambuf_iterator<char>());
+    REQUIRE(data.size() > 100);
+
+    // ZIP local-header magic, and all three package parts present
+    // (names appear verbatim in the local + central headers).
+    REQUIRE(data.compare(0, 4, "PK\x03\x04") == 0);
+    REQUIRE(data.find("[Content_Types].xml") != std::string::npos);
+    REQUIRE(data.find("_rels/.rels") != std::string::npos);
+    REQUIRE(data.find("3D/3dmodel.model") != std::string::npos);
+    // End-of-central-directory magic
+    REQUIRE(data.find("PK\x05\x06") != std::string::npos);
+
+    std::remove("test_out.3mf");
 }
 
 // Golden dumps: canonical mesh output written to the working directory,

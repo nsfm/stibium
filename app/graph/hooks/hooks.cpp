@@ -47,10 +47,12 @@ BOOST_PYTHON_MODULE(_AppHooks)
                 );
 
     class_<ScriptExportHooks>("ScriptExportHooks", init<>())
-        .def("stl", raw_function(&ScriptExportHooks::stl),
-                "stl(shape, bounds=None, pad=True, filename=None,\n"
-                "    resolution=None, detect_features=False)\n"
-                "    Registers a .stl exporter for the given shape.\n"
+        .def("mesh", raw_function(&ScriptExportHooks::stl),
+                "mesh(shape, bounds=None, pad=True, filename=None,\n"
+                "     resolution=None, detect_features=False, simplify=0)\n"
+                "    Registers a mesh exporter for the given shape.\n"
+                "    The format follows the filename extension:\n"
+                "      .3mf, or anything else for .stl\n"
                 "    Valid kwargs:\n"
                 "    bounds is either a fab.types.Bounds object or None.\n"
                 "      If it is None, bounds are taken from the shape.\n"
@@ -60,7 +62,14 @@ BOOST_PYTHON_MODULE(_AppHooks)
                 "      If None, a dialog will open to select a file.\n"
                 "    resolution sets the resolution.\n"
                 "      If None, a dialog will open to select the resolution.\n"
-                "    detect_features enables feature detection (experimental)"
+                "    detect_features enables sharp-feature detection\n"
+                "    simplify sets the max simplification deviation\n"
+                "      in model units (0 disables simplification)"
+                )
+        .def("stl", raw_function(&ScriptExportHooks::stl),
+                "stl(shape, bounds=None, pad=True, filename=None,\n"
+                "    resolution=None, detect_features=False, simplify=0)\n"
+                "    Alias of mesh() (kept for compatibility).\n"
                 )
         .def("heightmap", raw_function(&ScriptExportHooks::heightmap),
                 "heightmap(shape, bounds=None, pad=True, filename=None,\n"
