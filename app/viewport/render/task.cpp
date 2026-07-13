@@ -224,11 +224,10 @@ Bounds RenderTask::render(Shape* shape, Bounds b_, float scale)
     memset(d16, 0, depth.width() * depth.height() * 2);
     memset(s8, 0, depth.width() * depth.height() * 3);
 
-    Region r = (Region) {
-            .imin=0, .jmin=0, .kmin=0,
-            .ni=(uint32_t)depth.width(), .nj=(uint32_t)depth.height(),
-            .nk=uint32_t(fmax(1, (b.zmax - b.zmin) * scale))
-    };
+    Region r = {};
+    r.ni = (uint32_t)depth.width();
+    r.nj = (uint32_t)depth.height();
+    r.nk = uint32_t(fmax(1, (b.zmax - b.zmin) * scale));
 
     build_arrays(&r, b.xmin, b.ymin, b.zmin,
                      b.xmax, b.ymax, b.zmax);
