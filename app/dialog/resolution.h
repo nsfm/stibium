@@ -30,7 +30,8 @@ public:
      *  max_voxels is the maximum allowable voxel count
      */
     explicit ResolutionDialog(Bounds b, bool dimensions, bool has_units,
-                              long max_voxels=(1<<22), QWidget* parent=0);
+                              long max_voxels=(1<<22), QWidget* parent=0,
+                     float min_resolution=1);
 
     /*
      *  Returns the current resolution (from the UI)

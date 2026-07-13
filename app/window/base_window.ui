@@ -45,8 +45,14 @@
     <property name="title">
      <string>File</string>
     </property>
+    <widget class="QMenu" name="menuRecent">
+     <property name="title">
+      <string>Open Recent</string>
+     </property>
+    </widget>
     <addaction name="actionNew"/>
     <addaction name="actionOpen"/>
+    <addaction name="menuRecent"/>
     <addaction name="separator"/>
     <addaction name="actionSave"/>
     <addaction name="actionSaveAs"/>
@@ -84,6 +90,7 @@
      <string>Render</string>
     </property>
     <addaction name="actionExportImage"/>
+    <addaction name="actionAnalytics"/>
    </widget>
    <widget class="QMenu" name="menuWindow">
     <property name="title">
@@ -247,6 +254,17 @@
   <action name="actionExportImage">
    <property name="text">
     <string>Export image...</string>
+   </property>
+  </action>
+  <action name="actionAnalytics">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Analytics overlay</string>
+   </property>
+   <property name="toolTip">
+    <string>Volume, center of mass, and tight bounds (re-toggle to refresh after edits)</string>
    </property>
   </action>
   <action name="actionSectionSlider">

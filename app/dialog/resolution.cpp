@@ -6,7 +6,8 @@
 #include "dialog/resolution.h"
 
 ResolutionDialog::ResolutionDialog(Bounds bounds, bool dimensions, bool has_units,
-                                   long max_voxels, QWidget* parent)
+                                   long max_voxels, QWidget* parent,
+                                   float min_resolution)
     : QDialog(parent), bounds(bounds), ui(new Ui::ResolutionDialog),
       z_bounded(!std::isinf(bounds.zmax) && !std::isinf(bounds.zmin))
 {
@@ -39,21 +40,22 @@ ResolutionDialog::ResolutionDialog(Bounds bounds, bool dimensions, bool has_unit
     connect(ui->export_res,
             static_cast<void (QSpinBox::*)(int)>(&QSpinBox::valueChanged),
             this, &ResolutionDialog::onValueChanged);
+    onValueChanged(ui->export_res->value());
 
     if (dimensions == RESOLUTION_DIALOG_2D || !z_bounded)
     {
         float area = (bounds.xmax - bounds.xmin) *
                      (bounds.ymax - bounds.ymin);
-        ui->export_res->setValue(
-                std::max(1.0, pow(max_voxels / area, 1/2.) / 4.));
+        ui->export_res->setValue(std::max(double(min_resolution),
+                pow(max_voxels / area, 1/2.) / 4.));
     }
     else
     {
         float volume = (bounds.xmax - bounds.xmin) *
                        (bounds.ymax - bounds.ymin) *
                        (bounds.zmax - bounds.zmin);
-        ui->export_res->setValue(
-                std::max(1.0, pow(max_voxels / volume, 1/3.) / 2.52));
+        ui->export_res->setValue(std::max(double(min_resolution),
+                pow(max_voxels / volume, 1/3.) / 2.52));
     }
 }
 
@@ -65,6 +67,11 @@ void ResolutionDialog::onValueChanged(int i)
             .arg(z_bounded
                     ? int((bounds.zmax - bounds.zmin) * i)
                     : 1));
+
+    // Sampling can miss details thinner than ~2 voxels; surface the
+    // implied minimum feature size so the tradeoff is visible
+    ui->feature_size->setText(QString("min feature \u2248 %1")
+            .arg(2.0 / i, 0, 'g', 3));
 }
 
 float ResolutionDialog::getResolution() const

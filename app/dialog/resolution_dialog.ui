@@ -75,6 +75,16 @@
     </widget>
    </item>
    <item>
+    <widget class="QLabel" name="feature_size">
+     <property name="text">
+      <string/>
+     </property>
+     <property name="toolTip">
+      <string>Details thinner than about two voxels can be missed by sampling</string>
+     </property>
+    </widget>
+   </item>
+   <item>
     <widget class="QRadioButton" name="detect_features">
      <property name="text">
       <string>Detect features</string>

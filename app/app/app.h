@@ -3,6 +3,8 @@
 #include <Python.h>
 
 #include <QApplication>
+
+#include "fab/tree/analytics.h"
 #include <QAction>
 #include <QTimer>
 
@@ -84,6 +86,28 @@ public:
     void loadFile(QString f);
 
     /*
+     *  loadFile with the same discard-unsaved-changes confirmation
+     *  File > Open uses (for the recent-files menu)
+     */
+    void openFile(QString f);
+
+    /*
+     *  Moves f to the front of the recent-files list
+     */
+    static void touchRecentFile(const QString& f);
+
+    /*
+     *  Integrates the model's shapes (busy dialog + worker thread),
+     *  storing the result for viewport overlays.  Returns false if
+     *  there was nothing to analyze.
+     */
+    bool runAnalytics();
+
+    bool analyticsValid() const { return analytics_valid; }
+    bool analyticsFlat() const { return analytics_flat; }
+    const FieldStats& analyticsStats() const { return analytics_stats; }
+
+    /*
      *  (Re)arms the file watcher on the current filename
      */
     void watchCurrentFile();
@@ -148,6 +172,11 @@ protected:
     Graph* graph;
     GraphProxy* proxy;
     UndoStack* undo_stack;
+
+    /*  Latest field analytics (viewport overlays read these)  */
+    FieldStats analytics_stats;
+    bool analytics_valid=false;
+    bool analytics_flat=false;
 
     /*
      *  Watches the open file and reloads when it changes on disk

@@ -89,6 +89,16 @@ release; newest work at the top of each section.
 
 ## UI
 
+- **Analytics overlay**: Render ▸ Analytics overlay integrates the
+  model and pins volume, center of mass (with an in-scene crosshair
+  marker), and tight bounds to the viewport.
+- **Recent files & directory memory**: File ▸ Open Recent, and all
+  export dialogs open in the last export directory (kept separate
+  from the model directory).
+- **Saner export defaults**: mesh dialogs start at 7 voxels/unit,
+  vector/raster at 60 (the old content-scaled default suggested 1 -
+  a useless mesh), and the dialog now shows the minimum feature size
+  the chosen resolution can resolve.
 - **Render ▸ Export image**: render the current view to a PNG from
   the viewport window - orientation-matched, optional section cut,
   size and transparent-background options. Same engine as the

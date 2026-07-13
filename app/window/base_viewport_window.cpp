@@ -1,4 +1,5 @@
 #include "app/app.h"
+#include "app/settings.h"
 
 #include "viewport/scene.h"
 #include "viewport/view.h"
@@ -7,6 +8,7 @@
 
 #include <QToolButton>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFutureWatcher>
 #include <QMessageBox>
 #include <QtConcurrent>
@@ -59,6 +61,27 @@ BaseViewportWindow::BaseViewportWindow(QList<ViewportView*> views)
                 view->hideUIButton(), &QToolButton::setChecked);
     }
 
+    // Render > Analytics overlay: integrate the model, then show the
+    // stats card + center-of-mass marker in every pane
+    connect(ui->actionAnalytics, &QAction::toggled, this, [=](bool on){
+        if (on && !App::instance()->analyticsValid())
+        {
+            if (!App::instance()->runAnalytics())
+            {
+                ui->actionAnalytics->setChecked(false);
+                return;
+            }
+        }
+        else if (on)
+        {
+            // Re-toggling refreshes: a check while already computed
+            // means the user wants fresh numbers
+            App::instance()->runAnalytics();
+        }
+        for (auto view : views)
+            view->setAnalyticsVisible(on);
+    });
+
     // Render > Export image: view-matched shaded render to a file
     connect(ui->actionExportImage, &QAction::triggered, this, [=]{
         auto view = views.first();
@@ -68,9 +91,13 @@ BaseViewportWindow::BaseViewportWindow(QList<ViewportView*> views)
             return;
 
         const QString filename = QFileDialog::getSaveFileName(
-                this, "Export image", "", "Images (*.png)");
+                this, "Export image",
+                Settings::get("files/last_export_dir", "").toString(),
+                "Images (*.png)");
         if (filename.isEmpty())
             return;
+        Settings::set("files/last_export_dir",
+                      QFileInfo(filename).absolutePath());
 
         ImageExport::Options opt;
         opt.M = view->getMatrix(ViewportView::ROT);

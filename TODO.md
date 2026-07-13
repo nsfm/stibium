@@ -57,8 +57,12 @@ were named for the element symbol all along).
   configurable today (`render/key_light = "x,y,z"` in the config file);
   give it real UI - a drag gizmo in the viewport or at least a dialog.
   Consider exposing rim/AO strengths the same way.
-- **Recent-files menu.** Config now remembers the last directory; grow
-  it into File > Recent with a small MRU list.
+- **Smart resolution suggestion.** The dialogs now floor at sane
+  defaults (7 for mesh, 60 for vector/raster) and show the implied
+  minimum feature size (~2 voxels); the real version analyzes the
+  model - find the smallest feature via interval probing and suggest
+  a resolution that resolves it at the target tolerance (0.1mm print
+  vs micron litho).
 - **Enum/choice datums with dropdowns.** Nodes that take one of a known
   set (dovetail male/female, teardrop axis X/Y/Z, screw-size presets)
   should render a combo box instead of a free-text field — e.g.
@@ -249,6 +253,13 @@ library -> MCP server on the live session):
 
 
 ## Done
+- 2026-07-13 — UI quality-of-life batch: analytics overlay (Render ▸
+  Analytics overlay: volume/COM/tight-size card + amber center-of-
+  mass crosshair projected in-scene; re-toggle to refresh), File ▸
+  Open Recent (10-entry MRU), exports remember their own directory
+  (shared across mesh/vector/heightmap/image), export resolution
+  defaults floored at practical values (mesh 7, vector+raster 60)
+  with a live "min feature ≈ 2/res" readout in the dialog.
 - 2026-07-13 — analytics engine + `--analyze` verb: dense grid
   integration (parallel, ~4M samples default, `--resolution`
   controls) reporting volume/area, center of mass, and tight bounds

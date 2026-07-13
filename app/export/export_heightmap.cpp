@@ -3,6 +3,9 @@
 #include <cmath>
 
 #include <QFileDialog>
+#include <QFileInfo>
+
+#include "app/settings.h"
 #include <QMessageBox>
 
 #include "export/export_heightmap.h"
@@ -31,7 +34,7 @@ void ExportHeightmapWorker::run()
     if (resolution == -1)
     {
         auto resolution_dialog = new ResolutionDialog(
-                bounds, RESOLUTION_DIALOG_2D, HAS_UNITS);
+                bounds, RESOLUTION_DIALOG_2D, HAS_UNITS, 1 << 22, NULL, 60);
         if (!resolution_dialog->exec())
             return;
         _resolution = resolution_dialog->getResolution();
@@ -54,11 +57,15 @@ void ExportHeightmapWorker::run()
 
     if (filename.isEmpty())
         _filename = QFileDialog::getSaveFileName(
-                NULL, "Export .png", "", "*.png");
+                NULL, "Export .png",
+                Settings::get("files/last_export_dir", "").toString(),
+                "*.png");
     else
         _filename = filename;
     if (_filename.isEmpty())
         return;
+    Settings::set("files/last_export_dir",
+                  QFileInfo(_filename).absolutePath());
 
     if (checkWritable())
         runAsync();
