@@ -365,6 +365,16 @@ void ViewportView::setCenter(QVector3D c)
 
 void ViewportView::mousePressEvent(QMouseEvent* event)
 {
+    // The analytics card's close box swallows its click
+    if (show_analytics && event->button() == Qt::LeftButton &&
+        App::instance()->analyticsValid() &&
+        analytics_close.contains(event->position()))
+    {
+        emit(analyticsDismissed());
+        event->accept();
+        return;
+    }
+
     // Clicks on the light gizmo aim the key light instead of the view
     if (event->button() == Qt::LeftButton)
     {
@@ -572,7 +582,11 @@ void ViewportView::drawAnalytics(QPainter* painter) const
     float wmax = 0;
     for (const auto& l : lines)
         wmax = fmax(wmax, fm.horizontalAdvance(l));
-    const QRectF card(10, 10, wmax + 20, lines.size() * fm.height() + 14);
+
+    // Top-center, clear of the section slider on the left
+    const float card_w = wmax + 38;
+    const QRectF card((width() - card_w) / 2, 10, card_w,
+                      lines.size() * fm.height() + 14);
 
     auto bg = Colors::base01;
     bg.setAlphaF(0.85);
@@ -587,6 +601,14 @@ void ViewportView::drawAnalytics(QPainter* painter) const
         painter->drawText(QPointF(card.left() + 10, y), l);
         y += fm.height();
     }
+
+    // Close box, top-right of the card
+    analytics_close = QRectF(card.right() - 20, card.top() + 4, 16, 16);
+    painter->setPen(QPen(Colors::base04, 1.4));
+    const auto x = analytics_close.adjusted(4.5, 4.5, -4.5, -4.5);
+    painter->drawLine(x.topLeft(), x.bottomRight());
+    painter->drawLine(x.topRight(), x.bottomLeft());
+
     painter->restore();
 }
 

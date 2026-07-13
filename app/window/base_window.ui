@@ -84,13 +84,13 @@
     <addaction name="actionHideUI"/>
     <addaction name="actionSectionSlider"/>
     <addaction name="actionLightControl"/>
+    <addaction name="actionAnalytics"/>
    </widget>
    <widget class="QMenu" name="menuRender">
     <property name="title">
      <string>Render</string>
     </property>
     <addaction name="actionExportImage"/>
-    <addaction name="actionAnalytics"/>
    </widget>
    <widget class="QMenu" name="menuWindow">
     <property name="title">

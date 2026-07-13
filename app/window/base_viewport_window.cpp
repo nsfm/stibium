@@ -81,6 +81,9 @@ BaseViewportWindow::BaseViewportWindow(QList<ViewportView*> views)
         for (auto view : views)
             view->setAnalyticsVisible(on);
     });
+    for (auto view : views)
+        connect(view, &ViewportView::analyticsDismissed,
+                [=]{ ui->actionAnalytics->setChecked(false); });
 
     // Render > Export image: view-matched shaded render to a file
     connect(ui->actionExportImage, &QAction::triggered, this, [=]{

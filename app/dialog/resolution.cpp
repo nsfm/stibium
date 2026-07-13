@@ -36,6 +36,26 @@ ResolutionDialog::ResolutionDialog(Bounds bounds, bool dimensions, bool has_unit
     layout()->invalidate();
     adjustSize();
 
+    {   // Real model dimensions (voxel counts were never useful)
+        const float w = bounds.xmax - bounds.xmin;
+        const float h = bounds.ymax - bounds.ymin;
+        if (z_bounded)
+            ui->export_size->setText(QString("model  %1 \u00d7 %2 \u00d7 %3 mm")
+                    .arg(w, 0, 'g', 4).arg(h, 0, 'g', 4)
+                    .arg(bounds.zmax - bounds.zmin, 0, 'g', 4));
+        else
+            ui->export_size->setText(QString("model  %1 \u00d7 %2 mm")
+                    .arg(w, 0, 'g', 4).arg(h, 0, 'g', 4));
+    }
+
+    connect(ui->max_deviation,
+            static_cast<void (QDoubleSpinBox::*)(double)>(
+                &QDoubleSpinBox::valueChanged),
+            [this](double){
+                if (!updating_deviation)
+                    deviation_touched = true;
+            });
+
     // This connection is awkward because of function overloading.
     connect(ui->export_res,
             static_cast<void (QSpinBox::*)(int)>(&QSpinBox::valueChanged),
@@ -70,8 +90,22 @@ void ResolutionDialog::onValueChanged(int i)
 
     // Sampling can miss details thinner than ~2 voxels; surface the
     // implied minimum feature size so the tradeoff is visible
-    ui->feature_size->setText(QString("min feature \u2248 %1")
-            .arg(2.0 / i, 0, 'g', 3));
+    const double feature = 2.0 / i;
+    ui->feature_size->setText(feature < 0.1
+            ? QString("min feature \u2248 %1 \u00b5m  \u24d8")
+                    .arg(feature * 1000, 0, 'g', 3)
+            : QString("min feature \u2248 %1 mm  \u24d8")
+                    .arg(feature, 0, 'g', 3));
+
+    // Simplification deviation follows the sampling error (half the
+    // feature size = one voxel) until the user edits it themselves,
+    // making the resolution the gold standard down the whole chain
+    if (!deviation_touched)
+    {
+        updating_deviation = true;
+        ui->max_deviation->setValue(1.0 / i);
+        updating_deviation = false;
+    }
 }
 
 float ResolutionDialog::getResolution() const

@@ -70,7 +70,7 @@
    <item>
     <widget class="QLabel" name="export_size">
      <property name="text">
-      <string>255 x 255 x 255</string>
+      <string/>
      </property>
     </widget>
    </item>

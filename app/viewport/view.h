@@ -147,6 +147,12 @@ signals:
     void changed(QMatrix4x4 m, QRect clip, float section);
 
     /*
+     *  Emitted when the analytics card's close box is clicked
+     *  (the window unchecks its menu action in response)
+     */
+    void analyticsDismissed();
+
+    /*
      *  Signal used to request that images adjust zmin and zmax based on
      *  their z bounds.
      */
@@ -231,6 +237,7 @@ protected:
     class QToolButton* hide_ui_button=nullptr;
     bool light_gizmo_visible=true;
     bool show_analytics=false;
+    mutable QRectF analytics_close;  /*  viewport coords, set on draw  */
 
     QVector3D center;
 
