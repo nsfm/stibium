@@ -9,6 +9,7 @@
 
 #include "dialog/resolution.h"
 
+#include "fab/formats/dxf.h"
 #include "fab/formats/svg.h"
 #include "fab/tree/contour.h"
 
@@ -51,12 +52,17 @@ void ExportSvgWorker::run()
     //  Get a target filename, either hardcoded or from the user
     if (filename.isEmpty())
     {
+        QString filter = "SVG (*.svg)";
         _filename = QFileDialog::getSaveFileName(
-                NULL, "Export SVG", "", "SVG (*.svg)");
+                NULL, "Export vector", "",
+                "SVG (*.svg);;DXF (*.dxf)", &filter);
+
+        // If no recognized extension was typed, take it from the filter
         if (!_filename.isEmpty() &&
-            !_filename.endsWith(".svg", Qt::CaseInsensitive))
+            !_filename.endsWith(".svg", Qt::CaseInsensitive) &&
+            !_filename.endsWith(".dxf", Qt::CaseInsensitive))
         {
-            _filename += ".svg";
+            _filename += filter.contains("*.dxf") ? ".dxf" : ".svg";
         }
     }
     else
@@ -104,6 +110,12 @@ void ExportSvgWorker::async()
     const float tolerance = simplify < 0 ? 0.25f / _resolution : simplify;
     simplify_contours(paths, tolerance);
 
-    save_svg(paths, bounds.xmin, bounds.ymin, bounds.xmax, bounds.ymax,
-             _filename.toStdString().c_str());
+    // Format follows the file extension; SVG is the fallback for
+    // scripted exports with unrecognized names.
+    if (_filename.endsWith(".dxf", Qt::CaseInsensitive))
+        save_dxf(paths, bounds.xmin, bounds.ymin, bounds.xmax,
+                 bounds.ymax, _filename.toStdString().c_str());
+    else
+        save_svg(paths, bounds.xmin, bounds.ymin, bounds.xmax,
+                 bounds.ymax, _filename.toStdString().c_str());
 }

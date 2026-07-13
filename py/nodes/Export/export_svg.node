@@ -1,8 +1,8 @@
 import fab
 
-title('Vector (.svg)')
+title('Vector (.svg, .dxf)')
 
 input('shape', fab.types.Shape)
 output('out', shape)
 
-sb.export.svg(shape)
+sb.export.vector(shape)

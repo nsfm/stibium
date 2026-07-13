@@ -6,6 +6,9 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **DXF export**: the same contours as R12 closed POLYLINEs (y-up,
+  mm) — the flavor laser-cutter and CAM toolchains read. One
+  extension-driven vector exporter covers both (`export.vector`).
 - **SVG export**: 2D shapes trace to resolution-independent vector
   paths (`export.svg`, sharp corners recovered by feature detection to
   ~5× finer than the sampling grid, holes and clipped shapes handled,
