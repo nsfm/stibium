@@ -12,6 +12,7 @@ uniform int is_2d;
 
 uniform vec3 color;
 uniform vec2 pixel_size;
+uniform vec3 key_light;
 
 // Occlusion contribution from one neighboring depth tap:
 // neighbors closer to the viewer than us cast a little shadow.
@@ -51,7 +52,7 @@ vec4 shade(vec4 norm, float center_depth)
     vec3 ambient = mix(dark, light, hemi) * 0.40;
 
     // Key light, upper-left-ish
-    float key = max(dot(n, vec3(0.57, -0.57, 0.57)), 0.0);
+    float key = max(dot(n, key_light), 0.0);
     vec3 diffuse = key * light * 0.62;
 
     // Cheap screen-space AO from the depth buffer

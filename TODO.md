@@ -43,6 +43,12 @@ were named for the element symbol all along).
 - **Node editor QoL.** Fuzzy-search add menu (type "cyl"), minimap for big
   graphs, canvas annotations (sticky notes + named zones behind nodes,
   persisted in the .sb JSON like node positions).
+- **Light-direction UI for the Enhanced render mode.** The key light is
+  configurable today (`render/key_light = "x,y,z"` in the config file);
+  give it real UI - a drag gizmo in the viewport or at least a dialog.
+  Consider exposing rim/AO strengths the same way.
+- **Recent-files menu.** Config now remembers the last directory; grow
+  it into File > Recent with a small MRU list.
 - **Enum/choice datums with dropdowns.** Nodes that take one of a known
   set (dovetail male/female, teardrop axis X/Y/Z, screw-size presets)
   should render a combo box instead of a free-text field — e.g.
