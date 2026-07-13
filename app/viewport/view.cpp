@@ -15,6 +15,7 @@
 #include "viewport/control/control_instance.h"
 
 #include "app/colors.h"
+#include "app/settings.h"
 
 #include "graph/proxy/datum.h"
 #include "graph/constructor/populate.h"
@@ -220,6 +221,60 @@ void ViewportView::drawForeground(QPainter* painter, const QRectF& rect)
     QGraphicsView::drawForeground(painter, rect);
     drawAxes(painter);
     drawCoords(painter);
+    drawLightGizmo(painter);
+}
+
+QPointF ViewportView::lightGizmoCenter() const
+{
+    return QPointF(width()/2.0 - 58, height()/2.0 - 58);
+}
+
+void ViewportView::drawLightGizmo(QPainter* painter) const
+{
+    const float R = 34;
+    const auto c = lightGizmoCenter();
+
+    painter->setRenderHint(QPainter::Antialiasing);
+
+    auto fill = Colors::base01;
+    fill.setAlpha(160);
+    painter->setBrush(fill);
+    painter->setPen(QPen(Colors::base03, 1));
+    painter->drawEllipse(c, R, R);
+
+    // Read the light direction and place the sun dot
+    const auto parts = Settings::get(
+            "render/key_light", "0.57,-0.57,0.57").toString().split(',');
+    QVector3D l(0.57, -0.57, 0.57);
+    if (parts.size() == 3)
+        l = QVector3D(parts[0].toFloat(), parts[1].toFloat(),
+                      parts[2].toFloat());
+    l.normalize();
+    const QPointF dot = c + QPointF(l.x(), l.y()) * R;
+
+    painter->setPen(QPen(Colors::base03, 1));
+    painter->drawLine(c, dot);
+    painter->setPen(QPen(Colors::base00, 1));
+    painter->setBrush(Colors::amber);
+    painter->drawEllipse(dot, 5, 5);
+}
+
+void ViewportView::updateLightFromGizmo(QPointF scene_pos)
+{
+    const float R = 34;
+    auto d = (scene_pos - lightGizmoCenter()) / R;
+    float x = d.x(), y = d.y();
+    const float len = sqrt(x*x + y*y);
+    if (len > 0.95)
+    {
+        x *= 0.95 / len;
+        y *= 0.95 / len;
+    }
+    const float z = sqrt(fmax(0.0475, 1 - x*x - y*y));
+
+    Settings::set("render/key_light", QString("%1,%2,%3")
+            .arg(x, 0, 'f', 3).arg(y, 0, 'f', 3).arg(z, 0, 'f', 3));
+    scene()->invalidate();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -271,6 +326,19 @@ void ViewportView::setCenter(QVector3D c)
 
 void ViewportView::mousePressEvent(QMouseEvent* event)
 {
+    // Clicks on the light gizmo aim the key light instead of the view
+    if (event->button() == Qt::LeftButton)
+    {
+        const auto p = mapToScene(event->position().toPoint());
+        if (QLineF(p, lightGizmoCenter()).length() < 42)
+        {
+            gizmo_drag = true;
+            updateLightFromGizmo(p);
+            event->accept();
+            return;
+        }
+    }
+
     QGraphicsView::mousePressEvent(event);
 
     // If the event hasn't been accepted, record click position for
@@ -292,6 +360,12 @@ void ViewportView::mousePressEvent(QMouseEvent* event)
 
 void ViewportView::mouseMoveEvent(QMouseEvent* event)
 {
+    if (gizmo_drag)
+    {
+        updateLightFromGizmo(mapToScene(event->position().toPoint()));
+        return;
+    }
+
     QGraphicsView::mouseMoveEvent(event);
 
     current_pos = event->pos();
@@ -320,6 +394,13 @@ void ViewportView::mouseMoveEvent(QMouseEvent* event)
 
 void ViewportView::mouseReleaseEvent(QMouseEvent* event)
 {
+    if (gizmo_drag)
+    {
+        gizmo_drag = false;
+        event->accept();
+        return;
+    }
+
     if (event->button() == Qt::RightButton && !dragged)
     {
         auto is = items(event->pos());
