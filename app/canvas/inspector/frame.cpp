@@ -36,7 +36,15 @@ InspectorFrame::InspectorFrame(Node* node, QGraphicsScene* scene)
     setAcceptHoverEvents(true);
 
     scene->addItem(this);
+    if (auto cs = dynamic_cast<CanvasScene*>(scene))
+        cs->registerInspector(this);
     redoLayout();
+}
+
+InspectorFrame::~InspectorFrame()
+{
+    if (auto cs = dynamic_cast<CanvasScene*>(scene()))
+        cs->unregisterInspector(this);
 }
 
 QRectF InspectorFrame::tightBoundingRect() const
@@ -154,10 +162,15 @@ void InspectorFrame::paint(QPainter *painter,
         const float body_top = r.top() + band_h + 10;
         rows = std::min({rows, 6,
                          int((r.bottom() - 8 - body_top) / (row_h + row_gap))});
-        if (rows > 0 && (row_h + row_gap) * px >= 3)
+
+        // Stubs fade in between 3 and 6 screen pixels of row pitch
+        // instead of snapping at a visibility threshold
+        const float pitch_px = (row_h + row_gap) * px;
+        const float stub_fade = fmin(1.f, fmax(0.f, (pitch_px - 3) / 3));
+        if (rows > 0 && stub_fade > 0)
         {
             auto stub = Colors::adjust(tint, 1.6f);
-            stub.setAlphaF(0.55);
+            stub.setAlphaF(0.55 * stub_fade);
             painter->setBrush(stub);
             const float x0 = r.left() + 10;
             float y = body_top;
