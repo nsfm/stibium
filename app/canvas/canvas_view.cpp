@@ -493,10 +493,10 @@ void CanvasView::zoomTo(Node* n)
     b->start(QPropertyAnimation::DeleteWhenStopped);
 }
 
-// Floating labels fade in below this zoom (and reach full opacity
-// at half of it): the LOD cards' scene-scaled names are unreadable
-// by then, so screen-fixed labels take over, web-map style.
-static constexpr float FLOATING_LABEL_ZOOM = 0.18f;
+// Floating labels take over naming duty exactly where nodes collapse
+// to LOD cards (the cards themselves are text-free skeletons), fading
+// to full opacity over the first quarter of the zoom-out.
+static constexpr float FLOATING_LABEL_ZOOM = CANVAS_LOD_THRESHOLD;
 
 void CanvasView::drawFloatingLabels(QPainter* painter)
 {
@@ -505,7 +505,7 @@ void CanvasView::drawFloatingLabels(QPainter* painter)
         return;
 
     const float alpha = fmin(
-            1.f, 2 * (FLOATING_LABEL_ZOOM - zoom) / FLOATING_LABEL_ZOOM);
+            1.f, 4 * (FLOATING_LABEL_ZOOM - zoom) / FLOATING_LABEL_ZOOM);
 
     struct Label {
         QString name;
