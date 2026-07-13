@@ -13,6 +13,12 @@ were named for the element symbol all along).
 
 ## Tier 2 — strong wants
 
+- **Render menu growth.** Backgrounds beyond transparent/dark (solid
+  color picker, gradients); an exact-viewport-crop option (match pan/
+  zoom framing, not just orientation); and the future residents:
+  turntable GIFs, section-sweep animations, geometric-diff heatmaps,
+  batch gallery renders.
+
 - **Deep-zoom render quality (micron-scale features as a feature).**
   Now that extreme zoom no longer clips (28d365ad), surfaces get
   visually harsh up close: capped depth-voxel budget quantizes the
@@ -228,6 +234,11 @@ library -> MCP server on the live session):
   extraction is commented out and pinned to 0) disables error line
   numbers entirely. Fix properly with defensive PyObject extraction so
   script errors report real line numbers again without the crash.
+- **Renders drop shape colors.** The viewport tints each shape by its
+  r/g/b (color nodes) when compositing; ImageExport unions everything
+  into one field first, so color identity is lost — exports come out
+  monochrome. Fix by rendering per terminal shape and compositing by
+  depth (what the viewport does), keeping per-shape color.
 - **Undo stack survives file loads (use-after-free suspect).**
   App::loadFile clears the graph but not the undo stack, so undoing
   after File > Open (or a live reload) replays commands holding
