@@ -102,15 +102,24 @@ Import Mesh node / OP_GRID engine; see CHANGELOG. 🎉)
   compositing fixed along the way). Future: sub-surface heatmap of
   |f_a - f_b| magnitude, and a `--diff` exit-code mode for CI gates
   ("fail if anything outside this region changed").
-- **Assertion nodes — unit tests for geometry.** In-graph checks
-  ("min wall ≥ 0.8", "fits in 200³", "clearance to s0.shape ≥ 0.2")
-  that go red in the canvas and fail `--validate` headlessly. The
-  analytics panel grown into executable specs: models with tests,
-  runnable in CI, writable by agents.
-- **Morphological open/close (printability filter).** close(f,r) =
-  offset(offset(f,r),-r) erases features smaller than r; open() does
-  the inverse. "Show me what my printer will actually produce" as a
-  preview node — design-for-manufacture as two nested offsets.
+- ~~**Assertion nodes**~~ SHIPPED 2026-07-13 (Checks category:
+  Fits Box / Volume / Clearance over a new fab.shapes.measure()
+  binding; red in canvas, --validate exits nonzero, in CI via
+  showcase_gear's own spec). Min Wall waits on the redistance
+  primitive below. Future: Check: COM ("stands upright"), per-check
+  resolution presets, a summary panel.
+- **Redistance primitive + true morphology (printability filter,
+  min-wall check).** Two nested offsets do NOT implement open/close:
+  our offset is field-minus-constant, so they cancel textually
+  (discovered 2026-07-13 when a min-wall check built that way passed
+  everything). The real fix: `redistance(shape, res)` samples the
+  sign on a grid, runs an exact euclidean distance transform
+  (Felzenszwalb, O(n)), and registers the result as a grid field —
+  the OP_GRID machinery from mesh import already handles the rest.
+  With true distances, open/close become exact-to-voxel, unlocking
+  Check: Min Wall (erode by t/2, see what vanished) and the "show me
+  what my printer will actually produce" preview. Also generally
+  fixes offset/shell on non-exact fields.
 - **Projected footprint node (project_z).** F(x,y) = min over z of
   f(x,y,z): the true shadow of a 3D part as a first-class 2D shape —
   straight into the SVG/DXF pipeline for baseplates, gaskets, and

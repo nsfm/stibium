@@ -1,0 +1,25 @@
+import fab
+
+title('Check: Clearance')
+
+input('a', fab.types.Shape)
+input('b', fab.types.Shape)
+input('gap', float, 0.2)
+input('resolution', float, 0)
+
+# Grow a by the required gap; any overlap with b is a violation
+collision = fab.shapes.offset(a, gap) & b
+
+# Disjoint bounds mean the check passes trivially
+if (collision.bounds.xmin < collision.bounds.xmax and
+        collision.bounds.ymin < collision.bounds.ymax):
+    m = fab.shapes.measure(collision, resolution)
+    key = 'area' if m['flat'] else 'volume'
+    if m['inside'] > 0:
+        raise RuntimeError(
+            "clearance violated: %.6g of material within %g of 'a' "
+            "(offending region bounds: %s)"
+            % (m[key], gap,
+               ', '.join('%.4g' % x for x in m['tight'])))
+
+output('ok', a)
