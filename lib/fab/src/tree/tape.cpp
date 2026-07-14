@@ -917,6 +917,186 @@ extern "C" Interval tape_eval_i(const Tape* tape, TapeCtx* ctx,
     return v[tape->root];
 }
 
+/*  Batched interval evaluation: `count` boxes classified in one pass
+ *  down the tape.  Layout trick: an r-row is MIN_VOLUME floats per
+ *  register, which is exactly TAPE_BATCH lower bounds followed by
+ *  TAPE_BATCH upper bounds - so the batch workspace is the existing
+ *  region workspace, and constant rows (value replicated across the
+ *  whole row) are already correct interval constants.
+ *
+ *  Parity rule: bounds must equal scalar tape_eval_i bit-for-bit
+ *  (fill decisions must not depend on which evaluator ran).  The
+ *  five hot ops are elementwise mirrors of math_i.c; every branchy
+ *  op delegates to the scalar math_i function per lane.  */
+
+static_assert(MIN_VOLUME >= 2 * TAPE_BATCH,
+              "r-rows must hold TAPE_BATCH interval bounds");
+
+namespace {
+
+constexpr int BH = TAPE_BATCH;   // upper-bound half offset in a row
+
+/*  Locals-then-store keeps every kernel alias-safe: with register
+ *  reuse the output row may be one of the input rows.  */
+void batch_add(const float* A, const float* B, float* R, int n)
+{
+    for (int k = 0; k < n; ++k) {
+        const float lo = A[k] + B[k], hi = A[BH+k] + B[BH+k];
+        R[k] = lo; R[BH+k] = hi;
+    }
+}
+
+void batch_sub(const float* A, const float* B, float* R, int n)
+{
+    for (int k = 0; k < n; ++k) {
+        const float lo = A[k] - B[BH+k], hi = A[BH+k] - B[k];
+        R[k] = lo; R[BH+k] = hi;
+    }
+}
+
+void batch_mul(const float* A, const float* B, float* R, int n)
+{
+    for (int k = 0; k < n; ++k) {
+        const float c1 = A[k] * B[k],       c2 = A[k] * B[BH+k],
+                    c3 = A[BH+k] * B[k],    c4 = A[BH+k] * B[BH+k];
+        const float lo = fmin(fmin(c1, c2), fmin(c3, c4));
+        const float hi = fmax(fmax(c1, c2), fmax(c3, c4));
+        R[k] = lo; R[BH+k] = hi;
+    }
+}
+
+void batch_min(const float* A, const float* B, float* R, int n)
+{
+    for (int k = 0; k < n; ++k) {
+        const float lo = A[k] < B[k] ? A[k] : B[k];
+        const float hi = A[BH+k] < B[BH+k] ? A[BH+k] : B[BH+k];
+        R[k] = lo; R[BH+k] = hi;
+    }
+}
+
+void batch_max(const float* A, const float* B, float* R, int n)
+{
+    for (int k = 0; k < n; ++k) {
+        const float lo = A[k] > B[k] ? A[k] : B[k];
+        const float hi = A[BH+k] > B[BH+k] ? A[BH+k] : B[BH+k];
+        R[k] = lo; R[BH+k] = hi;
+    }
+}
+
+/*  Per-lane delegation to the scalar op: exact parity for free  */
+template <typename F>
+void batch_un(F op, const float* A, float* R, int n)
+{
+    for (int k = 0; k < n; ++k) {
+        const Interval r = op(Interval{ A[k], A[BH+k] });
+        R[k] = r.lower; R[BH+k] = r.upper;
+    }
+}
+
+template <typename F>
+void batch_bin(F op, const float* A, const float* B, float* R, int n)
+{
+    for (int k = 0; k < n; ++k) {
+        const Interval r = op(Interval{ A[k], A[BH+k] },
+                              Interval{ B[k], B[BH+k] });
+        R[k] = r.lower; R[BH+k] = r.upper;
+    }
+}
+
+}  // namespace
+
+extern "C" void tape_eval_i_batch(const Tape* tape, TapeCtx* ctx,
+                                  const Interval* Xs, const Interval* Ys,
+                                  const Interval* Zs, Interval* out,
+                                  const int count)
+{
+    if (ctx->g_mode)
+        fill_const_rows(ctx, false);
+
+    float* base = ctx->r;
+#define ROW(s)  (base + size_t(s) * MIN_VOLUME)
+
+    for (uint32_t s : ctx->deck->xs) {
+        float* r = ROW(s);
+        for (int k = 0; k < count; ++k)
+            { r[k] = Xs[k].lower; r[BH+k] = Xs[k].upper; }
+    }
+    for (uint32_t s : ctx->deck->ys) {
+        float* r = ROW(s);
+        for (int k = 0; k < count; ++k)
+            { r[k] = Ys[k].lower; r[BH+k] = Ys[k].upper; }
+    }
+    for (uint32_t s : ctx->deck->zs) {
+        float* r = ROW(s);
+        for (int k = 0; k < count; ++k)
+            { r[k] = Zs[k].lower; r[BH+k] = Zs[k].upper; }
+    }
+
+    for (const auto& c : tape->clauses)
+    {
+        const float *A = ROW(c.a), *B = ROW(c.b);
+        float* R = ROW(c.out);
+        switch (c.op)
+        {
+            case OP_ADD:    batch_add(A, B, R, count); break;
+            case OP_SUB:    batch_sub(A, B, R, count); break;
+            case OP_MUL:    batch_mul(A, B, R, count); break;
+            case OP_MIN:    batch_min(A, B, R, count); break;
+            case OP_MAX:    batch_max(A, B, R, count); break;
+
+            case OP_DIV:    batch_bin(div_i, A, B, R, count); break;
+            case OP_POW:    batch_bin(pow_i, A, B, R, count); break;
+            case OP_ATAN2:  batch_bin(atan2_i, A, B, R, count); break;
+            case OP_MOD:    batch_bin(mod_i, A, B, R, count); break;
+
+            case OP_ABS:    batch_un(abs_i, A, R, count); break;
+            case OP_SQUARE: batch_un(square_i, A, R, count); break;
+            case OP_SQRT:   batch_un(sqrt_i, A, R, count); break;
+            case OP_SIN:    batch_un(sin_i, A, R, count); break;
+            case OP_COS:    batch_un(cos_i, A, R, count); break;
+            case OP_TAN:    batch_un(tan_i, A, R, count); break;
+            case OP_ASIN:   batch_un(asin_i, A, R, count); break;
+            case OP_ACOS:   batch_un(acos_i, A, R, count); break;
+            case OP_ATAN:   batch_un(atan_i, A, R, count); break;
+            case OP_NEG:    batch_un(neg_i, A, R, count); break;
+            case OP_EXP:    batch_un(exp_i, A, R, count); break;
+            case OP_FLOOR:  batch_un(floor_i, A, R, count); break;
+            case OP_LOG:    batch_un(log_i, A, R, count); break;
+
+            case OP_GRID: {
+                const MeshGrid* grid =
+                        static_cast<const MeshGrid*>(c.payload);
+                const float* M = ROW(c.m);
+                for (int k = 0; k < count; ++k)
+                {
+                    const Interval r = grid_eval_i(grid,
+                            Interval{ A[k], A[BH+k] },
+                            Interval{ B[k], B[BH+k] },
+                            Interval{ M[k], M[BH+k] });
+                    R[k] = r.lower; R[BH+k] = r.upper;
+                }
+                break;
+            }
+
+            case OP_CONST:
+                for (int k = 0; k < count; ++k)
+                    { R[k] = c.imm; R[BH+k] = c.imm; }
+                break;
+            case OP_COPY:
+                if (R != A)
+                    for (int k = 0; k < count; ++k)
+                        { R[k] = A[k]; R[BH+k] = A[BH+k]; }
+                break;
+            default: ;
+        }
+    }
+
+    const float* root = ROW(tape->root);
+    for (int k = 0; k < count; ++k)
+        out[k] = Interval{ root[k], root[BH+k] };
+#undef ROW
+}
+
 extern "C" const float* tape_eval_r(const Tape* tape, TapeCtx* ctx, Region r)
 {
     if (ctx->g_mode)
