@@ -241,6 +241,28 @@ protected:
     // Queue of interpolation commands to be run soon
     std::list<InterpolateCommand> queue;
 
+    // Dedup index over the queue's INTERPOLATE entries: canonical
+    // vertex pair -> INTERPOLATE ordinal.  Replaces the per-edge
+    // linear queue walk (O(edges x queue) with an Eigen compare in
+    // the middle - ~30% of export wall time on big models).  Keys
+    // are bit-packed coords - Vec3f is Eigen::Vector3d despite the
+    // name, so each is a full 8-byte word - with -0 normalized to
+    // +0 so bitwise equality matches ==; NaN coords are never
+    // entered (they match nothing under ==).
+    struct PairHash {
+        size_t operator()(const std::array<uint64_t, 6>& k) const {
+            // FNV-1a over the six packed doubles
+            uint64_t h = 0xcbf29ce484222325ull;
+            for (uint64_t w : k) {
+                h = (h ^ w) * 0x100000001b3ull;
+            }
+            return h;
+        }
+    };
+    std::unordered_map<std::array<uint64_t, 6>, unsigned, PairHash>
+        interp_cache;
+    unsigned interp_count=0;   // INTERPOLATE entries now in queue
+
     // Triangle that's being constructed (vertex indices, up to 3)
     std::vector<uint32_t> triangle;
 

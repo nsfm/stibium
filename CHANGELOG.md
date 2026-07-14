@@ -6,6 +6,18 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **Mesher edge-dedup cache**: scheduling an edge interpolation
+  walked the entire pending queue comparing vertex pairs
+  (O(edges x queue) with an Eigen double-vector compare per entry -
+  ~30% of export wall time on big models, per a sampled profile).
+  Now a hash lookup with identical semantics, cross-checked by a
+  compile-time differential harness (INTERP_CACHE_DIFF) that runs
+  both implementations side by side over the full test suite.
+  gear r60 detect-features export 2.25s → 2.05s; quarter-scale
+  merged Zeiss r7 export 18.0s → 15.7s; golden meshes bit-identical.
+  (Octant batch-classification in the mesher was also built and
+  measured: wall-neutral, reverted - the mesher tracks the surface,
+  so children are rarely skippable; see doc/TAPE-NEXT.md §1.)
 - **The fmin toll removed** (doc/TAPE-DESIGN.md "Round 4"): since
   Antimony's first commit, every min/max node evaluated at every
   voxel paid a call into libm - `min_f` was C's double-precision

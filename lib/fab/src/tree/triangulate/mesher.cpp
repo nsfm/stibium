@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstring>
+#include <cmath>
 #include <iostream>
 #include <unordered_set>
 
@@ -736,6 +737,8 @@ void Mesher::flush_queue()
         }
     }
     queue.clear();
+    interp_cache.clear();
+    interp_count = 0;
 }
 
 // Schedule an interpolate calculation in the queue.
@@ -744,25 +747,81 @@ void Mesher::interpolate_between(const Vec3f& v0, const Vec3f& v1)
     InterpolateCommand next = (InterpolateCommand){
         .cmd=InterpolateCommand::INTERPOLATE, .v0=v0, .v1=v1};
 
-    // Walk through the list, looking for duplicates.
-    // If we find the same operation, then switch to a CACHED lookup instead.
-    unsigned count = 0;
-    for (auto c : queue)
+    // Check for a duplicate of this operation already in the queue
+    // (either vertex order); if found, switch to a CACHED lookup of
+    // its result instead.  interp_cache mirrors the old linear-walk
+    // float == semantics exactly: -0 is normalized into +0 (they
+    // compare equal), the pair is canonically ordered (the walk
+    // matched both orders), and NaN coordinates never enter the
+    // cache (NaN == matches nothing).  A pair can appear as
+    // INTERPOLATE at most once, so the cached ordinal is unique.
+    std::array<uint64_t, 6> key;
+    bool clean = true;
+    for (int i=0; i < 3 && clean; ++i)
     {
-        if (c.cmd == InterpolateCommand::INTERPOLATE)
+        clean &= !std::isnan(v0[i]) && !std::isnan(v1[i]);
+        memcpy(&key[i],     &v0[i], 8);
+        memcpy(&key[i + 3], &v1[i], 8);
+        if (key[i]     == 0x8000000000000000ull)  key[i] = 0;
+        if (key[i + 3] == 0x8000000000000000ull)  key[i + 3] = 0;
+    }
+    if (clean)
+    {
+        const bool swap = std::lexicographical_compare(
+                key.begin() + 3, key.end(), key.begin(), key.begin() + 3);
+        if (swap)
+            for (int i=0; i < 3; ++i)
+                std::swap(key[i], key[i + 3]);
+
+        const auto found = interp_cache.find(key);
+        if (found != interp_cache.end())
         {
-            if ((v0 == c.v0 && v1 == c.v1) || (v0 == c.v1 && v1 == c.v0))
-            {
-                next.cmd = InterpolateCommand::CACHED;
-                next.cached = count;
-            }
-            count++;
+            next.cmd = InterpolateCommand::CACHED;
+            next.cached = found->second;
         }
+        else
+            interp_cache.emplace(key, interp_count);
     }
 
+#ifdef INTERP_CACHE_DIFF
+    {   // Differential check against the original linear walk
+        InterpolateCommand ref = (InterpolateCommand){
+            .cmd=InterpolateCommand::INTERPOLATE, .v0=v0, .v1=v1};
+        unsigned count = 0;
+        for (auto c : queue)
+        {
+            if (c.cmd == InterpolateCommand::INTERPOLATE)
+            {
+                if ((v0 == c.v0 && v1 == c.v1) ||
+                    (v0 == c.v1 && v1 == c.v0))
+                {
+                    ref.cmd = InterpolateCommand::CACHED;
+                    ref.cached = count;
+                }
+                count++;
+            }
+        }
+        if (ref.cmd != next.cmd ||
+            (ref.cmd == InterpolateCommand::CACHED &&
+             ref.cached != next.cached))
+        {
+            fprintf(stderr,
+                    "INTERP DIVERGE: v0=(%a,%a,%a) v1=(%a,%a,%a) "
+                    "old=%d/%u new=%d/%u interp_count=%u walk_count=%u\n",
+                    v0[0], v0[1], v0[2], v1[0], v1[1], v1[2],
+                    ref.cmd, ref.cached, next.cmd, next.cached,
+                    interp_count, count);
+            abort();
+        }
+    }
+#endif
+
     queue.push_back(next);
-    if (next.cmd == InterpolateCommand::INTERPOLATE && count + 1 == MIN_VOLUME)
+    if (next.cmd == InterpolateCommand::INTERPOLATE &&
+        ++interp_count == MIN_VOLUME)
+    {
         flush_queue();
+    }
 }
 
 
