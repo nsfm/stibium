@@ -1,0 +1,19 @@
+import fab
+
+title('Check: Fits Box')
+
+input('shape', fab.types.Shape)
+input('width', float, 200)
+input('height', float, 200)
+input('depth', float, 200)
+input('resolution', float, 0)
+
+m = fab.shapes.measure(shape, resolution)
+t = m['tight']
+dx, dy, dz = t[3] - t[0], t[4] - t[1], t[5] - t[2]
+if dx > width or dy > height or dz > depth:
+    raise RuntimeError(
+        "does not fit: %.4g x %.4g x %.4g exceeds %g x %g x %g"
+        % (dx, dy, dz, width, height, depth))
+
+output('ok', shape)

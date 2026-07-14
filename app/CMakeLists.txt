@@ -286,6 +286,18 @@ $<TARGET_FILE:${STIBIUM_APP}> ${CMAKE_SOURCE_DIR}/examples/csg.sb --diff ${CMAKE
 test -s ${CMAKE_CURRENT_BINARY_DIR}/ctest_diff.png")
     set_tests_properties(app_diff_identity app_diff_render
             PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    # Check nodes gate validation: showcase_gear's checks pass (its
+    # validate test above covers that); a spec broken on purpose must
+    # exit nonzero
+    add_test(NAME app_checks_gate
+             COMMAND bash -c "\
+python3 -c \"import json,sys; d=json.load(open('${CMAKE_SOURCE_DIR}/examples/showcase_gear.sb')); \
+[dd.update(expr='999000.0') for n in d['nodes'] if n['name']=='sane_volume' for dd in n['datums'] if dd['name']=='at_least']; \
+json.dump(d, open('${CMAKE_CURRENT_BINARY_DIR}/ctest_broken_spec.sb','w'), indent=1)\" && \
+! $<TARGET_FILE:${STIBIUM_APP}> --validate ${CMAKE_CURRENT_BINARY_DIR}/ctest_broken_spec.sb")
+    set_tests_properties(app_checks_gate
+            PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
 set_property(TARGET ${STIBIUM_APP} PROPERTY CXX_STANDARD 17)

@@ -5,6 +5,7 @@
 #include "fab/types/shape.h"
 #include "fab/types/transform.h"
 #include "fab/mesh/mesh_import.h"
+#include "fab/tree/analytics.h"
 #include "fab/tree/grid.h"
 
 using namespace boost::python;
@@ -28,6 +29,49 @@ std::string fab::projectDir()
 static std::string project_dir_py()
 {
     return _project_dir;
+}
+
+/*  Grid-integrates a shape's field over its bounds: the measurement
+ *  primitive behind the Checks node family and scripted analysis.
+ *  Returns a dict; raises on unbounded shapes.  resolution is
+ *  samples per unit (<= 0 targets ~4M samples); 2D shapes report
+ *  area in 'volume' with z fields zeroed. */
+static dict measure_py(const Shape& s, float resolution)
+{
+    const Bounds& b = s.bounds;
+    const bool flat = std::isinf(b.zmin) || std::isinf(b.zmax);
+    if (std::isinf(b.xmin) || std::isinf(b.xmax) ||
+        std::isinf(b.ymin) || std::isinf(b.ymax))
+    {
+        PyErr_SetString(PyExc_RuntimeError,
+                "measure: shape has unbounded x/y extents");
+        throw_error_already_set();
+    }
+
+    volatile int halt = 0;
+    FieldStats stats;
+    if (!analyze_field(s.tree.get(),
+                       b.xmin, b.ymin, flat ? 0 : b.zmin,
+                       b.xmax, b.ymax, flat ? 0 : b.zmax,
+                       resolution, flat, -1, &halt, &stats))
+    {
+        PyErr_SetString(PyExc_RuntimeError,
+                "measure: field integration failed");
+        throw_error_already_set();
+    }
+
+    dict out;
+    out[flat ? "area" : "volume"] = stats.volume;
+    out["com"] = boost::python::make_tuple(
+            stats.com[0], stats.com[1], stats.com[2]);
+    out["tight"] = boost::python::make_tuple(
+            stats.tight[0], stats.tight[1], stats.tight[2],
+            stats.tight[3], stats.tight[4], stats.tight[5]);
+    out["inside"] = (unsigned long long)stats.inside;
+    out["samples"] = (unsigned long long)stats.samples;
+    out["cell"] = stats.cell;
+    out["flat"] = flat;
+    return out;
 }
 
 /*  Backend for fab.shapes.import_mesh (see py/fab/shapes.py, which
@@ -114,6 +158,9 @@ BOOST_PYTHON_MODULE(_fabtypes)
 
     def("project_dir", &project_dir_py,
         "Directory of the current project file ('' if unsaved)");
+    def("measure", &measure_py,
+        "Grid-integrate a Shape: volume/area, center of mass, tight "
+        "bounds. measure(shape, resolution=-1)");
     def("_import_mesh", &import_mesh_py,
         "Backend for fab.shapes.import_mesh; "
         "returns (Shape, stibium_stamp, sha256, from_cache)");

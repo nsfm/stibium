@@ -3318,3 +3318,21 @@ def import_mesh(filename, voxels_per_unit=2.0, sha256=''):
               "portable")
 
     return shape
+
+################################################################################
+# Measurement
+
+def measure(shape, resolution=-1):
+    """ Grid-integrates a shape's field over its bounds.
+
+        Returns a dict: volume (or area when flat), com (x, y, z),
+        tight (xmin, ymin, zmin, xmax, ymax, zmax - the actual filled
+        extent, accurate to one cell), inside/samples counts, cell
+        spacing, and flat. resolution is samples per model unit;
+        <= 0 auto-targets ~4M samples.
+
+        This is what the Checks nodes are built from: measure, then
+        raise if the number is out of spec.
+    """
+    import _fabtypes
+    return _fabtypes.measure(shape, float(resolution))

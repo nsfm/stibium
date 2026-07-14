@@ -6,6 +6,17 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **Check nodes: unit tests for geometry** (new Checks category).
+  Check: Fits Box, Check: Volume, and Check: Clearance measure the
+  actual field (grid integration; tight bounds accurate to a cell)
+  and raise with a precise message when the spec is violated - the
+  node goes red in the canvas, and `--validate` exits nonzero, so a
+  broken spec fails CI exactly like a broken test. Checks pass the
+  shape through, so they wire inline ahead of an export node (a
+  failing check blocks the export). Built on a new `fab.shapes.
+  measure(shape)` primitive exposing volume/area, center of mass,
+  tight bounds, and sample counts to every node script.
+  `examples/showcase_gear.sb` now carries its own spec.
 - **Geometric diff** (`stibium a.sb --diff b.sb [--render out.png]`):
   set algebra on the distance fields splits two models into
   unchanged / removed / added regions - printed as integrated

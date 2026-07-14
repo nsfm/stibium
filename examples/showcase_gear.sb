@@ -301,6 +301,133 @@
      "type": "_fabtypes.Shape"
     }
    ]
+  },
+  {
+   "uid": 6,
+   "name": "fits_printer",
+   "inspector": [
+    700,
+    -150
+   ],
+   "script": [
+    "import fab",
+    "",
+    "title('Check: Fits Box')",
+    "",
+    "input('shape', fab.types.Shape)",
+    "input('width', float, 200)",
+    "input('height', float, 200)",
+    "input('depth', float, 200)",
+    "input('resolution', float, 0)",
+    "",
+    "m = fab.shapes.measure(shape, resolution)",
+    "t = m['tight']",
+    "dx, dy, dz = t[3] - t[0], t[4] - t[1], t[5] - t[2]",
+    "if dx > width or dy > height or dz > depth:",
+    "    raise RuntimeError(",
+    "        \"does not fit: %.4g x %.4g x %.4g exceeds %g x %g x %g\"",
+    "        % (dx, dy, dz, width, height, depth))",
+    "",
+    "output('ok', shape)"
+   ],
+   "datums": [
+    {
+     "uid": 0,
+     "name": "shape",
+     "expr": "\u0011[__5.__2]",
+     "type": "_fabtypes.Shape"
+    },
+    {
+     "uid": 1,
+     "name": "width",
+     "expr": "120.0",
+     "type": "float"
+    },
+    {
+     "uid": 2,
+     "name": "height",
+     "expr": "120.0",
+     "type": "float"
+    },
+    {
+     "uid": 3,
+     "name": "depth",
+     "expr": "20.0",
+     "type": "float"
+    },
+    {
+     "uid": 4,
+     "name": "resolution",
+     "expr": "0.0",
+     "type": "float"
+    },
+    {
+     "uid": 5,
+     "name": "ok",
+     "expr": "\u0012",
+     "type": "_fabtypes.Shape"
+    }
+   ]
+  },
+  {
+   "uid": 7,
+   "name": "sane_volume",
+   "inspector": [
+    700,
+    150
+   ],
+   "script": [
+    "import fab",
+    "",
+    "title('Check: Volume')",
+    "",
+    "input('shape', fab.types.Shape)",
+    "input('at_least', float, 0)",
+    "input('at_most', float, 1e30)",
+    "input('resolution', float, 0)",
+    "",
+    "m = fab.shapes.measure(shape, resolution)",
+    "key = 'area' if m['flat'] else 'volume'",
+    "v = m[key]",
+    "if v < at_least:",
+    "    raise RuntimeError(\"%s %.6g is below the minimum %g\" % (key, v, at_least))",
+    "if v > at_most:",
+    "    raise RuntimeError(\"%s %.6g is above the maximum %g\" % (key, v, at_most))",
+    "",
+    "output('ok', shape)"
+   ],
+   "datums": [
+    {
+     "uid": 0,
+     "name": "shape",
+     "expr": "\u0011[__5.__2]",
+     "type": "_fabtypes.Shape"
+    },
+    {
+     "uid": 1,
+     "name": "at_least",
+     "expr": "4000.0",
+     "type": "float"
+    },
+    {
+     "uid": 2,
+     "name": "at_most",
+     "expr": "20000.0",
+     "type": "float"
+    },
+    {
+     "uid": 3,
+     "name": "resolution",
+     "expr": "0.0",
+     "type": "float"
+    },
+    {
+     "uid": 4,
+     "name": "ok",
+     "expr": "\u0012",
+     "type": "_fabtypes.Shape"
+    }
+   ]
   }
  ]
 }
