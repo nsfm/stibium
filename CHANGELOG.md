@@ -6,6 +6,19 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **The fmin toll removed** (doc/TAPE-DESIGN.md "Round 4"): since
+  Antimony's first commit, every min/max node evaluated at every
+  voxel paid a call into libm - `min_f` was C's double-precision
+  `fmin`, meaning two float→double converts, a PLT call, and a
+  truncation back, per lane. A CSG model's tape is mostly min/max. A
+  sampled profile put ~40% of render wall time inside those calls.
+  `min_f`/`max_f` are now bit-exact inline replicas of the
+  platform's fmin/fmax semantics (proven by a 100M-pair parity
+  harness against libm, then goldens + renders byte-identical), the
+  batch kernels carry `ivdep`, and the fab kernel builds with
+  `-fno-trapping-math` so the NaN-aware selects vectorize. Merged
+  Zeiss at 2048px: 11.8s → **7.6s** on the same machine, same night,
+  pixels identical. Exports gain ~5%.
 - **The MPR tile renderer** (doc/TAPE-DESIGN.md "Round 3"): interval
   evaluation now runs in batches - one pass down the tape classifies
   64 view tiles at once, with the hot ops vectorized and every batch
