@@ -6,6 +6,17 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **The MPR tile renderer** (doc/TAPE-DESIGN.md "Round 3"): interval
+  evaluation now runs in batches - one pass down the tape classifies
+  64 view tiles at once, with the hot ops vectorized and every batch
+  bound exactly equal to its scalar counterpart. Ambiguous-region
+  subdivision fans out 64 ways into a single batched classification
+  instead of bisecting in two, and the shaded pass pushes a pruned
+  tape per 64px tile. Together: the merged Zeiss at 2048px renders
+  ~20% faster, the win grows with resolution, and every image is
+  pixel-identical (STIBIUM_TILE_RENDER=0 restores the old
+  bisection). This is Keeter's 2020 MPR architecture running on CPU
+  - the same machinery the eventual GPU renderer will reuse.
 - **Tape round two: sound pruning, register allocation, deck
   caching** (doc/TAPE-DESIGN.md "Round 2"). A new pruning fuzzer
   (random expression trees x random regions, pushed-vs-base

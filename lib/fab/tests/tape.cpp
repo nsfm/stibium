@@ -436,6 +436,22 @@ TEST_CASE("Pruning fuzzer: pushed tapes match base pointwise",
             Tape* sub_t = tape_push(std_t, ctx, Xs, Ys, Zs,
                                     TAPE_PUSH_STANDARD);
 
+            // Batched interval eval must agree with scalar exactly
+            {
+                const Interval bx[2] = { X, Xs }, by[2] = { Y, Ys },
+                               bz[2] = { Z, Zs };
+                Interval bres[2];
+                tape_eval_i_batch(base, ctx, bx, by, bz, bres, 2);
+                const Interval s0 = tape_eval_i(base, ctx, X, Y, Z);
+                const Interval s1 = tape_eval_i(base, ctx, Xs, Ys, Zs);
+                CAPTURE(expr);
+                CAPTURE(iter);
+                REQUIRE(value_match(s0.lower, bres[0].lower));
+                REQUIRE(value_match(s0.upper, bres[0].upper));
+                REQUIRE(value_match(s1.lower, bres[1].lower));
+                REQUIRE(value_match(s1.upper, bres[1].upper));
+            }
+
             for (int s = 0; s < 27; ++s)
             {
                 const float px = x0 + sx * ((s      % 3) + 0.5f) / 3,
@@ -491,3 +507,47 @@ TEST_CASE("Pruning fuzzer: pushed tapes match base pointwise",
 
 
 
+
+TEST_CASE("Batched interval evaluation matches scalar", "[tape]")
+{
+    const Interval boxes[][3] = {
+        { {-1, 1}, {-1, 1}, {-1, 1} },
+        { {0.25f, 2}, {-0.5f, 0.5f}, {-2, -0.25f} },
+        { {-0.1f, 0.1f}, {-0.1f, 0.1f}, {-0.1f, 0.1f} },
+        { {5, 6}, {5, 6}, {5, 6} },
+        { {-3, -2.5f}, {0, 4}, {-0.5f, 3} },
+        { {0, 0}, {-1, 0}, {0, 1} },
+    };
+    const int NB = sizeof(boxes) / sizeof(boxes[0]);
+
+    for (const char* expr : CORPUS)
+    {
+        MathTree* tree = parse(expr);
+        REQUIRE(tree != nullptr);
+        Deck* deck = deck_from_tree(tree);
+        TapeCtx* ctx = tape_ctx_new(deck);
+        Tape* base = deck_base(deck);
+
+        Interval Xs[NB], Ys[NB], Zs[NB], batch[NB], scalar[NB];
+        for (int b = 0; b < NB; ++b)
+        {
+            Xs[b] = boxes[b][0];
+            Ys[b] = boxes[b][1];
+            Zs[b] = boxes[b][2];
+            scalar[b] = tape_eval_i(base, ctx, Xs[b], Ys[b], Zs[b]);
+        }
+        tape_eval_i_batch(base, ctx, Xs, Ys, Zs, batch, NB);
+
+        for (int b = 0; b < NB; ++b)
+        {
+            CAPTURE(expr);
+            CAPTURE(b);
+            REQUIRE(value_match(scalar[b].lower, batch[b].lower));
+            REQUIRE(value_match(scalar[b].upper, batch[b].upper));
+        }
+
+        tape_ctx_free(ctx);
+        deck_free(deck);
+        free_tree(tree);
+    }
+}

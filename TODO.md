@@ -32,16 +32,24 @@ what's still ahead.
   per-shape deck caching, the shrinkage curve (saturates ~depth 6 on
   the merged Zeiss - tune tile size against it), and an opt-in
   affine-collapse pass to enable when this lands.
-  First probes (same night): (a) MPR-style wide fan-out in the depth
-  pass exists behind STIBIUM_TILE_RENDER=N but is a mild LOSS on
-  serial CPU (binary bisection + cheap pushes re-specializes every
-  level; fan-out children re-eval the same parent tape) - the fan-out
-  shape needs vectorized interval eval or per-tile threads to pay,
-  which is the actual remaining work here. (b) The shaded pass now
-  pushes per 64px tile against the depth buffer's z-range, so
-  gradients run on pruned tapes instead of the full deck - merged
-  Zeiss ~5% total render, ~30% of the shading portion, and it
-  compounds in the GUI and animation verbs.
+  SHIPPED 2026-07-13, three pieces: (a) the shaded pass pushes per
+  64px tile against the depth buffer's z-range, so gradients run on
+  pruned tapes (~30% off the shading portion); (b)
+  `tape_eval_i_batch` - batched interval evaluation, 64 boxes per
+  pass down the tape, bounds exactly equal to scalar (hot ops are
+  elementwise math_i mirrors, branchy ops delegate per lane), living
+  in the existing r-rows (64 lo + 64 hi = MIN_VOLUME floats, zero
+  new allocation); (c) the depth pass fans ambiguous regions into 64
+  children and batch-classifies them - decided tiles fill/vanish
+  without re-walking the tape, only ambiguous ones recurse.  Default
+  ON (STIBIUM_TILE_RENDER=0 restores bisection, =N tunes): merged
+  Zeiss at 2048px renders ~20% faster, win grows with resolution,
+  pixel-identical everywhere.  Note the fan-out was a LOSS until the
+  batch evaluator landed - serial re-specialization was already
+  near-optimal; amortized traversal is what pays.  Still open here:
+  per-tile worker scheduling (current xy-chunking is coarser than
+  MPR's), and the GPU compute-shader rung (Tier 3) which reuses all
+  of this machinery.
 
 - **Parser hardening (upstream #198).** A malformed math expression
   hits a lemon assert and aborts the whole app. We OWN this parser

@@ -250,6 +250,49 @@ green; all four goldens byte-identical; all renders byte-identical
 except showcase_gear, which now matches unpruned ground truth
 exactly (see above).
 
+## Round 3 (landed 2026-07-13, still the same night)
+
+**`tape_eval_i_batch`: the vectorized interval evaluator.**  The MPR
+tile hierarchy finally pays on CPU.  One pass down the tape
+classifies up to 64 boxes at once: tape traversal (the clause fetch,
+the switch dispatch) is amortized across the whole batch, and the
+hot interval ops - add/sub/mul/min/max, the bulk of any CSG tape -
+run as elementwise loops the compiler vectorizes.  Every branchy op
+(div/pow/mod/trig/grid) delegates to the scalar math_i function per
+lane, so batched bounds are *exactly* the scalar bounds by
+construction - fill decisions cannot depend on which evaluator ran.
+
+The layout is the good kind of pun: an r-row is MIN_VOLUME = 128
+floats per register, which is exactly 64 lower bounds followed by 64
+upper bounds.  The batch workspace is the region workspace; constant
+rows (one value replicated across the row) are already correct
+interval constants.  Zero new allocation.
+
+The renderer's fan-out (which lost ~13% as a serial probe) now
+batch-classifies its 64 children: provably-inside tiles fill,
+provably-empty tiles vanish, neither ever re-walks the tape; only
+ambiguous children recurse (scalar eval_i + push, as before, so
+ClauseIv stays coherent).  Near-to-far ordering feeds the occlusion
+cull.  Default ON; `STIBIUM_TILE_RENDER=0` restores binary
+bisection, `=N` tunes the fan-out.
+
+| merged Zeiss --render | binary bisection | batched fan-out 64 |
+|---|---|---|
+| 512 px | 3.52 s | 3.32 s |
+| 2048 px | 14.97 s | **12.36 s** |
+
+Pixel-identical at every size; the win grows with resolution (the
+~2.5 s Python graph eval is constant, so the render-only fraction
+improves ~20%+).  Verified: suite (627,666 assertions), 100k-tree
+fuzz with batch-parity checks folded into every iteration (11.4M
+assertions), goldens and all renders byte-identical.
+
+Remaining rungs: per-tile worker scheduling (xy-chunking is coarser
+than MPR's tile queue), and the GPU compute shader (Tier 3) - which
+now needs nothing the kernel doesn't already have: bounded
+registers, 8-byte-able clauses, batch classification, copy-based
+pushes.
+
 Notes for the next rung (the SIMD tile viewport):
 
 - Pushed tapes are malloc'd per push; a spares freelist (libfive

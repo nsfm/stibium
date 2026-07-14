@@ -60,6 +60,20 @@ float tape_eval_f(const Tape* tape, TapeCtx* ctx,
                   float x, float y, float z);
 Interval tape_eval_i(const Tape* tape, TapeCtx* ctx,
                      Interval X, Interval Y, Interval Z);
+
+/** @brief Batched interval evaluation: classifies `count` boxes in
+    ONE pass down the tape (the MPR trick that makes wide tile
+    fan-outs pay - tape traversal is amortized and the simple ops
+    run across SIMD lanes).  Bounds are exactly equal to `count`
+    scalar tape_eval_i calls: hot ops are elementwise mirrors of
+    math_i and everything branchy delegates to it per lane.
+    count <= TAPE_BATCH.  Does NOT record push records (ClauseIv) -
+    ambiguous boxes still take a scalar tape_eval_i before their
+    push, exactly like today.  */
+#define TAPE_BATCH  64
+void tape_eval_i_batch(const Tape* tape, TapeCtx* ctx,
+                       const Interval* Xs, const Interval* Ys,
+                       const Interval* Zs, Interval* out, int count);
 const float* tape_eval_r(const Tape* tape, TapeCtx* ctx, Region r);
 const derivative* tape_eval_g(const Tape* tape, TapeCtx* ctx, Region r);
 
