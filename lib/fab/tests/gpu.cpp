@@ -37,6 +37,7 @@
 #include "catch/catch.hpp"
 
 #include "fab/tree/tape.h"
+#include "fab/tree/gpu.h"
 #include "fab/tree/tree.h"
 #include "fab/tree/render.h"
 #include "fab/tree/parser.h"
@@ -1305,5 +1306,63 @@ TEST_CASE("GPU big-deck exactness", "[.gpubig]")
         WARN("spheres=" << n_spheres << " slots=" << slots
                         << ": " << diff << " mismatched px");
         CHECK(diff == 0);
+    }
+}
+
+/*  The PRODUCTION path (fab/tree/gpu.h - rescheduled registers,
+ *  constants in shader source, z-slab tapes, band recycling), not
+ *  the historical prototypes above.  This is the referee that has
+ *  to stay green as the pipeline evolves.  */
+TEST_CASE("Production gpu_render16 matches CPU", "[.gpulib]")
+{
+    if (!gpu_available())
+    {
+        WARN("no GPU available; skipping");
+        return;
+    }
+    WARN("GPU renderer: " << gpu_renderer_name());
+
+    const char* MODELS[] = {
+        "*+Xf2.0+Yf2.0",
+        "aa-f-0.6X-Xf0.6aa-f-0.6Y-Yf0.6a-f-0.6Z-Zf0.6",
+        "-+*XX*YYf0.5",
+        "-r++qXqYqZf1",
+        "i-r++qXqYqZf1-r++q-Xf0.5q-Yf0.25q-Zf0.1f0.8",
+        "ai-r++qXqYqZf1-r++q-Xf0.5qYqZf0.7n-Zf0.2",
+        "+s*Xf3.0c*Yf2.0",
+        "i-r++qXqYqZf1-r++q-Xf10qYqZf0.5",
+        "-r++q/Xf1.7q/Yf1.3qZf1",
+        "i-r++q/Xf2q/Yf2qZf1-/Xf9f0.1",
+    };
+    for (const char* m : MODELS)
+    {
+        MathTree* tree = parse(m);
+        REQUIRE(tree != nullptr);
+        Deck* deck = deck_from_tree(tree);
+        free_tree(tree);
+
+        Region r = {};
+        r.ni = 160;  r.nj = 96;  r.nk = 128;   // non-square on purpose
+        r.voxels = uint64_t(r.ni) * r.nj * r.nk;
+        build_arrays(&r, -1.1f, -1.1f, -1.1f, 1.1f, 1.1f, 1.1f);
+
+        std::vector<uint16_t> gstore(size_t(r.ni) * r.nj, 0);
+        std::vector<uint16_t*> grows(r.nj);
+        for (uint32_t j = 0; j < r.nj; ++j)
+            grows[j] = gstore.data() + size_t(j) * r.ni;
+        volatile int halt = 0;
+        const bool ran = gpu_render16(deck, r, grows.data(), &halt);
+        REQUIRE(ran);
+
+        const auto c = render_cpu(deck, r);
+        uint64_t diff = 0;
+        for (size_t p = 0; p < gstore.size(); ++p)
+            if (gstore[p] != c[p])
+                ++diff;
+        CAPTURE(m);
+        CHECK(diff == 0);
+
+        free_arrays(&r);
+        deck_free(deck);
     }
 }
