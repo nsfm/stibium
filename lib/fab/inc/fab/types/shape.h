@@ -3,13 +3,15 @@
 
 #include <boost/python.hpp>
 
-#include <string>
 #include <memory>
+#include <mutex>
+#include <string>
 
 #include "fab/types/bounds.h"
 #include "fab/types/transform.h"
 
 #include "fab/tree/tree.h"
+#include "fab/tree/tape.h"
 
 typedef std::tuple<int,int,int> int3;
 
@@ -40,11 +42,25 @@ struct Shape
     /** Returns a new shape with re-mapped coordinates and bounds. */
     Shape map(Transform t) const;
 
+    /*  Lazily-compiled evaluation deck, built on first use and then
+     *  shared by copies of this shape, so renderers evaluate the same
+     *  immutable deck frame after frame instead of recompiling the
+     *  tree per call.  Lazy on purpose: graph evaluation creates many
+     *  transient intermediate Shapes that are never rendered.  */
+    const Deck* getDeck() const;
+
     std::string math;
     Bounds bounds;
 
     std::shared_ptr<MathTree> tree;
     int r, g, b;
+
+private:
+    struct DeckCache {
+        std::once_flag once;
+        std::shared_ptr<Deck> deck;
+    };
+    std::shared_ptr<DeckCache> deck_cache = std::make_shared<DeckCache>();
 };
 
 Shape operator~(const Shape& a);

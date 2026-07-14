@@ -25,6 +25,14 @@ Shape::Shape(std::string math, Bounds bounds, int3 color)
         throw fab::ParseError();
 }
 
+const Deck* Shape::getDeck() const
+{
+    std::call_once(deck_cache->once, [this] {
+        deck_cache->deck.reset(deck_from_tree(tree.get()), deck_free);
+    });
+    return deck_cache->deck.get();
+}
+
 object Shape::init(tuple args, dict kwargs)
 {
     object shape = args[0];

@@ -75,20 +75,49 @@ Interval pow_i(Interval A, Interval B)
 {
     Interval i;
 
-    int p = B.lower;
+    /*  The historical fast path assumed an integer-constant exponent
+     *  (squares/cubes from the shape library) and silently truncated
+     *  anything else - pow(x, Z) got the bounds of pow(x, 0).  Keep
+     *  that path bit-identical for exact integer exponents, and give
+     *  real / varying exponents sound bounds of their own.  */
+    if (B.lower == B.upper && B.lower == (int)B.lower) {
+        int p = B.lower;
 
-    if (p % 2) {
-        i.lower = pow(A.lower, p);
-        i.upper = pow(A.upper, p);
-    } else {
-        float L = fabs(A.lower), U = fabs(A.upper);
-        if (A.lower <= 0 && A.upper >= 0)
-            i.lower = 0;
-        else
-            i.lower = pow(L < U ? L : U, p);
-        i.upper = pow(L < U ? U : L, p);
+        if (p % 2) {
+            i.lower = pow(A.lower, p);
+            i.upper = pow(A.upper, p);
+        } else {
+            float L = fabs(A.lower), U = fabs(A.upper);
+            if (A.lower <= 0 && A.upper >= 0)
+                i.lower = 0;
+            else
+                i.lower = pow(L < U ? L : U, p);
+            i.upper = pow(L < U ? U : L, p);
+        }
+        return i;
     }
 
+    if (A.lower > 0) {
+        /*  pow = exp(b*log(a)): b*log(a) over a box attains its
+         *  extremes at the corners, and exp is monotone.  */
+        const float c[4] = { powf(A.lower, B.lower),
+                             powf(A.lower, B.upper),
+                             powf(A.upper, B.lower),
+                             powf(A.upper, B.upper) };
+        i.lower = i.upper = c[0];
+        for (int k = 1; k < 4; ++k) {
+            if (c[k] < i.lower)   i.lower = c[k];
+            if (c[k] > i.upper)   i.upper = c[k];
+        }
+        return i;
+    }
+
+    /*  Negative or zero-spanning base with a real exponent: pointwise
+     *  values include NaN / infinities; no finite bounds are sound.
+     *  (The tape evaluator's maybe-NaN taint flags this case, so
+     *  pruning never trusts it.)  */
+    i.lower = -INFINITY;
+    i.upper =  INFINITY;
     return i;
 }
 

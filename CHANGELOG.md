@@ -6,6 +6,30 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **Tape round two: sound pruning, register allocation, deck
+  caching** (doc/TAPE-DESIGN.md "Round 2"). A new pruning fuzzer
+  (random expression trees x random regions, pushed-vs-base
+  pointwise; 100k trees / 10.6M assertions in one run) found and
+  fixed four real bugs - three predating the tape work entirely:
+  domain-error intervals (sqrt/log/asin of out-of-range inputs)
+  could drive unsound pruning decisions (fixed with libfive-style
+  maybe-NaN taint, plus infinity rules libfive lacks); `pow_i`
+  silently truncated real exponents to integers (pow(x, Z) got the
+  bounds of pow(x, 0)); and the renderer's sign-collapse treated
+  zero-touching bounds as one sign class, flipping exactly-zero
+  fields under negation. The taint fix visibly repaired
+  showcase_gear: the old render differs from unpruned ground truth
+  by 5,842 pixels; the new one matches it bit-for-bit. Also landed:
+  linear-scan register allocation (merged Zeiss: 3157 clauses run in
+  465 registers, ~4x smaller per-thread workspaces - the
+  precondition for tile/GPU rendering), per-shape deck caching (the
+  viewport stops recompiling math every frame), a spare-tape
+  freelist + no pushes inside packed blocks (4.7M -> 0.6M pushes per
+  big export), mesher normal probes that escape their packed block
+  now walk up to a covering tape, `STIBIUM_TAPE_STATS=1` shrinkage
+  instrumentation (the MPR clauses-per-level curve: 20x by depth 6
+  on the merged Zeiss), and an opt-in `STIBIUM_AFFINE=1` transform-
+  chain collapse pass (bit-identity stays the default).
 - **Shortened-tape evaluation (the libfive keystone).** The kernel's
   spatial pruning was rebuilt around immutable, refcounted, shareable
   tapes (doc/TAPE-DESIGN.md; the idea from libfive's `eval/tape.cpp`

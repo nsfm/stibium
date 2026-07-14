@@ -139,7 +139,7 @@ void ExportHeightmapWorker::async()
         d16_rows[i] = &d16[r.ni * i];
 
     memset(d16, 0, r.ni * r.nj * sizeof(uint16_t));
-    render16_mt(shape.tree.get(), r, d16_rows, &halt);
+    render16_mt(shape.getDeck(), r, d16_rows, &halt);
 
     // These bounds will be stored to give the .png real-world units.
     float bounds[6] = {

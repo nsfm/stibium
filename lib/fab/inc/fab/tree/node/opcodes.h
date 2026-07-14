@@ -43,6 +43,12 @@ typedef enum Opcode_ {
     OP_Z,
     OP_CONST,
 
+    /*  Register-to-register copy.  Never appears in Node trees -
+     *  only in tape clauses, where pushes emit it in place of a
+     *  decided min/max (readers can't be remapped to the survivor
+     *  once registers are reused; see fab/tree/tape.h).  */
+    OP_COPY,
+
     LAST_OP
 } Opcode;
 

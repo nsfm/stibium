@@ -1,5 +1,9 @@
 #include <Python.h>
+#include <cmath>
+#include <cstdlib>
 #include <cstring>
+#include <random>
+#include <string>
 #include <catch/catch.hpp>
 
 #include "fab/fab.h"
@@ -328,3 +332,162 @@ TEST_CASE("Nested pushes and base walk-up", "[tape]")
     deck_free(deck);
     free_tree(tree);
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+namespace {
+
+/*  Deterministic random expression generator over the v1 prefix
+ *  grammar.  Min/max are weighted heavily (they're what pruning
+ *  acts on) and the domain-error ops (sqrt, asin, acos, div, log's
+ *  cousins) are deliberately included - garbage interval bounds
+ *  from domain errors are exactly where pruning could go wrong.  */
+struct ExprGen {
+    std::mt19937 rng;
+    explicit ExprGen(uint32_t seed) : rng(seed) {}
+
+    int pick(int n) { return std::uniform_int_distribution<int>(0, n-1)(rng); }
+    float uniform(float lo, float hi)
+        { return std::uniform_real_distribution<float>(lo, hi)(rng); }
+
+    std::string gen(int depth)
+    {
+        if (depth <= 0 || pick(8) == 0)
+        {
+            switch (pick(5))
+            {
+                case 0: return "X";
+                case 1: return "Y";
+                case 2: return "Z";
+                default: {
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "f%.3f", uniform(-4, 4));
+                    return buf;
+                }
+            }
+        }
+        // i/a (min/max) get triple weight; the rest uniform-ish
+        static const char* BINARY[] = {"i", "i", "i", "a", "a", "a",
+                                       "+", "-", "*", "/", "p"};
+        static const char* UNARY[]  = {"n", "b", "q", "r", "s", "c",
+                                       "t", "S", "C", "x"};
+        if (pick(3) < 2)
+        {
+            const char* op = BINARY[pick(11)];
+            return std::string(op) + gen(depth - 1) + gen(depth - 1);
+        }
+        const char* op = UNARY[pick(10)];
+        return std::string(op) + gen(depth - 1);
+    }
+};
+
+/*  Equal, or both NaN (values, not bit patterns: +0 == -0 is fine,
+ *  and equal-valued min/max operands may return either side).  */
+bool value_match(float a, float b)
+{
+    return a == b || (std::isnan(a) && std::isnan(b));
+}
+
+}  // namespace
+
+TEST_CASE("Pruning fuzzer: pushed tapes match base pointwise",
+          "[tape][fuzzer]")
+{
+    const uint32_t seed = getenv("STIBIUM_FUZZ_SEED")
+        ? strtoul(getenv("STIBIUM_FUZZ_SEED"), nullptr, 10) : 0xF01DAB1E;
+    const int count = getenv("STIBIUM_FUZZ_COUNT")
+        ? atoi(getenv("STIBIUM_FUZZ_COUNT")) : 250;
+
+    ExprGen g(seed);
+    int pushes_that_pruned = 0;
+
+    for (int iter = 0; iter < count; ++iter)
+    {
+        const std::string expr = g.gen(6);
+        MathTree* tree = parse(expr.c_str());
+        if (!tree)  continue;   // generator bug would show as mass skips
+
+        Deck* deck = deck_from_tree(tree);
+        TapeCtx* ctx = tape_ctx_new(deck);
+        Tape* base = deck_base(deck);
+
+        for (int box = 0; box < 2; ++box)
+        {
+            const float x0 = g.uniform(-3, 2), sx = g.uniform(0.1f, 2);
+            const float y0 = g.uniform(-3, 2), sy = g.uniform(0.1f, 2);
+            const float z0 = g.uniform(-3, 2), sz = g.uniform(0.1f, 2);
+            const Interval X = {x0, x0 + sx},
+                           Y = {y0, y0 + sy},
+                           Z = {z0, z0 + sz};
+
+            tape_eval_i(base, ctx, X, Y, Z);
+            Tape* std_t = tape_push(base, ctx, X, Y, Z,
+                                    TAPE_PUSH_STANDARD);
+            tape_eval_i(base, ctx, X, Y, Z);
+            Tape* bin_t = tape_push(base, ctx, X, Y, Z,
+                                    TAPE_PUSH_BINARY);
+            if (std_t != base)  pushes_that_pruned++;
+
+            // Nested: push the standard tape again on a sub-box
+            const Interval Xs = {x0 + sx*0.25f, x0 + sx*0.75f},
+                           Ys = {y0 + sy*0.25f, y0 + sy*0.75f},
+                           Zs = {z0 + sz*0.25f, z0 + sz*0.75f};
+            tape_eval_i(std_t, ctx, Xs, Ys, Zs);
+            Tape* sub_t = tape_push(std_t, ctx, Xs, Ys, Zs,
+                                    TAPE_PUSH_STANDARD);
+
+            for (int s = 0; s < 27; ++s)
+            {
+                const float px = x0 + sx * ((s      % 3) + 0.5f) / 3,
+                            py = y0 + sy * ((s/3    % 3) + 0.5f) / 3,
+                            pz = z0 + sz * ((s/9    % 3) + 0.5f) / 3;
+
+                const float vb = tape_eval_f(base, ctx, px, py, pz);
+                const float vs = tape_eval_f(std_t, ctx, px, py, pz);
+                CAPTURE(expr);
+                CAPTURE(iter);
+                CAPTURE(px);
+                CAPTURE(py);
+                CAPTURE(pz);
+                char boxbuf[160];
+                snprintf(boxbuf, sizeof(boxbuf),
+                         "X[%g,%g] Y[%g,%g] Z[%g,%g]",
+                         X.lower, X.upper, Y.lower, Y.upper,
+                         Z.lower, Z.upper);
+                const std::string boxs = boxbuf;
+                CAPTURE(boxs);
+                REQUIRE(value_match(vb, vs));
+
+                // Binary mode preserves signs (all a raster reads)
+                if (!std::isnan(vb))
+                {
+                    const float vn = tape_eval_f(bin_t, ctx, px, py, pz);
+                    REQUIRE((vb < 0) == (vn < 0));
+                }
+
+                // Sub-push agrees inside its own sub-box
+                if (px >= Xs.lower && px <= Xs.upper &&
+                    py >= Ys.lower && py <= Ys.upper &&
+                    pz >= Zs.lower && pz <= Zs.upper)
+                {
+                    const float vv = tape_eval_f(sub_t, ctx, px, py, pz);
+                    REQUIRE(value_match(vb, vv));
+                }
+            }
+
+            tape_release(sub_t);
+            tape_release(bin_t);
+            tape_release(std_t);
+        }
+
+        tape_ctx_free(ctx);
+        deck_free(deck);
+        free_tree(tree);
+    }
+
+    // If pruning never fired the fuzzer is testing nothing
+    REQUIRE(pushes_that_pruned > count / 10);
+}
+
+
+

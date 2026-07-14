@@ -180,8 +180,23 @@ std::vector<Vec3f> Mesher::get_normals(const std::vector<uint32_t>& contour)
         i += 7;
     }
 
-    const float* out = tape_eval_r(block_tape ? block_tape : deck_base(deck),
-                                   ctx, dummy);
+    // The +/- epsilon probes can step just outside the packed block,
+    // where the block's specialized tape isn't valid (a pruned branch
+    // could win out there); walk up the tape stack until the whole
+    // sample cloud is covered.
+    float lo[3] = { INFINITY, INFINITY, INFINITY };
+    float hi[3] = { -INFINITY, -INFINITY, -INFINITY };
+    for (unsigned q = 0; q < dummy.voxels; ++q)
+    {
+        lo[0] = fmin(lo[0], dummy.X[q]);  hi[0] = fmax(hi[0], dummy.X[q]);
+        lo[1] = fmin(lo[1], dummy.Y[q]);  hi[1] = fmax(hi[1], dummy.Y[q]);
+        lo[2] = fmin(lo[2], dummy.Z[q]);  hi[2] = fmax(hi[2], dummy.Z[q]);
+    }
+    Tape* tape = tape_base_for_region(
+            block_tape ? block_tape : deck_base(deck),
+            lo[0], hi[0], lo[1], hi[1], lo[2], hi[2]);
+
+    const float* out = tape_eval_r(tape, ctx, dummy);
 
     // Extract normals from the evaluated data.
     std::vector<Vec3f> normals;
@@ -820,8 +835,12 @@ void Mesher::triangulate_region(const Region& r, Tape* tape)
     // Specialize the tape against the interval results: decided
     // min/max branches drop out for the whole subtree below here
     // (values are exact, so the mesh is unchanged - the old code
-    // only pruned once per packed block).
-    Tape* sub = tape_push(tape, ctx, X, Y, Z, TAPE_PUSH_STANDARD);
+    // only pruned once per packed block).  Inside a packed block the
+    // field is already sampled and the tape has already flattened
+    // out (see STIBIUM_TAPE_STATS), so pushing further is pure churn.
+    Tape* sub = has_data ? tape_retain(tape)
+                         : tape_push(tape, ctx, X, Y, Z,
+                                     TAPE_PUSH_STANDARD);
 
     // If we can calculate all of the points in this region with a single
     // region-eval call, then do so.  This large chunk will be used in
