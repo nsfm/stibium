@@ -40,7 +40,15 @@ NodeProxy::NodeProxy(Node* n, GraphProxy* parent)
                 this, &NodeProxy::onSubnameChanged);
     }
 
-    connect(this, &QObject::destroyed, inspector, &QObject::deleteLater);
+    // When this proxy is destroyed (the node was removed, e.g. by
+    // File > New or graph clear), the node is already freed.  Hide
+    // the inspector SYNCHRONOUSLY here so a queued paint can't
+    // dereference the dead node (typeTint walks node->childDatums)
+    // before the deferred deletion runs.
+    connect(this, &QObject::destroyed, inspector, [i = inspector]{
+        i->hide();
+        i->deleteLater();
+    });
 
     connect(inspector, &InspectorFrame::onFocus, this, &NodeProxy::setFocus);
     connect(this, &NodeProxy::setFocus, inspector, &InspectorFrame::setFocus);
