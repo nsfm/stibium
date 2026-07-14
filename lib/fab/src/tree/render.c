@@ -5,38 +5,37 @@
 #include <math.h>
 #include <string.h>
 
-#include "fab/tree/eval.h"
+#include "fab/tree/tape.h"
 #include "fab/tree/tree.h"
 #include "fab/tree/render.h"
 #include "fab/tree/math/math_g.h"
-#include "fab/tree/node/node.h"
 
 #include "fab/util/switches.h"
 
 /*  region8
  *
- *  Renders a tree pixel-by-pixel into a given region,
- *  using the eval_r function to find an array of results in
- *  a single pass through the tree.
+ *  Renders a tape pixel-by-pixel into a given region,
+ *  using tape_eval_r to find an array of results in
+ *  a single pass through the tape.
  *
  */
 static
-void region8(MathTree* tree, Region region, uint8_t** img);
+void region8(const Tape* tape, TapeCtx* ctx, Region region, uint8_t** img);
 
 /*  region16
  *
- *  Renders a tree pixel-by-pixel into a given region,
- *  using the eval_r function to find an array of results in
- *  a single pass through the tree.
+ *  Renders a tape pixel-by-pixel into a given region,
+ *  using tape_eval_r to find an array of results in
+ *  a single pass through the tape.
  *
  */
 static
-void region16(MathTree* tree, Region region, uint16_t** img);
+void region16(const Tape* tape, TapeCtx* ctx, Region region, uint16_t** img);
 
 ////////////////////////////////////////////////////////////////////////////////
-void render8(MathTree* tree, Region region,
-             uint8_t** img, volatile int* halt,
-             void (*callback)())
+void render8_tape(Tape* tape, TapeCtx* ctx, Region region,
+                  uint8_t** img, volatile int* halt,
+                  void (*callback)())
 {
     // Special interrupt system, set asynchronously by on high
     if (*halt)  return;
@@ -44,7 +43,7 @@ void render8(MathTree* tree, Region region,
     // Render pixel-by-pixel if we're below a certain size.
     if (region.voxels > 0 && region.voxels < MIN_VOLUME) {
         if (callback)   (*callback)();
-        region8(tree, region, img);
+        region8(tape, ctx, region, img);
         return;
     }
 
@@ -67,7 +66,7 @@ void render8(MathTree* tree, Region region,
              Y = {region.Y[0], region.Y[region.nj]},
              Z = {region.Z[0], region.Z[region.nk]};
 
-    Interval result = eval_i(tree, X, Y, Z);
+    Interval result = tape_eval_i(tape, ctx, X, Y, Z);
 
     // If we're inside the object, fill with color.
     if (result.upper < 0) {
@@ -82,8 +81,9 @@ void render8(MathTree* tree, Region region,
     if (result.upper < 0 || result.lower >= 0)  return;
 
 #if PRUNE
-    disable_nodes(tree);
-    disable_nodes_binary(tree);
+    Tape* sub = tape_push(tape, ctx, X, Y, Z, TAPE_PUSH_BINARY);
+#else
+    Tape* sub = tape_retain(tape);
 #endif
 
     // Subdivide and recurse if we're not at voxel size.
@@ -92,20 +92,28 @@ void render8(MathTree* tree, Region region,
 
         bisect(region, &A, &B);
 
-        render8(tree, B, img, halt, callback);
-        render8(tree, A, img, halt, callback);
+        render8_tape(sub, ctx, B, img, halt, callback);
+        render8_tape(sub, ctx, A, img, halt, callback);
     }
 
-#if PRUNE
-    enable_nodes(tree);
-#endif
+    tape_release(sub);
+}
 
+void render8(MathTree* tree, Region region,
+             uint8_t** img, volatile int* halt,
+             void (*callback)())
+{
+    Deck* deck = deck_from_tree(tree);
+    TapeCtx* ctx = tape_ctx_new(deck);
+    render8_tape(deck_base(deck), ctx, region, img, halt, callback);
+    tape_ctx_free(ctx);
+    deck_free(deck);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 static
-void region8(MathTree* tree, Region region, uint8_t** img)
+void region8(const Tape* tape, TapeCtx* ctx, Region region, uint8_t** img)
 {
     float *X = malloc(region.voxels*sizeof(float)),
           *Y = malloc(region.voxels*sizeof(float)),
@@ -127,7 +135,7 @@ void region8(MathTree* tree, Region region, uint8_t** img)
     region.Y = Y;
     region.Z = Z;
 
-    float* result = eval_r(tree, region);
+    const float* result = tape_eval_r(tape, ctx, region);
 
     // Free the allocated matrices
     free(X);
@@ -153,7 +161,8 @@ void region8(MathTree* tree, Region region, uint8_t** img)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void get_normals8(MathTree* tree,
+static
+void get_normals8(const Tape* tape, TapeCtx* ctx,
                   float* restrict X, float* restrict Y, float* restrict Z,
                   unsigned count, float (*normals)[3])
 {
@@ -163,7 +172,7 @@ void get_normals8(MathTree* tree,
     dummy.Z = Z;
     dummy.voxels = count;
 
-    derivative* result = eval_g(tree, dummy);
+    const derivative* result = tape_eval_g(tape, ctx, dummy);
 
     // Calculate normals and copy over.
     for (unsigned i=0; i < count; ++i)
@@ -192,14 +201,10 @@ void shade_pixels8(unsigned count, float (*normals)[3],
     }
 }
 
-void shaded8(struct MathTree_ *tree, Region region, uint16_t **depth,
-             uint8_t (**out)[3], volatile int *halt,
-             void (*callback)())
+void shaded8_tape(Tape* tape, TapeCtx* ctx, Region region,
+                  uint16_t** depth, uint8_t (**out)[3],
+                  volatile int* halt, void (*callback)())
 {
-    // Load the correct partial derivatives for constants
-    for (unsigned i=0; i < tree->num_constants; ++i)
-        fill_results_g(tree->constants[i], tree->constants[i]->results.f);
-
     float *X = malloc(MIN_VOLUME*sizeof(float)),
           *Y = malloc(MIN_VOLUME*sizeof(float)),
           *Z = malloc(MIN_VOLUME*sizeof(float));
@@ -236,7 +241,7 @@ void shaded8(struct MathTree_ *tree, Region region, uint16_t **depth,
             if (count == MIN_VOLUME/4 ||
                     (count && j == region.nj - 1 && i == region.ni - 1))
             {
-                get_normals8(tree, X, Y, Z, count, normals);
+                get_normals8(tape, ctx, X, Y, Z, count, normals);
                 shade_pixels8(count, normals, is, js, out);
                 count = 0;
             }
@@ -251,17 +256,24 @@ void shaded8(struct MathTree_ *tree, Region region, uint16_t **depth,
     free(js);
 
     free(normals);
+}
 
-    // Switch back to normal values for constants array
-    for (unsigned i=0; i < tree->num_constants; ++i)
-        fill_results(tree->constants[i], tree->constants[i]->results.f);
+void shaded8(MathTree* tree, Region region, uint16_t** depth,
+             uint8_t (**out)[3], volatile int* halt,
+             void (*callback)())
+{
+    Deck* deck = deck_from_tree(tree);
+    TapeCtx* ctx = tape_ctx_new(deck);
+    shaded8_tape(deck_base(deck), ctx, region, depth, out, halt, callback);
+    tape_ctx_free(ctx);
+    deck_free(deck);
 }
 
 
 ////////////////////////////////////////////////////////////////////////////////
-void render16(MathTree* tree, Region region,
-              uint16_t** img, volatile int* halt,
-              void (*callback)())
+void render16_tape(Tape* tape, TapeCtx* ctx, Region region,
+                   uint16_t** img, volatile int* halt,
+                   void (*callback)())
 {
     // Special interrupt system, set asynchronously by on high
     if (*halt)  return;
@@ -270,7 +282,7 @@ void render16(MathTree* tree, Region region,
     if (region.voxels > 0 && region.voxels < MIN_VOLUME) {
         if (callback)
             (*callback)();
-        region16(tree, region, img);
+        region16(tape, ctx, region, img);
         return;
     }
 
@@ -292,7 +304,7 @@ void render16(MathTree* tree, Region region,
              Y = {region.Y[0], region.Y[region.nj]},
              Z = {region.Z[0], region.Z[region.nk]};
 
-    Interval result = eval_i(tree, X, Y, Z);
+    Interval result = tape_eval_i(tape, ctx, X, Y, Z);
 
     // If we're inside the object, fill with color.
     if (result.upper < 0) {
@@ -307,8 +319,9 @@ void render16(MathTree* tree, Region region,
     if (result.upper < 0 || result.lower >= 0)  return;
 
 #if PRUNE
-    disable_nodes(tree);
-    disable_nodes_binary(tree);
+    Tape* sub = tape_push(tape, ctx, X, Y, Z, TAPE_PUSH_BINARY);
+#else
+    Tape* sub = tape_retain(tape);
 #endif
 
     // Subdivide and recurse if we're not at voxel size.
@@ -316,20 +329,28 @@ void render16(MathTree* tree, Region region,
         Region A, B;
         bisect(region, &A, &B);
 
-        render16(tree, B, img, halt, callback);
-        render16(tree, A, img, halt, callback);
+        render16_tape(sub, ctx, B, img, halt, callback);
+        render16_tape(sub, ctx, A, img, halt, callback);
     }
 
-#if PRUNE
-    enable_nodes(tree);
-#endif
+    tape_release(sub);
+}
 
+void render16(MathTree* tree, Region region,
+              uint16_t** img, volatile int* halt,
+              void (*callback)())
+{
+    Deck* deck = deck_from_tree(tree);
+    TapeCtx* ctx = tape_ctx_new(deck);
+    render16_tape(deck_base(deck), ctx, region, img, halt, callback);
+    tape_ctx_free(ctx);
+    deck_free(deck);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 static
-void region16(MathTree* tree, Region region, uint16_t** img)
+void region16(const Tape* tape, TapeCtx* ctx, Region region, uint16_t** img)
 {
     float *X = malloc(region.voxels*sizeof(float)),
           *Y = malloc(region.voxels*sizeof(float)),
@@ -351,7 +372,7 @@ void region16(MathTree* tree, Region region, uint16_t** img)
     region.Y = Y;
     region.Z = Z;
 
-    float* result = eval_r(tree, region);
+    const float* result = tape_eval_r(tape, ctx, region);
 
     // Free the allocated matrices
     free(X);

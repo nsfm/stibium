@@ -19,12 +19,18 @@ what's still ahead.
   what my printer will actually produce" preview. Also generally
   fixes offset/shell on non-exact fields.
 
-- **Shortened-tape evaluation (the libfive keystone).** Immutable
-  shared shortened-tape evaluation replacing `disable_nodes` - the
-  M-L keystone from the raid (see doc/LIBFIVE-RECON.md). Unlocks a
-  CPU SIMD tile viewport and eventually an MPR-style GPU renderer.
-  The single highest-leverage kernel change on the board; most of
-  Tier 3's rendering moonshots sit downstream of it.
+- **CPU SIMD tile viewport renderer (MPR ideas, now unblocked).**
+  Shipped 2026-07-13: shortened-tape evaluation (the libfive
+  keystone) landed - immutable shared tapes replaced disable_nodes /
+  clone_tree throughout the kernel (see doc/TAPE-DESIGN.md +
+  CHANGELOG). The next rung is the tile renderer it was for: tile
+  the viewport, interval-cull tiles, specialize the tape per
+  ambiguous tile, evaluate survivors with the array evaluator
+  (thread pool stands in for the GPU grid; SIMD lanes for warp
+  lanes). Follow-ups worth benching while in there: a spares
+  freelist for pushed tapes (libfive Deck::claim) to cut push
+  allocation churn, and Fidget-style register allocation to shrink
+  workspace rows.
 
 - **Parser hardening (upstream #198).** A malformed math expression
   hits a lemon assert and aborts the whole app. We OWN this parser
@@ -194,7 +200,8 @@ what's still ahead.
   complex models (Zeiss ID02: dozens of assemblies). Fidget proves the
   JIT/wide-evaluation approach; upstream has an abandoned `gl-render`
   branch to study. Months, not days - but it makes the tool feel current.
-  Downstream of the Tier 1 shortened-tape keystone.
+  The shortened-tape prerequisite shipped 2026-07-13; the CPU SIMD tile
+  viewport (now Tier 1) is the stepping stone.
 - **Adaptive meshing (libfive-style manifold dual contouring).** Fewer,
   feature-aligned triangles at the source. MPL-2.0 core, license-safe to
   adapt. The meshoptimizer post-pass covers most of the value meanwhile.
@@ -336,7 +343,8 @@ else would build. Shipped from the raid: exact-SDF box/rect primitives,
 log-sum-exp smooth blends + smooth difference (log/exp opcodes),
 half_space, gyroid/TPMS, clearance, mirrors. Still open:
 
-- **Shortened-tape evaluation** (the keystone) - promoted to Tier 1.
+- **Shortened-tape evaluation** - SHIPPED 2026-07-13 (Tier 1 → done;
+  doc/TAPE-DESIGN.md).
 - **maybe_nan interval tracking** in math_i.c - silent sqrt/log/acos
   domain errors currently poison interval bounds; track the flag like
   libfive's eval/interval.hpp does.

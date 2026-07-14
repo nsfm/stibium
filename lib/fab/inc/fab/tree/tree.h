@@ -4,7 +4,6 @@
 #include <stdint.h>
 
 #include "fab/tree/node/opcodes.h"
-#include "fab/util/ustack.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,12 +18,8 @@ typedef struct MathTree_ {
     struct Node_*** nodes;
 
     /** @var active
-    Number of active nodes, indexed by level */
+    Number of nodes, indexed by level */
     unsigned* active;
-
-    /** @var disabled
-    Stacks of disabled node counts, indexed by level */
-    ustack*  disabled;
 
     /** @var num_levels
     Number of levels in this tree */
@@ -64,44 +59,9 @@ void print_tree(MathTree* tree);
 /** @brief Prints a math tree to a given file descriptor. */
 void fprint_tree(MathTree* tree, int fd);
 
-
-/** @brief Clones a tree and all of its nodes.
-    @details The tree must not have any deactivated nodes.
-*/
-MathTree* clone_tree(MathTree* orig);
-
-
-/** @brief Travels down the tree, disabling nodes whose values will not matter
-    upon further spatial subdivision
-
-    @details
-    Nodes are disabled by swapping them to the back of their respective list
-    and decrementing the active count (so that the evaluation loop doesn't
-    touch them at all).
-
-    A count of nodes disabled in this pass is stored on the top of the
-    disabled stack (used by enable_nodes).
- */
-void disable_nodes(MathTree* tree);
-
-
-/** @brief Disables nodes that won't affect the output truth value
-    (i.e. whether it is larger or smaller than zero)
-
-    @details
-    Must be called after disable_nodes, otherwise the stacks won't be
-    in place to store the number of disabled nodes.
-*/
-void disable_nodes_binary(MathTree* tree);
-
-
-/** @brief Enables nodes that were disabled on the most recent call to disable_nodes.
-
-    @details
-    Nodes are enabled by increasing the value of active[level][op], so that
-    an evaluation continues further down the list.
-*/
-void enable_nodes(MathTree* tree);
+/*  Spatial specialization (formerly disable_nodes / enable_nodes /
+ *  clone_tree) now lives in the immutable shortened-tape machinery:
+ *  see fab/tree/tape.h and doc/TAPE-DESIGN.md.  */
 
 /** @brief Returns a bit mask containing active axes in a tree.
     @details

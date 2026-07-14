@@ -8,6 +8,7 @@
 #include "fab/tree/tree.h"
 #include "fab/tree/parser.h"
 #include "fab/tree/eval.h"
+#include "fab/tree/tape.h"
 #include "fab/tree/grid.h"
 #include "fab/tree/math/math_g.h"
 #include "fab/tree/node/node.h"
@@ -277,7 +278,7 @@ TEST_CASE("Grid nodes compose with transforms", "[grid]")
     grid_registry_trim();
 }
 
-TEST_CASE("Grid trees clone and share the payload", "[grid]")
+TEST_CASE("Grid decks retain and share the payload", "[grid]")
 {
     const uint32_t id = register_sphere_grid(33);
     char math[32];
@@ -285,19 +286,22 @@ TEST_CASE("Grid trees clone and share the payload", "[grid]")
     MathTree* t = parse(math);
     REQUIRE(t != nullptr);
 
-    MathTree* c = clone_tree(t);
-    REQUIRE(c != nullptr);
+    Deck* deck = deck_from_tree(t);
+    REQUIRE(deck != nullptr);
+    TapeCtx* ctx = tape_ctx_new(deck);
 
-    // Same values through both trees
+    // Same values through the tree and the compiled deck
     const float a = eval_f(t, 0.3f, -0.2f, 0.7f);
-    const float b = eval_f(c, 0.3f, -0.2f, 0.7f);
+    const float b = tape_eval_f(deck_base(deck), ctx, 0.3f, -0.2f, 0.7f);
     REQUIRE(a == b);
 
-    // The grid survives freeing either tree first
+    // The grid survives freeing the tree while the deck lives
     free_tree(t);
-    const float after = eval_f(c, 0.3f, -0.2f, 0.7f);
+    const float after = tape_eval_f(deck_base(deck), ctx,
+                                    0.3f, -0.2f, 0.7f);
     REQUIRE(after == b);
-    free_tree(c);
+    tape_ctx_free(ctx);
+    deck_free(deck);
 
     grid_registry_trim();
     MeshGrid* gone = grid_lookup(id);

@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "fab/util/region.h"
+#include "fab/tree/tape.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -35,6 +36,20 @@ void render16(struct MathTree_* tree, Region region,
               uint16_t** img, volatile int* halt,
               void (*callback)());
 
+/*  Tape-level entry points: same renderers over a pre-compiled deck,
+ *  so multithreaded callers compile once and share the base tape
+ *  across workers (each worker brings its own ctx).  */
+void render8_tape(Tape* tape, TapeCtx* ctx, Region region,
+                  uint8_t** img, volatile int* halt,
+                  void (*callback)());
+
+void render16_tape(Tape* tape, TapeCtx* ctx, Region region,
+                   uint16_t** img, volatile int* halt,
+                   void (*callback)());
+
+void shaded8_tape(Tape* tape, TapeCtx* ctx, Region region,
+                  uint16_t** depth, uint8_t (**out)[3],
+                  volatile int* halt, void (*callback)());
 
 #ifdef __cplusplus
 }

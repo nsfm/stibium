@@ -6,6 +6,28 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **Shortened-tape evaluation (the libfive keystone).** The kernel's
+  spatial pruning was rebuilt around immutable, refcounted, shareable
+  tapes (doc/TAPE-DESIGN.md; the idea from libfive's `eval/tape.cpp`
+  and the MPR paper, reimplemented for this kernel's four eval
+  modes). A `Deck` compiles a MathTree once into a flat clause tape;
+  interval evaluation then *pushes* shorter specialized tapes per
+  region - decided min/max branches drop out by remapping readers to
+  the surviving input, so pruned values are exact, not approximate.
+  Replaces the mutate-in-place `disable_nodes`/`enable_nodes`/`ustack`
+  machinery and the per-thread `clone_tree` copies (renderer, mesher,
+  and parallel evaluator now share one deck; each worker brings only
+  a slot-indexed workspace). The mesher also specializes per octree
+  level instead of once per packed block. Verified bit-identical:
+  eval equivalence unit tests across all four modes ("[tape]"),
+  golden mesh dumps, and every --render PNG (zeiss included) compare
+  byte-for-byte against the pre-tape build. Speedups scale with
+  model size and CSG density (the MPR paper's law): gyroid ~10%,
+  gear export ~1.4x, and the merged Zeiss ID02 export ~4x - with the
+  full-scale Zeiss going from never-completes (killed at 13 min,
+  nothing written) to done in 5 minutes. Memory flat. This is the
+  Tier 1 keystone that unlocks the CPU SIMD tile viewport and an
+  MPR-style GPU renderer.
 - **Antialiased renders + turntables, wigglegrams, and stereo pairs.**
   All rendered images (--render, --diff composites, thumbnails, the
   GUI image export) now supersample 2x and smooth-downscale (--aa N
@@ -317,6 +339,9 @@ release; newest work at the top of each section.
 
 ## Bug fixes
 
+- `exp(constant)` parsed as `abs(constant)`: the exp node's
+  constant-fold called the wrong math function (upstream-era typo in
+  `node_c.c`; only fired when exp received a literal constant).
 - SIGFPE crash exporting models with a sub-voxel-thin axis
   (`region.c` division by zero).
 - `new`/`free` mismatch in the math-string parser (UB on every parse

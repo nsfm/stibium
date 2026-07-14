@@ -6,6 +6,7 @@
 #include "fab/tree/render_mt.h"
 
 #include "fab/tree/render.h"
+#include "fab/tree/tape.h"
 #include "fab/tree/tree.h"
 
 namespace {
@@ -72,35 +73,39 @@ void run_chunked(MathTree* tree, const Region& r, volatile int* halt,
     threads = int(std::min<uint64_t>(threads,
                                      uint64_t(r.ni) * r.nj / 64 + 1));
 
+    // One immutable deck serves every worker; each thread only needs
+    // its own workspace (no per-thread tree clones).
+    Deck* deck = deck_from_tree(tree);
+    Tape* tape = deck_base(deck);
+
     if (threads < 2)
     {
-        render_chunk(tree, r);
+        TapeCtx* ctx = tape_ctx_new(deck);
+        render_chunk(tape, ctx, r);
+        tape_ctx_free(ctx);
+        deck_free(deck);
         return;
     }
 
     // More chunks than workers, so an empty chunk doesn't idle a core
     const auto chunks = split_xy(r, size_t(threads) * 3);
 
-    // clone_tree writes bookkeeping into the source; clone serially
-    std::vector<MathTree*> trees(threads);
-    for (auto& t : trees)
-        t = clone_tree(tree);
-
     std::atomic<size_t> next(0);
     std::vector<std::thread> pool;
     pool.reserve(threads);
     for (int t = 0; t < threads; ++t)
     {
-        pool.emplace_back([&, t]() {
+        pool.emplace_back([&]() {
+            TapeCtx* ctx = tape_ctx_new(deck);
             size_t c;
             while ((c = next.fetch_add(1)) < chunks.size() && !*halt)
-                render_chunk(trees[t], chunks[c]);
+                render_chunk(tape, ctx, chunks[c]);
+            tape_ctx_free(ctx);
         });
     }
     for (auto& th : pool)
         th.join();
-    for (auto& t : trees)
-        free_tree(t);
+    deck_free(deck);
 }
 
 }  // namespace
@@ -109,8 +114,8 @@ void render16_mt(MathTree* tree, Region r,
                  uint16_t** img, volatile int* halt, int threads)
 {
     run_chunked(tree, r, halt, threads,
-                [=](MathTree* t, const Region& chunk) {
-                    render16(t, chunk, img, halt, nullptr);
+                [=](Tape* t, TapeCtx* ctx, const Region& chunk) {
+                    render16_tape(t, ctx, chunk, img, halt, nullptr);
                 });
 }
 
@@ -119,7 +124,7 @@ void shaded8_mt(MathTree* tree, Region r,
                 int threads)
 {
     run_chunked(tree, r, halt, threads,
-                [=](MathTree* t, const Region& chunk) {
-                    shaded8(t, chunk, depth, out, halt, nullptr);
+                [=](Tape* t, TapeCtx* ctx, const Region& chunk) {
+                    shaded8_tape(t, ctx, chunk, depth, out, halt, nullptr);
                 });
 }

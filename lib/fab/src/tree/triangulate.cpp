@@ -6,6 +6,7 @@
 #include "fab/tree/triangulate.h"
 #include "fab/tree/triangulate/mesher.h"
 
+#include "fab/tree/tape.h"
 #include "fab/tree/tree.h"
 #include "fab/util/switches.h"
 
@@ -15,13 +16,15 @@ void triangulate(MathTree* tree, const Region r,
                  bool detect_edges, volatile int* halt,
                  float** const verts, unsigned* const count)
 {
-    Mesher t(tree, detect_edges, halt);
+    Deck* deck = deck_from_tree(tree);
+    Mesher t(deck, detect_edges, halt);
 
     // Top-level call to the recursive triangulation function.
     t.triangulate_region(r);
 
     // Copy data from the mesher to the output pointers.
     *verts = t.get_verts(count);
+    deck_free(deck);
 }
 
 void triangulate_indexed(MathTree* tree, const Region r,
@@ -30,9 +33,11 @@ void triangulate_indexed(MathTree* tree, const Region r,
                          std::vector<uint32_t>& indices,
                          std::atomic<uint64_t>* progress)
 {
-    Mesher t(tree, detect_edges, halt, progress);
+    Deck* deck = deck_from_tree(tree);
+    Mesher t(deck, detect_edges, halt, progress);
     t.triangulate_region(r);
     t.get_mesh(verts, indices);
+    deck_free(deck);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -194,12 +199,9 @@ void triangulate_indexed_mt(MathTree* tree, const Region r,
     const int n_chunks = split(r, chunks.data(), chunks.size());
     chunks.resize(n_chunks);
 
-    // Each worker meshes on its own clone of the tree (evaluation
-    // caches results inside the nodes).  clone_tree writes bookkeeping
-    // into the source tree, so clone serially, up front.
-    std::vector<MathTree*> trees(threads);
-    for (auto& t : trees)
-        t = clone_tree(tree);
+    // One immutable deck serves every worker; each Mesher brings its
+    // own evaluation workspace (no per-thread tree clones).
+    Deck* deck = deck_from_tree(tree);
 
     struct ChunkMesh {
         std::vector<float> verts;
@@ -213,7 +215,7 @@ void triangulate_indexed_mt(MathTree* tree, const Region r,
     for (int t = 0; t < threads; ++t)
     {
         pool.emplace_back([&, t]() {
-            Mesher m(trees[t], detect_edges, halt, progress);
+            Mesher m(deck, detect_edges, halt, progress);
             int c;
             while ((c = next.fetch_add(1)) < n_chunks && !*halt)
                 m.triangulate_region(chunks[c]);
@@ -225,8 +227,7 @@ void triangulate_indexed_mt(MathTree* tree, const Region r,
     }
     for (auto& th : pool)
         th.join();
-    for (auto& t : trees)
-        free_tree(t);
+    deck_free(deck);
 
     // Merge the per-worker meshes, re-interning the seam vertices
     // (workers that share a chunk boundary emit identical floats for
