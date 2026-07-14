@@ -6,6 +6,23 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **Fidget `.vm` import** (`stibium model.vm --import-vm out.sb`):
+  translates math tapes from Matt Keeter's successor project
+  (github.com/mkeeter/fidget) into Stibium projects - one frozen
+  shape node holding the full field. Direct op mapping plus algebraic
+  rewrites (ceil/round/recip); atan2 via the V2-in-V1 grammar embed;
+  discontinuous ops (compare/and/or/not) rejected with a clear error;
+  expression-depth guard against the parser stack. Bounds are
+  auto-discovered by two-pass interval octree descent (scale-free,
+  ~0.2% tightness), with 2D tapes (no var-z) detected and emitted as
+  planar shapes. Deterministic output, in CI. Fidget's flagship
+  7,866-op `prospero.vm` converts in under a second and renders
+  pixel-perfect. New stdlib (from the libfive raid, see
+  doc/LIBFIVE-RECON.md): log-sum-exp smooth union/difference
+  (`blend_expt_unit`, `blend_difference` + Smooth Union/Difference
+  nodes), exact-field `rectangle_exact` and `rounded_box` (+ nodes),
+  and a `gyroid()` function (fixing the Gyroid node's period being
+  ~23x off).
 - **Mesh import** (upstream's most-requested feature, mkeeter/antimony#153):
   the new Import > Import Mesh node turns an STL into a solid distance
   field that composes with the whole vocabulary — CSG, transforms,

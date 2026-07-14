@@ -18,6 +18,7 @@ find_package(Qt6 REQUIRED COMPONENTS
 set(SRC_FILES
     app/main.cpp
     app/app.cpp
+    app/vm_import.cpp
     app/colors.cpp
     app/theme.cpp
     app/settings.cpp
@@ -259,6 +260,20 @@ cmp ${CMAKE_CURRENT_BINARY_DIR}/ctest_rt1_import_bead.sb ${CMAKE_CURRENT_BINARY_
             app_render_import_bead
             app_resave_roundtrip_import_bead
             PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    # Fidget .vm import: convert deterministically, then the result
+    # must validate and render like any native project
+    foreach(tape quarter capsule)
+        add_test(NAME app_import_vm_${tape}
+                 COMMAND bash -c "\
+$<TARGET_FILE:${STIBIUM_APP}> ${CMAKE_SOURCE_DIR}/examples/vm/${tape}.vm --import-vm ${CMAKE_CURRENT_BINARY_DIR}/ctest_vm_${tape}.sb && \
+$<TARGET_FILE:${STIBIUM_APP}> ${CMAKE_SOURCE_DIR}/examples/vm/${tape}.vm --import-vm ${CMAKE_CURRENT_BINARY_DIR}/ctest_vm_${tape}_2.sb && \
+cmp ${CMAKE_CURRENT_BINARY_DIR}/ctest_vm_${tape}.sb ${CMAKE_CURRENT_BINARY_DIR}/ctest_vm_${tape}_2.sb && \
+$<TARGET_FILE:${STIBIUM_APP}> --validate ${CMAKE_CURRENT_BINARY_DIR}/ctest_vm_${tape}.sb && \
+$<TARGET_FILE:${STIBIUM_APP}> --render ${CMAKE_CURRENT_BINARY_DIR}/ctest_vm_${tape}.png --size 128 ${CMAKE_CURRENT_BINARY_DIR}/ctest_vm_${tape}.sb")
+        set_tests_properties(app_import_vm_${tape}
+                PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endforeach()
 endif()
 
 set_property(TARGET ${STIBIUM_APP} PROPERTY CXX_STANDARD 17)
