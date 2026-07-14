@@ -63,6 +63,7 @@ add_library(SbFab STATIC
     src/tree/node/results.c
     src/tree/parser.c
     src/tree/render.c
+    src/tree/gpu.cpp
     src/tree/tape.cpp
     src/tree/tree.c
     src/tree/v2parser.cpp
@@ -89,6 +90,15 @@ target_include_directories(SbFab SYSTEM PRIVATE
 # compiler may ignore them.  Computed values are unchanged — renders
 # and golden meshes stay bit-identical (verified 2026-07-13).
 target_compile_options(SbFab PRIVATE -fno-trapping-math)
+
+# GPU depth renderer (src/tree/gpu.cpp): needs only EGL/GL headers at
+# compile time - libEGL is dlopen'd at runtime.  Without the headers
+# the stubs compile and gpu_render16 reports unavailable.
+find_package(OpenGL COMPONENTS EGL)
+if (OpenGL_EGL_FOUND)
+    target_compile_definitions(SbFab PRIVATE STIBIUM_HAS_EGL)
+    target_link_libraries(SbFab ${CMAKE_DL_LIBS})
+endif()
 
 # Add the binary dir to include generated files
 target_include_directories(SbFab PRIVATE

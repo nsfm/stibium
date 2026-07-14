@@ -447,3 +447,43 @@ simplify pass - interleaved SSBO reads/writes made the emitted
 copy's out-slot word read back 0 (NVIDIA ran the same source
 correctly).  Locals-then-store fixed it; pattern kept in the
 shader with a comment.  Trust the referee, not the driver.
+
+## Round 7 (2026-07-14): the Zeiss on the GPU - correct, and honest
+
+The pipeline moved from the test harness into the library:
+`gpu_render16` (fab/tree/gpu.h, src/tree/gpu.cpp - libEGL dlopen'd,
+no link dependency), hooked into `render16_mt` behind
+`STIBIUM_GPU=1` with silent CPU fallback (no GL stack, OP_GRID
+decks, or per-tile tape memory over 512 MB).  The exporter, the
+heightmap path, and the live viewport all ride the same hook.
+
+**The merged Zeiss renders on the GPU bit-perfectly**: zero depth
+diffs across 607,662 pixels at 512px, output PNG byte-identical to
+the CPU's.  Getting there surfaced two production lessons the test
+corpus couldn't:
+
+- **The watchdog reads as wrong pixels, not as an error.**  A
+  monolithic dispatch over 607k pixels × 1019 z-steps × 3172
+  clauses (~2e12 clause-evals) got killed mid-flight by the driver;
+  the API returned normally and the readback was a half-written
+  buffer.  It looked exactly like a math bug (a third of the image
+  "differing") and burned a division-exactness hunt, a big-deck
+  hunt, and a scale hunt before a size-96 run exonerated the math
+  entirely.  Fix: dispatch in y-slices budgeted to ~2e9 clause-evals
+  with glFinish between, plus glGetError-or-fallback.  Diagnosis
+  knobs that earned their keep: STIBIUM_GPU=2 (brute-force mode -
+  "brute == pipeline" cleared the classify/simplify passes in one
+  shot), STIBIUM_GPU_DEBUG=2 (on-the-spot CPU-vs-GPU depth-delta
+  distribution; "0 within 1 level" killed every ulp theory).
+- **877 slots is the wall, as predicted.**  Correct but SLOW on the
+  Zeiss (minutes vs the CPU's 3.1 s at 512px): each thread carries a
+  3.5 KB dynamically-indexed register array, occupancy collapses.
+  Small decks fly (the gear's 106 slots: within-ulp identical and
+  fast).  Register spilling - fidget's Load/Store + LRU, dowry item
+  1 - is the single known fix and the next port.
+
+Also verified along the way: GLSL division and sqrt on both GPUs
+here are bit-exact vs libm on every model tested ([.gpudiv],
+[.gpubig] - synthetic decks to 745 slots all exact); GLSL acos/atan
+differ by ulps as expected (the gear: 86/245,760 px, 85 within one
+depth level - silhouette-grazing rays).

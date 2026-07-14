@@ -7,6 +7,7 @@
 
 #include "fab/tree/render.h"
 #include "fab/tree/tape.h"
+#include "fab/tree/gpu.h"
 
 namespace {
 
@@ -109,6 +110,18 @@ void run_chunked(const Deck* deck, const Region& r, volatile int* halt,
 void render16_mt(const Deck* deck, Region r,
                  uint16_t** img, volatile int* halt, int threads)
 {
+    // STIBIUM_GPU=1: run the depth pass as the on-device MPR
+    // pipeline (fab/tree/gpu.h).  Falls back silently to the CPU
+    // path when no GL stack is available or the deck references
+    // host-side grid payloads.  Output is pixel-identical (see
+    // TAPE-DESIGN Rounds 5-6 and the [.gpu2] referee).
+    static const char* use_gpu = getenv("STIBIUM_GPU");
+    if (use_gpu && atoi(use_gpu) != 0 &&
+        gpu_render16(deck, r, img, halt))
+    {
+        return;
+    }
+
     run_chunked(deck, r, halt, threads,
                 [=](Tape* t, TapeCtx* ctx, const Region& chunk) {
                     render16_tape(t, ctx, chunk, img, halt, nullptr);

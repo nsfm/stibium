@@ -144,13 +144,15 @@ hidden tags need the dot (`"[.gpu]"` not `"[gpu]"`).
 
 Port order from here:
 
-1. **Register spilling** (small, unblocks big models on GPU): adopt
-   Load/Store ops with LRU eviction from
+1. **Register spilling - NOW THE CRITICAL PATH** (Round 7 measured
+   it: the Zeiss renders bit-perfectly via STIBIUM_GPU=1 but takes
+   MINUTES vs the CPU's 3.1s at 512px, because its 877 slots make a
+   3.5KB per-thread array and occupancy collapses; the 106-slot
+   gear is fast).  Adopt Load/Store ops with LRU eviction from
    `fidget-core/src/compiler/alloc.rs` + `lru.rs` + `op.rs`
    (`Load(u8, u32)` / `Store(u8, u32)`).  Only needed for a bounded
-   register file - the CPU path keeps unbounded registers.  Merged
-   Zeiss needs 465 slots; the prototype's per-thread `regs[]` array
-   spills to local memory above ~128 and occupancy dies.
+   register file - the CPU path keeps unbounded registers.  Target
+   ~64-128 registers + a spill buffer in the tape blob.
 2. **Stage B - LANDED (2026-07-14, TAPE-DESIGN Round 6)**: interval
    classify + on-device tape simplify + shortened-tape march, one
    subdivision level, in tests/gpu.cpp (`[.gpu2]` referee - zero
