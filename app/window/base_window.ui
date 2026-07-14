@@ -93,6 +93,7 @@
     <addaction name="actionExportImage"/>
     <addaction name="separator"/>
     <addaction name="actionTurntable"/>
+    <addaction name="actionLightSweep"/>
     <addaction name="actionWiggle"/>
     <addaction name="actionStereo"/>
    </widget>
@@ -263,6 +264,11 @@
   <action name="actionTurntable">
    <property name="text">
     <string>Turntable GIF...</string>
+   </property>
+  </action>
+  <action name="actionLightSweep">
+   <property name="text">
+    <string>Light sweep GIF...</string>
    </property>
   </action>
   <action name="actionWiggle">

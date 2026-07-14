@@ -4,11 +4,15 @@
 #include <QFutureWatcher>
 #include <QtConcurrent>
 #include <QMessageBox>
+#include <QPainter>
+#include <QSplashScreen>
 #include <QStandardPaths>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileOpenEvent>
 #include <QJsonDocument>
+
+#include <memory>
 
 #include "app/app.h"
 #include "export/export_image.h"
@@ -402,6 +406,38 @@ void App::loadFile(QString f)
     // so it must be current before deserialization runs any scripts
     fab::setProjectDir(QFileInfo(f).absolutePath().toStdString());
 
+    // Big graphs take seconds to evaluate on load with no feedback;
+    // show a splash card for the duration (GUI sessions only)
+    std::unique_ptr<QSplashScreen> splash;
+    if (!headless)
+    {
+        QPixmap pm(440, 130);
+        pm.fill(QColor(28, 26, 24));
+        {
+            QPainter painter(&pm);
+            painter.setPen(QColor(228, 219, 205));
+            auto font = painter.font();
+            font.setPointSize(22);
+            font.setBold(true);
+            painter.setFont(font);
+            painter.drawText(QRect(0, 22, 440, 42), Qt::AlignCenter,
+                             "Stibium");
+            font.setPointSize(10);
+            font.setBold(false);
+            painter.setFont(font);
+            painter.setPen(QColor(160, 152, 140));
+            painter.drawText(QRect(0, 72, 440, 30), Qt::AlignCenter,
+                             "Loading " + QFileInfo(f).fileName() +
+                             "...");
+            painter.setPen(QColor(70, 64, 58));
+            painter.drawRect(0, 0, 439, 129);
+        }
+        splash.reset(new QSplashScreen(pm));
+        splash->show();
+        QCoreApplication::processEvents(
+                QEventLoop::ExcludeUserInputEvents);
+    }
+
     // Drop undo history before demolishing the graph: stale commands
     // hold pointers into the old nodes, and undoing across a load
     // would replay them into freed memory. (File > New always did
@@ -459,6 +495,9 @@ void App::loadFile(QString f)
         }
 
         proxy->setPositions(ds.frames);
+        // A freshly loaded file matches disk exactly: mark this the
+        // clean baseline so quitting doesn't prompt to save it.
+        undo_stack->setClean();
         emit(filenameChanged(filename));
         touchRecentFile(filename);
 

@@ -18,7 +18,11 @@ release; newest work at the top of each section.
   ZIP writer: no new dependencies), verified frame-exact against an
   external decoder. All three also live in the viewport's Render
   menu, rendered in the background with per-frame progress, spinning
-  the model about world z as seen from your current view angle.
+  the model about world z as seen from your current view angle. A
+  fourth, --lightsweep / Render > Light sweep, holds the model still
+  and circles the key light instead, so shadows tell the form. The
+  Render-menu animations get a size/frames/antialiasing dialog, and
+  the still image export gains an antialiasing control too.
 - **Check nodes: unit tests for geometry** (new Checks category).
   Check: Fits Box, Check: Volume, and Check: Clearance measure the
   actual field (grid integration; tight bounds accurate to a cell)
@@ -157,6 +161,16 @@ release; newest work at the top of each section.
   fixes, masking fixes). *(fork era)*
 
 ## UI
+
+- **Loading splash**: opening a large graph (hundreds of nodes takes
+  a few seconds to evaluate) now shows a splash card naming the file
+  instead of a frozen blank window.
+- **Ctrl-C from the launching terminal** runs the normal quit path,
+  including the unsaved-changes prompt, instead of killing the
+  process (self-pipe SIGINT handler into the Qt event loop; Python
+  is initialized without its own signal handlers so it can't reclaim
+  SIGINT). A freshly loaded file is marked clean, so quitting right
+  after opening never prompts.
 
 - **Analytics overlay**: Render ▸ Analytics overlay integrates the
   model and pins volume, center of mass (with an in-scene crosshair

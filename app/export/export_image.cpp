@@ -258,6 +258,13 @@ QImage renderShapesImage(const std::vector<Shape>& shapes, bool flat,
     // Key light: honor the user's configured direction (the same
     // one the viewport gizmo drags), falling back to the default
     float Lx = 0.33f, Ly = 0.32f, Lz = 0.89f;
+    if (opt.light_override)
+    {
+        Lx = opt.light[0];
+        Ly = opt.light[1];
+        Lz = opt.light[2];
+    }
+    else
     {
         const auto parts = Settings::get(
                 "render/key_light", "0.57,-0.57,0.57").toString().split(',');

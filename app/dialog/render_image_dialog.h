@@ -14,11 +14,13 @@ public:
     explicit RenderImageDialog(bool section_active, QWidget* parent=0);
 
     int imageSize() const;
+    int antialias() const;
     bool transparentBackground() const;
     bool applySection() const;
 
 protected:
     QSpinBox* size_box;
+    QSpinBox* aa_box;
     QCheckBox* transparent_box;
     QCheckBox* section_box;
 };

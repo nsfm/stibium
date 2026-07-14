@@ -8,6 +8,7 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QProgressDialog>
+#include <QSocketNotifier>
 #include <QSurfaceFormat>
 #include <QStringList>
 #include <QMessageBox>
@@ -45,6 +46,7 @@
 #include <QJsonObject>
 #include <QMatrix4x4>
 
+#include <cmath>
 #include <cstring>
 #include <memory>
 
@@ -389,7 +391,8 @@ static int diffHeadless(App& app, const QString& other_file,
  */
 static int animationHeadless(App& app, const QString& turntable,
                              const QString& wiggle,
-                             const QString& stereo, int frames,
+                             const QString& stereo,
+                             const QString& lightsweep, int frames,
                              float resolution, int size, int aa,
                              const QString& view)
 {
@@ -405,7 +408,7 @@ static int animationHeadless(App& app, const QString& turntable,
         return 1;
     }
 
-    const auto frame = [&](float yaw, QString* e) {
+    const auto frame = [&](float yaw, float light_az, QString* e) {
         ImageExport::Options opt;
         if (view == "front")
             opt.M.rotate(-90, 1, 0, 0);
@@ -417,14 +420,25 @@ static int animationHeadless(App& app, const QString& turntable,
         opt.supersample = aa;
         opt.fit_sphere = true;      // stable framing across the sweep
         opt.transparent = false;    // GIF alpha is binary; use theme
+        if (light_az == light_az)   // NaN = keep configured light
+        {
+            // Key light circles the model at ~35 degrees elevation
+            const float el = 0.6f;
+            opt.light_override = true;
+            opt.light[0] = cosf(light_az) * cosf(el);
+            opt.light[1] = sinf(light_az) * cosf(el);
+            opt.light[2] = sinf(el);
+        }
         return ImageExport::renderShapesImage(s3, false, opt, e);
     };
+    const float KEEP_LIGHT = NAN;
 
     if (!stereo.isEmpty())
     {
         // Parallel-view pair (cross-eyed viewers: swap panels)
-        QImage L = frame(2.5f, &err);
-        QImage R = err.isEmpty() ? frame(-2.5f, &err) : QImage();
+        QImage L = frame(2.5f, KEEP_LIGHT, &err);
+        QImage R = err.isEmpty() ? frame(-2.5f, KEEP_LIGHT, &err)
+                                 : QImage();
         if (!err.isEmpty())
         {
             fprintf(stderr, "stereo: %s\n",
@@ -452,8 +466,8 @@ static int animationHeadless(App& app, const QString& turntable,
 
     if (!wiggle.isEmpty())
     {
-        QImage a = frame(-3, &err);
-        QImage b = err.isEmpty() ? frame(3, &err) : QImage();
+        QImage a = frame(-3, KEEP_LIGHT, &err);
+        QImage b = err.isEmpty() ? frame(3, KEEP_LIGHT, &err) : QImage();
         if (err.isEmpty() &&
             !save_gif({a, b}, {12, 12}, wiggle))
             err = "could not write '" + wiggle + "'";
@@ -465,6 +479,31 @@ static int animationHeadless(App& app, const QString& turntable,
         }
     }
 
+    if (!lightsweep.isEmpty())
+    {
+        const int n = frames < 4 ? 36 : frames;
+        const int delay = std::max(2, 400 / n);
+        QList<QImage> seq;
+        for (int i = 0; i < n; ++i)
+        {
+            seq.append(frame(0, 6.2831853f * i / n, &err));
+            if (!err.isEmpty())
+            {
+                fprintf(stderr, "lightsweep: %s\n",
+                        err.toLocal8Bit().constData());
+                return 1;
+            }
+            fprintf(stderr, "\rlightsweep: frame %d/%d", i + 1, n);
+        }
+        fprintf(stderr, "\n");
+        if (!save_gif(seq, {delay}, lightsweep))
+        {
+            fprintf(stderr, "lightsweep: could not write '%s'\n",
+                    lightsweep.toLocal8Bit().constData());
+            return 1;
+        }
+    }
+
     if (!turntable.isEmpty())
     {
         const int n = frames < 4 ? 36 : frames;
@@ -472,7 +511,7 @@ static int animationHeadless(App& app, const QString& turntable,
         QList<QImage> seq;
         for (int i = 0; i < n; ++i)
         {
-            seq.append(frame(360.f * i / n, &err));
+            seq.append(frame(360.f * i / n, KEEP_LIGHT, &err));
             if (!err.isEmpty())
             {
                 fprintf(stderr, "turntable: %s\n",
@@ -569,6 +608,27 @@ static void guiLongOpHook(const char* label, uint64_t done, uint64_t total)
     QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 }
 
+#ifndef Q_OS_WIN
+#include <csignal>
+#include <sys/socket.h>
+#include <unistd.h>
+
+/*
+ *  Ctrl-C from the launching terminal should run the normal quit
+ *  path (save prompt included), not kill the process.  Signal
+ *  handlers can't touch Qt, so the handler writes one byte to a
+ *  socketpair and a QSocketNotifier picks it up on the event loop.
+ */
+static int sigint_fds[2] = {-1, -1};
+
+static void sigintHandler(int)
+{
+    const char byte = 1;
+    const auto r = ::write(sigint_fds[0], &byte, 1);
+    (void)r;
+}
+#endif
+
 int main(int argc, char *argv[])
 {
     {   // Set the default OpenGL version to be 2.1 with sample buffers
@@ -587,7 +647,7 @@ int main(int argc, char *argv[])
             arg == "--analyze" || arg == "--describe-nodes" ||
             arg == "--import-vm" || arg == "--diff" ||
             arg == "--turntable" || arg == "--wiggle" ||
-            arg == "--stereo")
+            arg == "--stereo" || arg == "--lightsweep")
         {
             if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM"))
                 qputenv("QT_QPA_PLATFORM", "offscreen");
@@ -602,7 +662,11 @@ int main(int argc, char *argv[])
     fab::preInit();
     Graph::preInit();
     AppHooks::preInit();
-    Py_Initialize();
+    // Pass 0 so CPython does NOT install its own signal handlers:
+    // we want SIGINT to run the app's quit path (save prompt), and
+    // reactive script evaluation would otherwise let Python reclaim
+    // the handler after ours is set.
+    Py_InitializeEx(0);
 
     // Set locale to C to make atof correctly parse floats
     setlocale(LC_NUMERIC, "C");
@@ -735,6 +799,10 @@ int main(int argc, char *argv[])
                 "Render a side-by-side parallel-view stereo pair to "
                 "FILE", "FILE");
         parser.addOption(stereoOpt);
+        QCommandLineOption lightsweepOpt("lightsweep",
+                "Render a GIF where the key light circles the still "
+                "model (shadow study) to FILE", "FILE");
+        parser.addOption(lightsweepOpt);
         QCommandLineOption framesOpt("frames",
                 "Frame count for --turntable (default 36)", "N", "36");
         parser.addOption(framesOpt);
@@ -769,7 +837,8 @@ int main(int argc, char *argv[])
                               parser.isSet(diffOpt) ||
                               parser.isSet(turntableOpt) ||
                               parser.isSet(wiggleOpt) ||
-                              parser.isSet(stereoOpt);
+                              parser.isSet(stereoOpt) ||
+                              parser.isSet(lightsweepOpt);
 
         auto args = parser.positionalArguments();
         // GUI sessions get a progress dialog for long script-eval
@@ -825,10 +894,11 @@ int main(int argc, char *argv[])
                                     aa);
 
             if (parser.isSet(turntableOpt) || parser.isSet(wiggleOpt) ||
-                parser.isSet(stereoOpt))
+                parser.isSet(stereoOpt) || parser.isSet(lightsweepOpt))
                 return animationHeadless(app, parser.value(turntableOpt),
                                          parser.value(wiggleOpt),
                                          parser.value(stereoOpt),
+                                         parser.value(lightsweepOpt),
                                          parser.value(framesOpt).toInt(),
                                          res,
                                          parser.value(sizeOpt).toInt(),
@@ -852,6 +922,24 @@ int main(int argc, char *argv[])
             return code;
         }
     }
+
+#ifndef Q_OS_WIN
+    if (::socketpair(AF_UNIX, SOCK_STREAM, 0, sigint_fds) == 0)
+    {
+        auto notifier = new QSocketNotifier(sigint_fds[1],
+                                            QSocketNotifier::Read, &app);
+        QObject::connect(notifier, &QSocketNotifier::activated, &app,
+                [&app](QSocketDescriptor, QSocketNotifier::Type){
+                    char byte;
+                    const auto r = ::read(sigint_fds[1], &byte, 1);
+                    (void)r;
+                    app.onQuit();
+                });
+        struct sigaction sa = {};
+        sa.sa_handler = sigintHandler;
+        ::sigaction(SIGINT, &sa, NULL);
+    }
+#endif
 
     app.makeDefaultWindows();
     return app.exec();

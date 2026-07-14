@@ -77,6 +77,7 @@ set(SRC_FILES
     dialog/exporting.cpp
     dialog/resolution.cpp
     dialog/render_image_dialog.cpp
+    dialog/animation_dialog.cpp
     export/export_mesh.cpp
     export/export_heightmap.cpp
     export/export_svg.cpp

@@ -16,11 +16,13 @@
 #include <QtConcurrent>
 
 #include <atomic>
+#include <cmath>
 #include <memory>
 
 #include "export/export_image.h"
 #include "export/gif_writer.h"
 #include "dialog/exporting.h"
+#include "dialog/animation_dialog.h"
 #include "dialog/render_image_dialog.h"
 
 #include "window/base_viewport_window.h"
@@ -112,6 +114,7 @@ BaseViewportWindow::BaseViewportWindow(QList<ViewportView*> views)
         opt.M = view->getMatrix(ViewportView::ROT);
         opt.section = dialog.applySection() ? view->getSection() : 1;
         opt.fit_px = dialog.imageSize();
+        opt.supersample = dialog.antialias();
         opt.transparent = dialog.transparentBackground();
         opt.filename = filename.endsWith(".png", Qt::CaseInsensitive)
                 ? filename : filename + ".png";
@@ -161,15 +164,17 @@ BaseViewportWindow::BaseViewportWindow(QList<ViewportView*> views)
             return;
         }
 
-        int frames = 36;
-        if (kind == "turntable")
-        {
-            bool ok = true;
-            frames = QInputDialog::getInt(this, "Turntable",
-                    "Frames per revolution:", 36, 4, 360, 1, &ok);
-            if (!ok)
-                return;
-        }
+        const bool sweep = kind == "turntable" || kind == "lightsweep";
+        AnimationDialog dialog(
+                kind == "turntable" ? "Turntable"
+                : kind == "lightsweep" ? "Light sweep"
+                : kind == "wiggle" ? "Wigglegram" : "Stereo pair",
+                sweep, this);
+        if (!dialog.exec())
+            return;
+        const int frames = dialog.frameCount();
+        const int img_size = dialog.imageSize();
+        const int aa = dialog.antialias();
 
         const bool gif = kind != "stereo";
         const QString filename = QFileDialog::getSaveFileName(
@@ -186,31 +191,43 @@ BaseViewportWindow::BaseViewportWindow(QList<ViewportView*> views)
 
         // Spin the model about world z, seen from the current view
         const QMatrix4x4 base = view->getMatrix(ViewportView::ROT);
-        const auto frame_opt = [base](float yaw) {
+        const auto frame_opt = [base, img_size, aa](float yaw,
+                                                    float light_az) {
             ImageExport::Options opt;
             opt.M = base;
             opt.M.rotate(yaw, 0, 0, 1);
+            opt.fit_px = img_size;
+            opt.supersample = aa;
             opt.fit_sphere = true;
             opt.transparent = false;
+            if (light_az == light_az)   // NaN = configured light
+            {
+                const float el = 0.6f;  // ~35 degrees elevation
+                opt.light_override = true;
+                opt.light[0] = cosf(light_az) * cosf(el);
+                opt.light[1] = sinf(light_az) * cosf(el);
+                opt.light[2] = sinf(el);
+            }
             return opt;
         };
+        const float KEEP = NAN;
 
         auto exporting = new ExportingDialog(this);
         exporting->setStatus(kind == "stereo" ? "Rendering stereo pair..."
                                               : "Rendering frames...");
         auto done = std::make_shared<std::atomic<int>>(0);
-        const int total = kind == "turntable" ? frames : 2;
+        const int total = sweep ? frames : 2;
 
         auto future = QtConcurrent::run([=]() -> QString {
             QString err;
             if (kind == "stereo")
             {
                 const QImage L = ImageExport::renderShapesImage(
-                        s3, false, frame_opt(2.5f), &err);
+                        s3, false, frame_opt(2.5f, KEEP), &err);
                 done->store(1);
                 const QImage R = err.isEmpty()
                     ? ImageExport::renderShapesImage(
-                            s3, false, frame_opt(-2.5f), &err)
+                            s3, false, frame_opt(-2.5f, KEEP), &err)
                     : QImage();
                 if (!err.isEmpty())
                     return err;
@@ -237,7 +254,7 @@ BaseViewportWindow::BaseViewportWindow(QList<ViewportView*> views)
                 for (const float yaw : {-3.f, 3.f})
                 {
                     seq.append(ImageExport::renderShapesImage(
-                            s3, false, frame_opt(yaw), &err));
+                            s3, false, frame_opt(yaw, KEEP), &err));
                     if (!err.isEmpty())
                         return err;
                     done->fetch_add(1);
@@ -246,10 +263,15 @@ BaseViewportWindow::BaseViewportWindow(QList<ViewportView*> views)
             }
             else
             {
+                const auto sweep_opt = [&](int i) {
+                    return kind == "lightsweep"
+                        ? frame_opt(0, 6.2831853f * i / frames)
+                        : frame_opt(360.f * i / frames, KEEP);
+                };
                 for (int i = 0; i < frames; ++i)
                 {
                     seq.append(ImageExport::renderShapesImage(
-                            s3, false, frame_opt(360.f * i / frames),
+                            s3, false, sweep_opt(i),
                             &err));
                     if (!err.isEmpty())
                         return err;
@@ -281,6 +303,8 @@ BaseViewportWindow::BaseViewportWindow(QList<ViewportView*> views)
     };
     connect(ui->actionTurntable, &QAction::triggered, this,
             [=]{ animate("turntable"); });
+    connect(ui->actionLightSweep, &QAction::triggered, this,
+            [=]{ animate("lightsweep"); });
     connect(ui->actionWiggle, &QAction::triggered, this,
             [=]{ animate("wiggle"); });
     connect(ui->actionStereo, &QAction::triggered, this,
