@@ -45,32 +45,43 @@ Numbers to beat (8c/16t):
 | merged Zeiss --export r7, full scale | ~310 s / 14.4 GB peak |
 | gear.sb --export r60 detect | ~2.25 s (same-machine A/B; old "1.6" was measured differently) |
 
-## 1. Mesher batching (biggest CPU win on the board)
+## 1. Mesher: batching measured FLAT, dedup cache landed (2026-07-14)
 
-The mesher still classifies octants one scalar `tape_eval_i` at a
-time (`Mesher::triangulate_region(const Region&, Tape*)`,
-triangulate/mesher.cpp).  Exports are the heavy workload; give the
-recursion the same treatment the renderer got:
+**Octant batching was built, measured, and reverted.**  The spec'd
+batch-classify (8 octants per `tape_eval_i_batch` in
+`triangulate_region`, exact-parity skips, progress mirrored) was
+bit-identical and wall-neutral: gear 2.2 s → 2.2 s, quarter Zeiss
+18.0 → 18.1.  Why it can't win what the renderer won: the mesher
+recursion tracks the surface, so most children of any recursed
+region are ambiguous — they still need their own scalar eval_i for
+the push, and the batch pass just duplicates classification.  The
+renderer won because view tiles skip in huge swaths.  Don't rebuild
+this without new evidence.
 
-- Above the packed-block threshold (`!has_data` and
-  `voxels >= MIN_VOLUME * 2`, mirroring render.c), split into up to
-  `TAPE_BATCH` children (`split()` from region.h, like render.c) and
-  `tape_eval_i_batch` them on the CURRENT tape.  Children proven
-  empty/full are skipped wholesale; ambiguous children recurse into
-  the existing scalar eval_i + push path (which keeps ClauseIv
-  coherent for the push - do NOT try to push straight off batch
-  results).
-- **Gotchas:** (a) progress accounting - skipped children must
-  `progress->fetch_add(child.voxels)` exactly like the scalar skip
-  branch, or the export progress bar lies; (b) keep the `has_data`
-  guard - never fan out or push inside a packed block; (c) the skip
-  test is `lower > 0 || upper < 0` (note: mesher skips FULL regions
-  too, unlike the renderer - copy the existing condition exactly);
-  (d) `load_packed` must still run on the tape that covers the block
-  (`block_tape` borrow feeds `eval_zero_crossings`/`get_normals`).
-- **Verify:** goldens bit-identical (batch bounds are exact ⇒ same
-  skips ⇒ same mesh), then bench gear r60 + quarter-scale merged +
-  (patience permitting) full-scale merged.
+**What the export profile actually said** (gdb-sampled, quarter
+Zeiss r7): ~30% `interpolate_between` (fixed, below), ~18% scalar
+eval_i (irreducible while pushes need ClauseIv), ~14% vertex-intern
+hashtable, visible `std::list<InterpolateCommand>` node churn, rest
+geometry/IO.  The export lever is the GEOMETRY pipeline, not
+evaluation.
+
+**Landed: interp dedup cache.**  `interpolate_between` walked the
+whole queue per edge with an Eigen compare (O(edges × queue)) —
+now an unordered_map keyed on the bit-packed vertex pair.  TRAP
+THAT BIT ONCE ALREADY: `Vec3f` is `Eigen::Vector3d` — doubles, 8
+bytes; packing 4-byte words collides and corrupts fan topology
+(check_feature spins forever).  Semantics mirrored exactly: -0
+normalized to +0, canonical pair order, NaN never enters.
+`INTERP_CACHE_DIFF` (compile-time define in mesher.cpp) re-arms a
+differential harness that runs old walk + new cache side by side
+and aborts on divergence — full suite ran clean under it.
+gear r60 detect 2.25 → 2.05 s, quarter Zeiss r7 18.0 → 15.7 s.
+
+**Remaining export candidates, by profile share:** vertex-intern
+hash (~14%; FNV + std::unordered_map — try a flat open-addressing
+table), `std::list` queue → vector (node allocs visible),
+`check_feature`/`get_contour` Eigen-double geometry (Vector3d
+throughout the fan logic — precision audit before touching).
 
 ## 2. Per-tile work queue in render_mt
 
