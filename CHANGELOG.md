@@ -164,7 +164,14 @@ release; newest work at the top of each section.
 
 - **Loading splash**: opening a large graph (hundreds of nodes takes
   a few seconds to evaluate) now shows a splash card naming the file
-  instead of a frozen blank window.
+  instead of a frozen blank window. Shown from startup and forced to
+  paint before the blocking load begins, so it's visible for the whole
+  wait rather than flashing once at the end.
+- **Fixed a crash on File > New (and graph clear) after loading a
+  file**: the per-node canvas inspector cards were only deferred-
+  deleted when their nodes were freed, so a repaint in the gap
+  dereferenced a dead node. They are now hidden synchronously the
+  moment their node goes away.
 - **Ctrl-C from the launching terminal** runs the normal quit path,
   including the unsaved-changes prompt, instead of killing the
   process (self-pipe SIGINT handler into the Qt event loop; Python
