@@ -30,10 +30,28 @@ struct Options
 
 /*
  *  Renders the graph's terminal shapes (what the viewport shows) to
- *  an image, shaded, with no GL and no display needed.
+ *  an image, shaded, with no GL and no display needed.  Each shape
+ *  renders separately and composites by depth, so per-shape colors
+ *  (set_color) survive into the image.
  *  Returns an empty string on success, else an error message.
  */
 QString render(Graph* graph, const Options& opt);
+
+/*
+ *  Renders an explicit list of shapes (all 3D or all 2D, flagged by
+ *  flat) with the same compositing pipeline; used by --diff.
+ */
+QString renderShapes(const std::vector<Shape>& shapes, bool flat,
+                     const Options& opt);
+
+/*
+ *  Collects the graph's renderable shapes (terminal outputs only,
+ *  unless node_name selects one node), 3D and 2D separately, without
+ *  unioning them.  Returns an error message, or empty on success.
+ */
+QString collectShapeList(Graph* graph, const QString& node_name,
+                         std::vector<Shape>& shapes3d,
+                         std::vector<Shape>& shapes2d);
 
 /*
  *  Unions the graph's renderable shapes, 3D and 2D separately

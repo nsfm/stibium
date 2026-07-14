@@ -29,15 +29,13 @@
 namespace ImageExport
 {
 
-QString collectShapes(Graph* graph, const QString& node_name,
-                      std::unique_ptr<Shape>& u3d,
-                      std::unique_ptr<Shape>& u2d)
+QString collectShapeList(Graph* graph, const QString& node_name,
+                         std::vector<Shape>& shapes3d,
+                         std::vector<Shape>& shapes2d)
 {
-
-
-    // Union the file's Shape outputs, 3D and 2D separately: when 3D
+    // Gather the file's Shape outputs, 3D and 2D separately: when 3D
     // geometry exists, 2D shapes are construction profiles and are
-    // left out of the thumbnail rather than flattening it.
+    // left out of the render rather than flattening it.
     const std::string want = node_name.toStdString();
     bool node_found = false;
     for (auto n : graph->childNodes())
@@ -64,9 +62,10 @@ QString collectShapes(Graph* graph, const QString& node_name,
             if (std::isinf(s.bounds.xmin) || std::isinf(s.bounds.xmax) ||
                 std::isinf(s.bounds.ymin) || std::isinf(s.bounds.ymax))
                 continue;
-            auto& u = (std::isinf(s.bounds.zmin) ||
-                       std::isinf(s.bounds.zmax)) ? u2d : u3d;
-            u.reset(u ? new Shape(*u | s) : new Shape(s));
+            auto& list = (std::isinf(s.bounds.zmin) ||
+                          std::isinf(s.bounds.zmax)) ? shapes2d
+                                                     : shapes3d;
+            list.push_back(s);
         }
     }
 
@@ -76,30 +75,60 @@ QString collectShapes(Graph* graph, const QString& node_name,
     return QString();
 }
 
-QString render(Graph* graph, const Options& opt)
+QString collectShapes(Graph* graph, const QString& node_name,
+                      std::unique_ptr<Shape>& u3d,
+                      std::unique_ptr<Shape>& u2d)
 {
-    std::unique_ptr<Shape> u3d, u2d;
-    const QString err = collectShapes(graph, opt.node_name, u3d, u2d);
+    std::vector<Shape> shapes3d, shapes2d;
+    const QString err = collectShapeList(graph, node_name,
+                                         shapes3d, shapes2d);
     if (!err.isEmpty())
         return err;
+    for (const auto& s : shapes3d)
+        u3d.reset(u3d ? new Shape(*u3d | s) : new Shape(s));
+    for (const auto& s : shapes2d)
+        u2d.reset(u2d ? new Shape(*u2d | s) : new Shape(s));
+    return QString();
+}
 
-    const bool flat = !u3d;
-    const std::unique_ptr<Shape>& total = flat ? u2d : u3d;
-    if (!total)
-        return "no renderable shapes";
-    const Bounds b = total->bounds;
-
+QString renderShapes(const std::vector<Shape>& shapes, bool flat,
+                     const Options& opt)
+{
     // 2D content always renders top-down
     QMatrix4x4 M;
     if (!flat)
         M = opt.M;
+    const Transform view = RenderTask::getTransform(M);
 
-    Shape src = flat
-        ? Shape(total->math, Bounds(b.xmin, b.ymin, 0,
-                                    b.xmax, b.ymax, 0.0001f))
-        : *total;
-    Shape transformed = src.map(RenderTask::getTransform(M));
-    const Bounds tb = transformed.bounds;
+    // Transform each shape into view space, carrying its color, and
+    // accumulate the view-space bounding box
+    std::vector<Shape> ts;
+    Bounds tb(INFINITY, INFINITY, INFINITY,
+              -INFINITY, -INFINITY, -INFINITY);
+    for (const auto& s : shapes)
+    {
+        if (s.bounds.xmin > s.bounds.xmax ||
+            s.bounds.ymin > s.bounds.ymax)
+            continue;       // empty (e.g. a diff layer with no volume)
+
+        const Shape src = flat
+            ? Shape(s.math, Bounds(s.bounds.xmin, s.bounds.ymin, 0,
+                                   s.bounds.xmax, s.bounds.ymax,
+                                   0.0001f))
+            : s;
+        Shape t = src.map(view);
+        t.r = s.r;  t.g = s.g;  t.b = s.b;    // map() drops color
+
+        tb = Bounds(fmin(tb.xmin, t.bounds.xmin),
+                    fmin(tb.ymin, t.bounds.ymin),
+                    fmin(tb.zmin, t.bounds.zmin),
+                    fmax(tb.xmax, t.bounds.xmax),
+                    fmax(tb.ymax, t.bounds.ymax),
+                    fmax(tb.zmax, t.bounds.zmax));
+        ts.push_back(t);
+    }
+    if (ts.empty())
+        return "no renderable shapes";
 
     float res = opt.resolution;
     if (res <= 0)
@@ -118,42 +147,71 @@ QString render(Graph* graph, const Options& opt)
     build_arrays(&r, tb.xmin, tb.ymin, tb.zmin, tb.xmax, tb.ymax, tzmax);
 
     const int W = r.ni, H = r.nj;
-    std::vector<uint16_t> d16(size_t(W) * H, 0);
-    std::vector<uint16_t*> d16_rows(H);
-    auto s8 = new uint8_t[size_t(W) * H][3];
-    memset(s8, 0, size_t(W) * H * 3);
-    auto s8_rows = new decltype(s8)[H];
+    const size_t px_count = size_t(W) * H;
+
+    // Master buffers: nearest depth wins, carrying its normal + color
+    std::vector<uint16_t> d16(px_count, 0);
+    std::vector<uint8_t> n8(px_count * 3, 0);
+    std::vector<uint8_t> c8(px_count * 3, 0);
+
+    // Scratch buffers, reused per shape
+    std::vector<uint16_t> sd16(px_count);
+    std::vector<uint16_t*> sd16_rows(H);
+    auto ss8 = new uint8_t[px_count][3];
+    auto ss8_rows = new decltype(ss8)[H];
     for (int i = 0; i < H; ++i)
     {
-        d16_rows[i] = &d16[size_t(W) * i];
-        s8_rows[i] = &s8[size_t(W) * i];
+        sd16_rows[i] = &sd16[size_t(W) * i];
+        ss8_rows[i] = &ss8[size_t(W) * i];
     }
 
+    const uint8_t warm[3] = {228, 219, 205};        // default material
     volatile int halt = 0;
-    render16_mt(transformed.tree.get(), r, d16_rows.data(), &halt);
-    if (flat)
+    for (const auto& t : ts)
     {
-        // 2D fields have no meaningful z gradient; fill with a
-        // straight-on normal (the viewport does the same)
-        for (int j = 0; j < H; ++j)
-            for (int i = 0; i < W; ++i)
-                if (d16_rows[j][i])
+        memset(sd16.data(), 0, px_count * sizeof(uint16_t));
+        memset(ss8, 0, px_count * 3);
+
+        render16_mt(t.tree.get(), r, sd16_rows.data(), &halt);
+        if (flat)
+        {
+            // 2D fields have no meaningful z gradient; fill with a
+            // straight-on normal (the viewport does the same)
+            for (size_t p = 0; p < px_count; ++p)
+                if (sd16[p])
                 {
-                    s8_rows[j][i][0] = 128;
-                    s8_rows[j][i][1] = 128;
-                    s8_rows[j][i][2] = 255;
+                    ss8[p][0] = 128;
+                    ss8[p][1] = 128;
+                    ss8[p][2] = 255;
                 }
-    }
-    else
-    {
-        shaded8_mt(transformed.tree.get(), r, d16_rows.data(), s8_rows,
-                   &halt);
+        }
+        else
+        {
+            shaded8_mt(t.tree.get(), r, sd16_rows.data(), ss8_rows,
+                       &halt);
+        }
+
+        const uint8_t rgb[3] = {
+            uint8_t(t.r >= 0 ? t.r : warm[0]),
+            uint8_t(t.g >= 0 ? t.g : warm[1]),
+            uint8_t(t.b >= 0 ? t.b : warm[2])};
+        for (size_t p = 0; p < px_count; ++p)
+        {
+            if (sd16[p] > d16[p])
+            {
+                d16[p] = sd16[p];
+                memcpy(&n8[p * 3], ss8[p], 3);
+                memcpy(&c8[p * 3], rgb, 3);
+            }
+        }
     }
     free_arrays(&r);
+    delete [] ss8;
+    delete [] ss8_rows;
 
     // Compose an ARGB image: decode the packed normals (n*127+128)
-    // and light them (key + ambient, warm material) where depth
-    // exists; transparent elsewhere.  Flip vertically (rows are y-up).
+    // and light them (key + ambient) with each pixel's material
+    // color; transparent elsewhere.  Flip vertically (rows are y-up).
     // Key light: honor the user's configured direction (the same
     // one the viewport gizmo drags), falling back to the default
     float Lx = 0.33f, Ly = 0.32f, Lz = 0.89f;
@@ -172,27 +230,24 @@ QString render(Graph* graph, const Options& opt)
             Lz = l.z();
         }
     }
-    const float base[3] = {228, 219, 205};            // warm gray
     QImage img(W, H, QImage::Format_ARGB32);
     img.fill(opt.transparent ? QColor(0, 0, 0, 0) : QColor(28, 26, 24));
     for (int j = 0; j < H; ++j)
         for (int i = 0; i < W; ++i)
-            if (d16_rows[j][i])
-            {
-                const auto& px = s8_rows[j][i];
-                const float nx = (px[0] - 128) / 127.f;
-                const float ny = (px[1] - 128) / 127.f;
-                const float nz = (px[2] - 128) / 127.f;
-                const float diff = fmax(0.f, nx*Lx + ny*Ly + nz*Lz);
-                const float lum = 0.32f + 0.68f * diff;
-                img.setPixel(i, H - 1 - j, qRgba(
-                    int(fmin(255.f, base[0] * lum)),
-                    int(fmin(255.f, base[1] * lum)),
-                    int(fmin(255.f, base[2] * lum)), 255));
-            }
-
-    delete [] s8;
-    delete [] s8_rows;
+        {
+            const size_t p = size_t(W) * j + i;
+            if (!d16[p])
+                continue;
+            const float nx = (n8[p*3 + 0] - 128) / 127.f;
+            const float ny = (n8[p*3 + 1] - 128) / 127.f;
+            const float nz = (n8[p*3 + 2] - 128) / 127.f;
+            const float diff = fmax(0.f, nx*Lx + ny*Ly + nz*Lz);
+            const float lum = 0.32f + 0.68f * diff;
+            img.setPixel(i, H - 1 - j, qRgba(
+                int(fmin(255.f, c8[p*3 + 0] * lum)),
+                int(fmin(255.f, c8[p*3 + 1] * lum)),
+                int(fmin(255.f, c8[p*3 + 2] * lum)), 255));
+        }
 
     // Fall back to PNG when the filename has no recognized suffix
     // (freedesktop thumbnailers pass bare temp paths)
@@ -200,6 +255,18 @@ QString render(Graph* graph, const Options& opt)
         return "could not write " + opt.filename;
 
     return QString();
+}
+
+QString render(Graph* graph, const Options& opt)
+{
+    std::vector<Shape> shapes3d, shapes2d;
+    const QString err = collectShapeList(graph, opt.node_name,
+                                         shapes3d, shapes2d);
+    if (!err.isEmpty())
+        return err;
+
+    const bool flat = shapes3d.empty();
+    return renderShapes(flat ? shapes2d : shapes3d, flat, opt);
 }
 
 }  // namespace ImageExport

@@ -6,6 +6,17 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **Geometric diff** (`stibium a.sb --diff b.sb [--render out.png]`):
+  set algebra on the distance fields splits two models into
+  unchanged / removed / added regions - printed as integrated
+  volumes (JSON, with an exact-identity shortcut) and optionally
+  rendered as a composite (gray / red / green). Meshes can't diff
+  geometry cheaply; fields literally subtract. Review a CAD change
+  like a code change.
+- **Per-shape color in rendered images**: `--render` and the image
+  export now render each terminal shape separately and composite by
+  depth, so `set_color` colors survive into thumbnails and exports
+  (previously everything flattened into one warm-gray union).
 - **Fidget `.vm` import** (`stibium model.vm --import-vm out.sb`):
   translates math tapes from Matt Keeter's successor project
   (github.com/mkeeter/fidget) into Stibium projects - one frozen
