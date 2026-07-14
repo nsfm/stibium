@@ -97,11 +97,11 @@ Import Mesh node / OP_GRID engine; see CHANGELOG. 🎉)
 
 ## Tier 2.5 — adopted from dreaming mode (concrete, just not scheduled)
 
-- **Geometric diff (`--diff a.sb b.sb → image`).** Render |f_a - f_b|
-  (or sign changes) as a heatmap: exactly which regions changed
-  between two versions of a model. Meshes can't diff geometry
-  cheaply; fields literally subtract. Git-native CAD review, and an
-  agent's proof that an edit changed only what it claimed.
+- ~~**Geometric diff**~~ SHIPPED 2026-07-13 (`--diff` verb: JSON
+  volumes + gray/red/green composite render; per-shape color
+  compositing fixed along the way). Future: sub-surface heatmap of
+  |f_a - f_b| magnitude, and a `--diff` exit-code mode for CI gates
+  ("fail if anything outside this region changed").
 - **Assertion nodes — unit tests for geometry.** In-graph checks
   ("min wall ≥ 0.8", "fits in 200³", "clearance to s0.shape ≥ 0.2")
   that go red in the canvas and fail `--validate` headlessly. The
