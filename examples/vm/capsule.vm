@@ -1,0 +1,26 @@
+# A 3D capsule along x: sphere-swept segment, plus a boxy bite
+x var-x
+y var-y
+z var-z
+half const 0.6
+xc min x half
+nh const -0.6
+xc2 max xc nh
+dx sub x xc2
+dx2 square dx
+y2 square y
+z2 square z
+rr add dx2 y2
+rr2 add rr z2
+len sqrt rr2
+rad const 0.4
+cap sub len rad
+bx abs x
+bxc sub bx half
+by abs y
+byc sub by half
+bz sub z half
+bmax max bxc byc
+box max bmax bz
+nbox neg box
+out max cap nbox

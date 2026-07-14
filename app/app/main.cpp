@@ -13,6 +13,7 @@
 #include <QMessageBox>
 
 #include "app/app.h"
+#include "app/vm_import.h"
 #include "graph/hooks/hooks.h"
 
 #include "fab/fab.h"
@@ -356,7 +357,8 @@ int main(int argc, char *argv[])
         const QByteArray arg(argv[i]);
         if (arg == "--export" || arg == "--validate" ||
             arg == "--render" || arg == "--resave" ||
-            arg == "--analyze" || arg == "--describe-nodes")
+            arg == "--analyze" || arg == "--describe-nodes" ||
+            arg == "--import-vm")
         {
             if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM"))
                 qputenv("QT_QPA_PLATFORM", "offscreen");
@@ -488,6 +490,11 @@ int main(int argc, char *argv[])
                 "current protocol (batch migration / canonicalizing), "
                 "then exit", "FILE");
         parser.addOption(resaveOpt);
+        QCommandLineOption importVmOpt("import-vm",
+                "Translate a Fidget .vm math tape (given as the "
+                "positional argument) into FILE as a Stibium project, "
+                "then exit", "FILE");
+        parser.addOption(importVmOpt);
         QCommandLineOption validateOpt("validate",
                 "Load the file, report script and datum errors to "
                 "stderr, and exit (0 = valid)");
@@ -503,7 +510,8 @@ int main(int argc, char *argv[])
                               parser.isSet(renderOpt) ||
                               parser.isSet(resaveOpt) ||
                               parser.isSet(analyzeOpt) ||
-                              parser.isSet(validateOpt);
+                              parser.isSet(validateOpt) ||
+                              parser.isSet(importVmOpt);
 
         auto args = parser.positionalArguments();
         // GUI sessions get a progress dialog for long script-eval
@@ -523,7 +531,21 @@ int main(int argc, char *argv[])
                     "--export/--render/--validate require a file\n");
             exit(1);
         }
-        else if (args.length() == 1)
+        // .vm import never loads the positional as a project: it IS
+        // the tape to translate
+        if (parser.isSet(importVmOpt))
+        {
+            if (args.length() != 1)
+            {
+                fprintf(stderr, "--import-vm needs the input .vm as "
+                                "the file argument\n");
+                return 1;
+            }
+            return importVmHeadless(args[0],
+                                    parser.value(importVmOpt));
+        }
+
+        if (args.length() == 1)
         {
             app.setHeadless(headless);
             app.loadFile(args[0]);

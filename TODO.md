@@ -506,6 +506,8 @@ MPR-style GPU renderer (L). Marquee (L): adaptive manifold DC mesher
 
 ## Foreign project import (2026-07-13) — see doc/FOREIGN-IMPORT.md
 
+[Tier A SHIPPED 2026-07-13: --import-vm converts Fidget tapes,
+deterministic + in CI; prospero renders. Remaining below.]
 Yes: libfive/Fidget projects can become .sb files. Fidget .vm is a
 flat tape that maps onto our math strings with 100% op coverage on
 every shipped model (measured: worst string 74 KB, worst parse depth
