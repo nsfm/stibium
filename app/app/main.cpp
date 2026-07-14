@@ -639,6 +639,8 @@ int main(int argc, char *argv[])
 
     // Headless verbs run without a display: pick the offscreen
     // platform before Qt initializes (unless the user chose one)
+    bool headless_verb = false;
+    QString splash_file;
     for (int i = 1; i < argc; ++i)
     {
         const QByteArray arg(argv[i]);
@@ -651,12 +653,24 @@ int main(int argc, char *argv[])
         {
             if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM"))
                 qputenv("QT_QPA_PLATFORM", "offscreen");
-            break;
+            headless_verb = true;
+        }
+        else if (!arg.startsWith('-') && arg.endsWith(".sb"))
+        {
+            splash_file = QFileInfo(QString::fromLocal8Bit(arg))
+                    .fileName();
         }
     }
 
     // Create the Application object
     App app(argc, argv);
+
+    // Cold start is where the wait hurts: Python init, module load,
+    // and a big graph's first evaluation all happen before any window
+    // paints.  Raise the splash now, behind all of it.
+    if (!headless_verb)
+        app.showStartupSplash(splash_file.isEmpty()
+                ? "Starting..." : "Loading " + splash_file + "...");
 
     // Initialize various Python modules and the interpreter itself
     fab::preInit();
@@ -942,5 +956,17 @@ int main(int argc, char *argv[])
 #endif
 
     app.makeDefaultWindows();
+
+    // Dismiss the startup splash once a real window exists to hand
+    // off to (finish waits for it to paint, so there's no flash gap)
+    QWidget* first = nullptr;
+    for (auto* w : app.topLevelWidgets())
+        if (w->isWindow() && !w->windowTitle().isEmpty())
+        {
+            first = w;
+            break;
+        }
+    app.finishStartupSplash(first);
+
     return app.exec();
 }
