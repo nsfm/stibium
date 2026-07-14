@@ -26,6 +26,7 @@
 #include "graph/proxy/node.h"
 #include "export/export_worker.h"
 #include "export/export_image.h"
+#include "export/gif_writer.h"
 #include "graph/serialize/serializer.h"
 
 #include <QFile>
@@ -275,7 +276,8 @@ static int resaveHeadless(App& app, const QString& out)
  */
 static int diffHeadless(App& app, const QString& other_file,
                         const QString& render_file, float resolution,
-                        const QString& view, int size, float section)
+                        const QString& view, int size, float section,
+                        int aa)
 {
     std::unique_ptr<Shape> a3, a2;
     QString err = ImageExport::collectShapes(app.getGraph(), "", a3, a2);
@@ -364,6 +366,7 @@ static int diffHeadless(App& app, const QString& other_file,
         opt.section = section;
         opt.resolution = resolution;
         opt.fit_px = size;
+        opt.supersample = aa;
         opt.filename = render_file;
 
         err = ImageExport::renderShapes({unchanged, removed, added},
@@ -378,9 +381,120 @@ static int diffHeadless(App& app, const QString& other_file,
     return 0;
 }
 
+/*
+ *  Implements --turntable / --wiggle / --stereo: the model rendered
+ *  from a sweep of yaw angles with rotation-stable framing (the
+ *  circumsphere), assembled into an animated GIF or a side-by-side
+ *  stereo pair.
+ */
+static int animationHeadless(App& app, const QString& turntable,
+                             const QString& wiggle,
+                             const QString& stereo, int frames,
+                             float resolution, int size, int aa,
+                             const QString& view)
+{
+    std::vector<Shape> s3, s2;
+    QString err = ImageExport::collectShapeList(app.getGraph(), "",
+                                                s3, s2);
+    if (err.isEmpty() && s3.empty())
+        err = s2.empty() ? "no renderable shapes"
+                         : "2D models have no depth to animate";
+    if (!err.isEmpty())
+    {
+        fprintf(stderr, "animate: %s\n", err.toLocal8Bit().constData());
+        return 1;
+    }
+
+    const auto frame = [&](float yaw, QString* e) {
+        ImageExport::Options opt;
+        if (view == "front")
+            opt.M.rotate(-90, 1, 0, 0);
+        else if (view != "top")     // iso pitch
+            opt.M.rotate(-55, 1, 0, 0);
+        opt.M.rotate(yaw, 0, 0, 1);
+        opt.resolution = resolution;
+        opt.fit_px = size;
+        opt.supersample = aa;
+        opt.fit_sphere = true;      // stable framing across the sweep
+        opt.transparent = false;    // GIF alpha is binary; use theme
+        return ImageExport::renderShapesImage(s3, false, opt, e);
+    };
+
+    if (!stereo.isEmpty())
+    {
+        // Parallel-view pair (cross-eyed viewers: swap panels)
+        QImage L = frame(2.5f, &err);
+        QImage R = err.isEmpty() ? frame(-2.5f, &err) : QImage();
+        if (!err.isEmpty())
+        {
+            fprintf(stderr, "stereo: %s\n",
+                    err.toLocal8Bit().constData());
+            return 1;
+        }
+        const int gap = 8;
+        QImage pair(L.width() + R.width() + gap, L.height(),
+                    QImage::Format_ARGB32);
+        pair.fill(QColor(28, 26, 24));
+        for (int j = 0; j < L.height(); ++j)
+        {
+            memcpy(pair.scanLine(j), L.constScanLine(j),
+                   size_t(L.width()) * 4);
+            memcpy(pair.scanLine(j) + (L.width() + gap) * 4,
+                   R.constScanLine(j), size_t(R.width()) * 4);
+        }
+        if (!pair.save(stereo) && !pair.save(stereo, "PNG"))
+        {
+            fprintf(stderr, "stereo: could not write '%s'\n",
+                    stereo.toLocal8Bit().constData());
+            return 1;
+        }
+    }
+
+    if (!wiggle.isEmpty())
+    {
+        QImage a = frame(-3, &err);
+        QImage b = err.isEmpty() ? frame(3, &err) : QImage();
+        if (err.isEmpty() &&
+            !save_gif({a, b}, {12, 12}, wiggle))
+            err = "could not write '" + wiggle + "'";
+        if (!err.isEmpty())
+        {
+            fprintf(stderr, "wiggle: %s\n",
+                    err.toLocal8Bit().constData());
+            return 1;
+        }
+    }
+
+    if (!turntable.isEmpty())
+    {
+        const int n = frames < 4 ? 36 : frames;
+        const int delay = std::max(2, 400 / n);   // ~4s per revolution
+        QList<QImage> seq;
+        for (int i = 0; i < n; ++i)
+        {
+            seq.append(frame(360.f * i / n, &err));
+            if (!err.isEmpty())
+            {
+                fprintf(stderr, "turntable: %s\n",
+                        err.toLocal8Bit().constData());
+                return 1;
+            }
+            fprintf(stderr, "\rturntable: frame %d/%d", i + 1, n);
+        }
+        fprintf(stderr, "\n");
+        if (!save_gif(seq, {delay}, turntable))
+        {
+            fprintf(stderr, "turntable: could not write '%s'\n",
+                    turntable.toLocal8Bit().constData());
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int renderHeadless(App& app, const QString& out, float resolution,
                           const QString& view, int size, float section,
-                          const QString& node)
+                          const QString& node, int aa)
 {
     ImageExport::Options opt;
     opt.node_name = node;
@@ -396,6 +510,7 @@ static int renderHeadless(App& app, const QString& out, float resolution,
     opt.section = section;
     opt.resolution = resolution;
     opt.fit_px = size;
+    opt.supersample = aa;
     opt.filename = out;
 
     const QString err = ImageExport::render(app.getGraph(), opt);
@@ -470,7 +585,9 @@ int main(int argc, char *argv[])
         if (arg == "--export" || arg == "--validate" ||
             arg == "--render" || arg == "--resave" ||
             arg == "--analyze" || arg == "--describe-nodes" ||
-            arg == "--import-vm" || arg == "--diff")
+            arg == "--import-vm" || arg == "--diff" ||
+            arg == "--turntable" || arg == "--wiggle" ||
+            arg == "--stereo")
         {
             if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM"))
                 qputenv("QT_QPA_PLATFORM", "offscreen");
@@ -602,6 +719,25 @@ int main(int argc, char *argv[])
                 "current protocol (batch migration / canonicalizing), "
                 "then exit", "FILE");
         parser.addOption(resaveOpt);
+        QCommandLineOption aaOpt("aa",
+                "Antialiasing for rendered images: supersample factor "
+                "(1 disables; default 2)", "N", "2");
+        parser.addOption(aaOpt);
+        QCommandLineOption turntableOpt("turntable",
+                "Render a looping turntable GIF of the model to FILE "
+                "(--frames, --size, --view and --aa apply)", "FILE");
+        parser.addOption(turntableOpt);
+        QCommandLineOption wiggleOpt("wiggle",
+                "Render a two-frame wigglegram GIF to FILE (depth "
+                "through motion)", "FILE");
+        parser.addOption(wiggleOpt);
+        QCommandLineOption stereoOpt("stereo",
+                "Render a side-by-side parallel-view stereo pair to "
+                "FILE", "FILE");
+        parser.addOption(stereoOpt);
+        QCommandLineOption framesOpt("frames",
+                "Frame count for --turntable (default 36)", "N", "36");
+        parser.addOption(framesOpt);
         QCommandLineOption diffOpt("diff",
                 "Compare the loaded model against FILE: print the "
                 "removed/added material measures as JSON, and with "
@@ -630,7 +766,10 @@ int main(int argc, char *argv[])
                               parser.isSet(analyzeOpt) ||
                               parser.isSet(validateOpt) ||
                               parser.isSet(importVmOpt) ||
-                              parser.isSet(diffOpt);
+                              parser.isSet(diffOpt) ||
+                              parser.isSet(turntableOpt) ||
+                              parser.isSet(wiggleOpt) ||
+                              parser.isSet(stereoOpt);
 
         auto args = parser.positionalArguments();
         // GUI sessions get a progress dialog for long script-eval
@@ -675,12 +814,25 @@ int main(int argc, char *argv[])
             const float res = parser.isSet(resolutionOpt)
                 ? parser.value(resolutionOpt).toFloat() : -1;
 
+            const int aa = std::max(1, parser.value(aaOpt).toInt());
+
             if (parser.isSet(diffOpt))
                 return diffHeadless(app, parser.value(diffOpt),
                                     parser.value(renderOpt), res,
                                     parser.value(viewOpt),
                                     parser.value(sizeOpt).toInt(),
-                                    parser.value(sectionOpt).toFloat());
+                                    parser.value(sectionOpt).toFloat(),
+                                    aa);
+
+            if (parser.isSet(turntableOpt) || parser.isSet(wiggleOpt) ||
+                parser.isSet(stereoOpt))
+                return animationHeadless(app, parser.value(turntableOpt),
+                                         parser.value(wiggleOpt),
+                                         parser.value(stereoOpt),
+                                         parser.value(framesOpt).toInt(),
+                                         res,
+                                         parser.value(sizeOpt).toInt(),
+                                         aa, parser.value(viewOpt));
 
             int code = runHeadless(app, parser.isSet(validateOpt),
                                    parser.value(exportOpt), res,
@@ -691,7 +843,7 @@ int main(int argc, char *argv[])
                                       parser.value(viewOpt),
                                       parser.value(sizeOpt).toInt(),
                                       parser.value(sectionOpt).toFloat(),
-                                      parser.value(nodeOpt));
+                                      parser.value(nodeOpt), aa);
             if (code == 0 && parser.isSet(analyzeOpt))
                 code = analyzeHeadless(app, res, parser.value(nodeOpt));
             if (code == 0 && parser.isSet(resaveOpt))

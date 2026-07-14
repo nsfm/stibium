@@ -2,6 +2,7 @@
 
 #include <Python.h>
 
+#include <QImage>
 #include <QMatrix4x4>
 #include <QString>
 
@@ -21,6 +22,12 @@ struct Options
     float section = 1;      /*  screen-parallel cut (1 = no cut)  */
     float resolution = -1;  /*  voxels per unit; <= 0 fits fit_px  */
     int fit_px = 512;       /*  longest image side when fitting  */
+    int supersample = 2;    /*  antialiasing: render at N x then
+                                smooth-downscale (1 = off)  */
+    bool fit_sphere = false;/*  frame the model's circumsphere
+                                instead of its per-view bounds, so
+                                rotating views keep a fixed framing
+                                (turntables)  */
     bool transparent = true;/*  transparent vs. theme background  */
     QString filename;       /*  output image (format by extension)  */
     QString node_name;      /*  non-empty: render only this node's
@@ -43,6 +50,13 @@ QString render(Graph* graph, const Options& opt);
  */
 QString renderShapes(const std::vector<Shape>& shapes, bool flat,
                      const Options& opt);
+
+/*
+ *  Same, but returns the image instead of saving it (animation
+ *  frames).  On failure returns a null image and sets *err.
+ */
+QImage renderShapesImage(const std::vector<Shape>& shapes, bool flat,
+                         const Options& opt, QString* err);
 
 /*
  *  Collects the graph's renderable shapes (terminal outputs only,

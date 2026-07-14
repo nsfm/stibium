@@ -81,6 +81,7 @@ set(SRC_FILES
     export/export_heightmap.cpp
     export/export_svg.cpp
     export/export_image.cpp
+    export/gif_writer.cpp
     export/export_worker.cpp
     viewport/scene.cpp
     viewport/gl.cpp
@@ -156,6 +157,9 @@ else()
          ${CMAKE_SOURCE_DIR}/py/*)
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/sb_py.stamp
+        COMMAND ${CMAKE_COMMAND} -E rm -rf
+            ${CMAKE_CURRENT_BINARY_DIR}/sb/nodes
+            ${CMAKE_CURRENT_BINARY_DIR}/sb/fab
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/py/nodes
             ${CMAKE_CURRENT_BINARY_DIR}/sb/nodes
@@ -297,6 +301,14 @@ python3 -c \"import json,sys; d=json.load(open('${CMAKE_SOURCE_DIR}/examples/sho
 json.dump(d, open('${CMAKE_CURRENT_BINARY_DIR}/ctest_broken_spec.sb','w'), indent=1)\" && \
 ! $<TARGET_FILE:${STIBIUM_APP}> --validate ${CMAKE_CURRENT_BINARY_DIR}/ctest_broken_spec.sb")
     set_tests_properties(app_checks_gate
+            PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    # Animation verbs: a tiny turntable must produce a valid GIF89a
+    add_test(NAME app_turntable
+             COMMAND bash -c "\
+$<TARGET_FILE:${STIBIUM_APP}> ${CMAKE_SOURCE_DIR}/examples/csg.sb --turntable ${CMAKE_CURRENT_BINARY_DIR}/ctest_turn.gif --frames 4 --size 64 && \
+head -c 6 ${CMAKE_CURRENT_BINARY_DIR}/ctest_turn.gif | grep -q 'GIF89a'")
+    set_tests_properties(app_turntable
             PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 

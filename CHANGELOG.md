@@ -6,6 +6,17 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **Antialiased renders + turntables, wigglegrams, and stereo pairs.**
+  All rendered images (--render, --diff composites, thumbnails, the
+  GUI image export) now supersample 2x and smooth-downscale (--aa N
+  to adjust, 1 disables). Three new headless verbs render motion:
+  --turntable FILE.gif (looping rotation, --frames), --wiggle
+  FILE.gif (two-frame depth wobble), and --stereo FILE.png
+  (side-by-side parallel-view pair) - all with rotation-stable
+  circumsphere framing so the model doesn't swim between frames.
+  The GIF writer is a from-scratch GIF89a/LZW encoder (like the 3MF
+  ZIP writer: no new dependencies), verified frame-exact against an
+  external decoder.
 - **Check nodes: unit tests for geometry** (new Checks category).
   Check: Fits Box, Check: Volume, and Check: Clearance measure the
   actual field (grid integration; tight bounds accurate to a cell)

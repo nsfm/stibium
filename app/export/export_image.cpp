@@ -91,14 +91,40 @@ QString collectShapes(Graph* graph, const QString& node_name,
     return QString();
 }
 
-QString renderShapes(const std::vector<Shape>& shapes, bool flat,
-                     const Options& opt)
+QImage renderShapesImage(const std::vector<Shape>& shapes, bool flat,
+                         const Options& opt, QString* err)
 {
     // 2D content always renders top-down
     QMatrix4x4 M;
     if (!flat)
         M = opt.M;
     const Transform view = RenderTask::getTransform(M);
+
+    // World-space circumsphere for rotation-stable framing
+    QVector3D sphere_center;
+    float sphere_r = 0;
+    if (opt.fit_sphere)
+    {
+        Bounds wb(INFINITY, INFINITY, INFINITY,
+                  -INFINITY, -INFINITY, -INFINITY);
+        for (const auto& s : shapes)
+        {
+            if (s.bounds.xmin > s.bounds.xmax)
+                continue;
+            wb = Bounds(fmin(wb.xmin, s.bounds.xmin),
+                        fmin(wb.ymin, s.bounds.ymin),
+                        fmin(wb.zmin, flat ? 0 : s.bounds.zmin),
+                        fmax(wb.xmax, s.bounds.xmax),
+                        fmax(wb.ymax, s.bounds.ymax),
+                        fmax(wb.zmax, flat ? 0 : s.bounds.zmax));
+        }
+        sphere_center = QVector3D((wb.xmin + wb.xmax) / 2,
+                                  (wb.ymin + wb.ymax) / 2,
+                                  (wb.zmin + wb.zmax) / 2);
+        sphere_r = 0.5f * QVector3D(wb.xmax - wb.xmin,
+                                    wb.ymax - wb.ymin,
+                                    wb.zmax - wb.zmin).length();
+    }
 
     // Transform each shape into view space, carrying its color, and
     // accumulate the view-space bounding box
@@ -128,14 +154,31 @@ QString renderShapes(const std::vector<Shape>& shapes, bool flat,
         ts.push_back(t);
     }
     if (ts.empty())
-        return "no renderable shapes";
+    {
+        *err = "no renderable shapes";
+        return QImage();
+    }
 
+    // Rotation-stable framing: override the fitted xy box with the
+    // circumsphere's square around the view-space center (depth
+    // keeps the per-view fit so the z budget stays tight)
+    if (opt.fit_sphere && sphere_r > 0)
+    {
+        const QVector3D c = M.map(sphere_center);
+        tb.xmin = c.x() - sphere_r;
+        tb.xmax = c.x() + sphere_r;
+        tb.ymin = c.y() - sphere_r;
+        tb.ymax = c.y() + sphere_r;
+    }
+
+    const int ss = opt.supersample > 1 ? opt.supersample : 1;
     float res = opt.resolution;
     if (res <= 0)
     {
         const float extent = fmax(tb.xmax - tb.xmin, tb.ymax - tb.ymin);
         res = extent > 0 ? opt.fit_px / extent : 1;
     }
+    res *= ss;
 
     // Section view: cut away the near side of the depth range
     const float tzmax = tb.zmax - (1 - opt.section) * (tb.zmax - tb.zmin);
@@ -248,6 +291,23 @@ QString renderShapes(const std::vector<Shape>& shapes, bool flat,
                 int(fmin(255.f, c8[p*3 + 1] * lum)),
                 int(fmin(255.f, c8[p*3 + 2] * lum)), 255));
         }
+
+    // Antialiasing: the render above happened at ss x the target
+    // resolution; a smooth downscale averages the subpixels
+    if (ss > 1)
+        img = img.scaled(W / ss, H / ss, Qt::IgnoreAspectRatio,
+                         Qt::SmoothTransformation);
+
+    return img;
+}
+
+QString renderShapes(const std::vector<Shape>& shapes, bool flat,
+                     const Options& opt)
+{
+    QString err;
+    const QImage img = renderShapesImage(shapes, flat, opt, &err);
+    if (!err.isEmpty())
+        return err;
 
     // Fall back to PNG when the filename has no recognized suffix
     // (freedesktop thumbnailers pass bare temp paths)
