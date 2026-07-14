@@ -170,8 +170,10 @@ release; newest work at the top of each section.
 - **Fixed a crash on File > New (and graph clear) after loading a
   file**: the per-node canvas inspector cards were only deferred-
   deleted when their nodes were freed, so a repaint in the gap
-  dereferenced a dead node. They are now hidden synchronously the
-  moment their node goes away.
+  dereferenced a dead node (both the card's own paint and the
+  floating-label sweep read the node). Cards now detach synchronously
+  the moment their node goes away - unregistered from the label
+  registry and hidden - so no paint path can touch freed memory.
 - **Ctrl-C from the launching terminal** runs the normal quit path,
   including the unsaved-changes prompt, instead of killing the
   process (self-pipe SIGINT handler into the Qt event loop; Python

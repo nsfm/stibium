@@ -27,6 +27,10 @@ public:
     explicit InspectorFrame(Node* node, QGraphicsScene* scene);
     ~InspectorFrame();
 
+    /*  Detach from the scene registry and hide, synchronously, when
+     *  the underlying node is freed (see InspectorFrame::detach).  */
+    void detach();
+
     /*
      *  Overloaded QGraphicsObject functions
      */

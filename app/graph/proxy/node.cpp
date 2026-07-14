@@ -41,12 +41,14 @@ NodeProxy::NodeProxy(Node* n, GraphProxy* parent)
     }
 
     // When this proxy is destroyed (the node was removed, e.g. by
-    // File > New or graph clear), the node is already freed.  Hide
-    // the inspector SYNCHRONOUSLY here so a queued paint can't
-    // dereference the dead node (typeTint walks node->childDatums)
-    // before the deferred deletion runs.
+    // File > New or graph clear), the node is already freed.  Detach
+    // the inspector SYNCHRONOUSLY here - unregister it from the
+    // scene's inspector registry and hide it - so no queued paint can
+    // dereference the dead node (the card's own paint via typeTint,
+    // or the floating-label sweep via getName) before the deferred
+    // deletion runs.
     connect(this, &QObject::destroyed, inspector, [i = inspector]{
-        i->hide();
+        i->detach();
         i->deleteLater();
     });
 

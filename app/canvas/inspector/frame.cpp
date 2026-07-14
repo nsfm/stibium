@@ -47,6 +47,18 @@ InspectorFrame::~InspectorFrame()
         cs->unregisterInspector(this);
 }
 
+void InspectorFrame::detach()
+{
+    // Called synchronously when the node behind this card is freed
+    // (File > New, graph clear).  Remove from the scene's inspector
+    // registry and hide, so no paint path - neither this card's own
+    // paint nor the floating-label sweep over allInspectors() - can
+    // dereference the dead node before the deferred deletion runs.
+    if (auto cs = dynamic_cast<CanvasScene*>(scene()))
+        cs->unregisterInspector(this);
+    hide();
+}
+
 QRectF InspectorFrame::tightBoundingRect() const
 {
     // In low-detail mode the children are hidden; use the rect
