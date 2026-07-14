@@ -1,0 +1,20 @@
+import fab
+
+title('Rectangle (exact SDF)')
+
+input('x0', float, 0)
+input('y0', float, 0)
+input('width', float, 2)
+input('height', float, 1)
+
+xmin, xmax = x0 - width/2, x0 + width/2
+ymin, ymax = y0 - height/2, y0 + height/2
+
+output('shape', fab.shapes.rectangle_exact(xmin, xmax, ymin, ymax))
+
+def drag_hw(this, x, y, z):
+   this.width = abs(2 * (x - this.x0))
+   this.height = abs(2 * (y - this.y0))
+
+sb.ui.point(x0, y0)
+sb.ui.point(x0 + width/2, y0 + height/2, drag=drag_hw)

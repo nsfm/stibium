@@ -147,15 +147,26 @@ else()
     set(STIBIUM_APP stibium)
     add_executable(${STIBIUM_APP} ${SRC_FILES})
 
-    # Copy node and fab directory into build directory
-    add_custom_command(TARGET ${STIBIUM_APP} POST_BUILD
+    # Copy node and fab directories into the build directory whenever
+    # any py source changes (a POST_BUILD copy only fires on relink,
+    # leaving stale python after py-only edits). CONFIGURE_DEPENDS
+    # re-globs when files are added or removed.
+    file(GLOB_RECURSE SB_PY_SOURCES CONFIGURE_DEPENDS
+         ${CMAKE_SOURCE_DIR}/py/*)
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/sb_py.stamp
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/py/nodes
-            ${CMAKE_CURRENT_BINARY_DIR}/sb/nodes)
-    add_custom_command(TARGET ${STIBIUM_APP} POST_BUILD
+            ${CMAKE_CURRENT_BINARY_DIR}/sb/nodes
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/py/fab
-            ${CMAKE_CURRENT_BINARY_DIR}/sb/fab)
+            ${CMAKE_CURRENT_BINARY_DIR}/sb/fab
+        COMMAND ${CMAKE_COMMAND} -E touch
+            ${CMAKE_CURRENT_BINARY_DIR}/sb_py.stamp
+        DEPENDS ${SB_PY_SOURCES})
+    add_custom_target(sb_py_assets ALL
+        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/sb_py.stamp)
+    add_dependencies(${STIBIUM_APP} sb_py_assets)
 
     install(TARGETS stibium
             DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
