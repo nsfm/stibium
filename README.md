@@ -4,7 +4,7 @@
 in which CAD software evolved from Lisp machines rather than drafting
 tables.
 
-Models are **functional representations** — pure math describing, for
+Models are **functional representations**: pure math describing, for
 every point in space, how far inside or outside the shape it is. You
 build them in a **node graph**: boxes wired to boxes, every parameter
 live, every node a small Python script you can open and edit. There are
@@ -13,11 +13,9 @@ approximated, degenerate, or non-manifold while you work. Zoom in
 forever; booleans always succeed; a thread is an equation.
 
 It is a continuation of [Antimony](https://github.com/mkeeter/antimony)
-by [Matt Keeter](https://mattkeeter.com/projects/antimony) — itself a
+by [Matt Keeter](https://mattkeeter.com/projects/antimony), itself a
 spiritual successor to [kokopelli](https://github.com/mkeeter/kokopelli)
-by way of [fabserver](http://kokompe.cba.mit.edu). The name keeps the
-lineage: Sb is antimony's element symbol, and every `.sb` model file
-already knew.
+by way of [fabserver](http://kokompe.cba.mit.edu).
 
 ## What Stibium adds
 
@@ -25,23 +23,23 @@ Antimony went into maintenance mode in 2016. Stibium picks the project
 back up and keeps going. Since the fork:
 
 **Geometry in, geometry out**
-- **Mesh import** — drop an STL (scan, vendor part, old export) into
+- **Mesh import**: drop an STL (scan, vendor part, old export) into
   the graph and it becomes a solid distance field like everything
   else: subtract it, blend it, lattice it, re-export it. Sign comes
   from winding numbers, so imperfect scans still work.
-- **Fidget import** — `stibium model.vm --import-vm out.sb` translates
+- **Fidget import**: `stibium model.vm --import-vm out.sb` translates
   math tapes from Keeter's successor project
   [Fidget](https://github.com/mkeeter/fidget) into Stibium projects.
-- **Modern export** — 3MF (typically 6× smaller than STL), SVG and DXF
+- **Modern export**: 3MF (typically 6× smaller than STL), SVG and DXF
   vector output with sharp-corner recovery for laser cutting and
-  photolithography, error-bounded mesh simplification, and honest
-  progress bars. Meshing and rendering run on all cores.
+  photolithography, and error-bounded mesh simplification. Meshing
+  and rendering run on all cores.
 
 **A deeper modeling vocabulary**
-- O(1) **domain repetition** — infinite arrays, polar rings, mirrored
+- O(1) **domain repetition**: infinite arrays, polar rings, mirrored
   tilings, and self-similar scale recursion at constant cost (the
   classic Array nodes union N copies and weep).
-- **Parts library** — provably-mating ISO threads, involute gears,
+- **Parts library**: provably-mating ISO threads, involute gears,
   printable clearance holes with M2–M12 tables, dovetails, snap clips,
   hex vents, heat-set bosses.
 - Smooth (log-sum-exp) and quadratic blends, chamfers and fillets,
@@ -59,13 +57,11 @@ back up and keeps going. Since the fork:
 
 **Quality of life**
 - Cross-section preview, analytics overlay, recent files, export
-  dialogs that suggest sane resolutions and show real dimensions,
+  dialogs that suggest sane resolutions and show real dimensions, a
   canvas that stays smooth on 300-node graphs, and a seven-year
-  backlog of crash fixes (deterministic undo-after-open, zoom clip,
-  grid stutter).
+  backlog of crash fixes cleared.
 
-The full ledger is in [CHANGELOG.md](CHANGELOG.md); the roadmap lives
-in [TODO.md](TODO.md).
+The full ledger is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Try it
 
@@ -78,11 +74,9 @@ f-rep cylinder.
 
 ## Documentation
 
-- [USAGE.md](doc/USAGE.md) — the tour
-- [SCRIPTING.md](doc/SCRIPTING.md) — writing your own nodes
-- [AGENT-SURFACE.md](doc/AGENT-SURFACE.md) — driving Stibium headlessly
-- [LIBFIVE-RECON.md](doc/LIBFIVE-RECON.md) — how Stibium relates to
-  libfive/Fidget, and what we're borrowing next
+- [USAGE.md](doc/USAGE.md) - the tour
+- [SCRIPTING.md](doc/SCRIPTING.md) - writing your own nodes
+- [AGENT-SURFACE.md](doc/AGENT-SURFACE.md) - driving Stibium headlessly
 
 ## Support
 
@@ -96,7 +90,7 @@ For Antimony history and design rationale, see
 
 Stibium's new work is released under the [GPLv3](LICENSE).
 
-Code inherited from Antimony remains under its original MIT License —
+Code inherited from Antimony remains under its original MIT License;
 see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
 Copyright (c) 2013-2015 Matthew Keeter and other contributors (Antimony)
