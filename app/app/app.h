@@ -86,6 +86,15 @@ public:
     void loadFile(QString f);
 
     /*
+     *  Cold-start splash: shown from main() before the heavy startup
+     *  (Python init, module load, first file evaluation), then
+     *  dismissed once the first window is up.  While it is active,
+     *  loadFile suppresses its own mid-session splash.
+     */
+    void showStartupSplash(const QString& subtitle);
+    void finishStartupSplash(QWidget* w);
+
+    /*
      *  loadFile with the same discard-unsaved-changes confirmation
      *  File > Open uses (for the recent-files menu)
      */
@@ -186,6 +195,10 @@ protected:
     QFileSystemWatcher* file_watcher=nullptr;
     bool ignore_next_file_change=false;
     bool headless=false;
+
+    /*  Cold-start splash (see showStartupSplash); non-null only
+     *  between showStartupSplash and finishStartupSplash.  */
+    class QSplashScreen* startup_splash=nullptr;
 
     QString filename;
     QTimer* autosave_timer;

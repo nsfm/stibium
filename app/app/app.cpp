@@ -68,6 +68,64 @@ App* App::instance()
     return static_cast<App*>(QApplication::instance());
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+/*  The shared splash artwork: wordmark, tagline, and a status line. */
+static QPixmap splashPixmap(const QString& subtitle)
+{
+    const qreal dpr = qApp->devicePixelRatio();
+    QPixmap pm(int(460 * dpr), int(150 * dpr));
+    pm.setDevicePixelRatio(dpr);
+    pm.fill(QColor(28, 26, 24));
+
+    QPainter painter(&pm);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setRenderHint(QPainter::TextAntialiasing);
+
+    auto font = painter.font();
+    font.setPointSize(26);
+    font.setBold(true);
+    painter.setFont(font);
+    painter.setPen(QColor(228, 219, 205));
+    painter.drawText(QRect(0, 26, 460, 44), Qt::AlignCenter, "Stibium");
+
+    font.setPointSize(11);
+    font.setBold(false);
+    font.setItalic(true);
+    painter.setFont(font);
+    painter.setPen(QColor(150, 142, 130));
+    painter.drawText(QRect(0, 74, 460, 24), Qt::AlignCenter,
+                     "CAD from a parallel universe");
+
+    font.setItalic(false);
+    font.setPointSize(9);
+    painter.setFont(font);
+    painter.setPen(QColor(120, 113, 104));
+    painter.drawText(QRect(0, 104, 460, 22), Qt::AlignCenter, subtitle);
+
+    painter.setPen(QColor(70, 64, 58));
+    painter.drawRect(0, 0, 459, 149);
+    return pm;
+}
+
+void App::showStartupSplash(const QString& subtitle)
+{
+    if (headless || startup_splash)
+        return;
+    startup_splash = new QSplashScreen(splashPixmap(subtitle));
+    startup_splash->show();
+    processEvents(QEventLoop::ExcludeUserInputEvents);
+}
+
+void App::finishStartupSplash(QWidget* w)
+{
+    if (!startup_splash)
+        return;
+    startup_splash->finish(w);
+    delete startup_splash;
+    startup_splash = nullptr;
+}
+
 void App::makeDefaultWindows()
 {
     newCanvasWindow();
@@ -407,32 +465,15 @@ void App::loadFile(QString f)
     fab::setProjectDir(QFileInfo(f).absolutePath().toStdString());
 
     // Big graphs take seconds to evaluate on load with no feedback;
-    // show a splash card for the duration (GUI sessions only)
+    // show a splash card for the duration.  On cold start main()
+    // already owns one (startup_splash), so only make a mid-session
+    // splash here for File > Open on an already-running window.
     std::unique_ptr<QSplashScreen> splash;
-    if (!headless)
+    if (!headless && !startup_splash)
     {
-        QPixmap pm(440, 130);
-        pm.fill(QColor(28, 26, 24));
-        {
-            QPainter painter(&pm);
-            painter.setPen(QColor(228, 219, 205));
-            auto font = painter.font();
-            font.setPointSize(22);
-            font.setBold(true);
-            painter.setFont(font);
-            painter.drawText(QRect(0, 22, 440, 42), Qt::AlignCenter,
-                             "Stibium");
-            font.setPointSize(10);
-            font.setBold(false);
-            painter.setFont(font);
-            painter.setPen(QColor(160, 152, 140));
-            painter.drawText(QRect(0, 72, 440, 30), Qt::AlignCenter,
-                             "Loading " + QFileInfo(f).fileName() +
-                             "...");
-            painter.setPen(QColor(70, 64, 58));
-            painter.drawRect(0, 0, 439, 129);
-        }
-        splash.reset(new QSplashScreen(pm));
+        splash.reset(new QSplashScreen(
+                splashPixmap("Loading " + QFileInfo(f).fileName() +
+                             "...")));
         splash->show();
         QCoreApplication::processEvents(
                 QEventLoop::ExcludeUserInputEvents);
