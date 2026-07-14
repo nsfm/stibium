@@ -6,6 +6,18 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **The fidget dowry, ported** (doc/TAPE-DESIGN.md "Round 8"):
+  overnight rebuild of the GPU pipeline's memory story. Registers
+  are bounded by Sethi-Ullman rescheduling at export (the merged
+  Zeiss: 877 slots -> 95 registers; constants live in shader
+  source as uniform data); a second subdivision level classifies
+  every (tile x z-slab) box and emits per-box shortened tapes
+  through an atomic bump allocator into a recycled pool; the image
+  renders in self-tuning bands that halve on pool overflow. Merged
+  Zeiss 512px: 153s -> 24s on the GPU, bit-perfect at every step -
+  the laptop's CPU (3.8s) still wins; the architecture is ready
+  for hardware that doesn't. Production referee: SbFabTest
+  "[.gpulib]".
 - **STIBIUM_GPU=1: GPU rendering in the app** (doc/TAPE-DESIGN.md
   "Round 7"): the on-device pipeline is now a library path
   (fab/tree/gpu.h) hooked into the production renderer behind an

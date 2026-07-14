@@ -487,3 +487,66 @@ here are bit-exact vs libm on every model tested ([.gpudiv],
 [.gpubig] - synthetic decks to 745 slots all exact); GLSL acos/atan
 differ by ulps as expected (the gear: 86/245,760 px, 85 within one
 depth level - silhouette-grazing rays).
+
+## Round 8 (2026-07-14, the night shift): the dowry, ported
+
+Nate asked for the fidget port overnight.  What landed - each step
+verified bit-perfect against the CPU renderer before the next:
+
+1. **Register rescheduling** (`blob_reschedule`, gpu.cpp).  Fidget
+   bounds its register file with LRU spilling; we hold a card fidget
+   doesn't - the export step may reorder clauses freely.  SSA-ify
+   the blob, Sethi-Ullman DFS (heavier subtree first, DAG values
+   emitted once), fresh linear scan.  The merged Zeiss: 877 slots →
+   409 constants + 3 axes + **95 registers**.  No spill machinery
+   needed - scheduling made it moot (LRU spilling remains the
+   documented fallback if a model's true peak liveness ever exceeds
+   the file).
+2. **Constants out of per-thread state**: thread-uniform, so they
+   live in the generated shader source (`PINNED[]`, constant
+   memory).  Per-thread mutable state: 877 floats → 98.
+3. **The second subdivision level**: pass 1b classifies every
+   (tile × 16-voxel z-slab) box on the tile's tape, records choices
+   in thread-local 2-bit lanes, and for ambiguous boxes immediately
+   replays the push walk and emits a compacted slab tape into a
+   shared pool via an **atomic bump allocator** (fidget's scheme -
+   fixed slots would need gigabytes).  Zeiss tapes: 3172 → ~2800
+   (tile × full-z; tall boxes barely prune) → **~760** per slab.
+4. **Band rendering**: slab-tape demand isn't knowable up front, so
+   the image renders in tile-row bands, every working buffer
+   recycled between bands, and a band that overflows the pool
+   retries at half height.  MPR never keeps a frame's tapes alive
+   at once; now neither do we.  This also removed the old 512 MB
+   cap wholesale.
+5. **`[.gpulib]`**: the production-path referee (10 models, both
+   GPUs, non-square regions) - the guard that must stay green.
+
+The scoreboard, merged Zeiss 512px, and the honest reading:
+
+| stage | GPU wall |
+|---|---|
+| Round 7 (877-slot regs, full-z march) | ~153 s |
+| + rescheduled registers | ~120 s |
+| + slab classification (fat tile tapes) | ~117 s |
+| + slab tapes + bands | **~24 s** |
+| CPU, 8 threads + full arsenal | **3.8 s** |
+
+6.4x closed in one night, bit-perfect at every step (zero depth
+diffs across 607,662 pixels) - and the CPU still wins on this
+GTX 1650 Ti Max-Q.  The gear: GPU 2.0 s vs CPU 0.33 s.  The
+remaining GPU cost is empty-pixel marching (~30 ambiguous slabs ×
+16 voxels × ~760-clause tapes for rays that never hit), plus an
+interpreter whose dynamically-indexed register array lives in
+local memory.  The known next rungs, in expected-value order: a
+third subdivision level (4³/8³ boxes, tapes → dozens of clauses),
+finer xy tiles (pool pressure now handled by bands), warp-
+cooperative evaluation (one tape decode per warp), and near-to-far
+occlusion culling.  Each is mechanical now that the allocator and
+band machinery exist.
+
+The honest conclusion: the MPR architecture is fully in-tree,
+correct, and self-managing on memory - and a laptop Max-Q chip
+plus a GLSL interpreter doesn't beat 8 Zen cores wielding the same
+algorithm.  Fidget's published wins come from desktop GPUs with
+5-20x this card's compute.  When Stibium meets one - or WebGPU -
+the pipeline is sitting here, referee'd and ready.

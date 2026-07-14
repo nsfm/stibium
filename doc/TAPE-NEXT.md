@@ -144,15 +144,17 @@ hidden tags need the dot (`"[.gpu]"` not `"[gpu]"`).
 
 Port order from here:
 
-1. **Register spilling - NOW THE CRITICAL PATH** (Round 7 measured
-   it: the Zeiss renders bit-perfectly via STIBIUM_GPU=1 but takes
-   MINUTES vs the CPU's 3.1s at 512px, because its 877 slots make a
-   3.5KB per-thread array and occupancy collapses; the 106-slot
-   gear is fast).  Adopt Load/Store ops with LRU eviction from
-   `fidget-core/src/compiler/alloc.rs` + `lru.rs` + `op.rs`
-   (`Load(u8, u32)` / `Store(u8, u32)`).  Only needed for a bounded
-   register file - the CPU path keeps unbounded registers.  Target
-   ~64-128 registers + a spill buffer in the tape blob.
+1. **Register bounding - DONE (Round 8)**, via Sethi-Ullman
+   rescheduling at export (`blob_reschedule`) instead of fidget's
+   LRU spilling: Zeiss 877 slots → 95 registers + constants baked
+   into shader source.  Spilling stays unimplemented-by-design;
+   revisit only if a model's true peak liveness exceeds ~128 after
+   scheduling.  ALSO DONE (Round 8): z-slab second subdivision
+   level with atomic-pool compacted slab tapes and adaptive band
+   rendering (pool overflow → halve band, retry).  Zeiss 512:
+   153s → 24s GPU, bit-perfect - CPU (3.8s) still wins on the
+   1650 Ti Max-Q; see Round 8 for the next rungs (third level,
+   finer tiles, warp-cooperative eval, near-to-far).
 2. **Stage B - LANDED (2026-07-14, TAPE-DESIGN Round 6)**: interval
    classify + on-device tape simplify + shortened-tape march, one
    subdivision level, in tests/gpu.cpp (`[.gpu2]` referee - zero
