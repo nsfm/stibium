@@ -63,6 +63,7 @@ add_library(SbFab STATIC
     src/tree/node/results.c
     src/tree/parser.c
     src/tree/render.c
+    src/tree/tape.cpp
     src/tree/tree.c
     src/tree/v2parser.cpp
     src/tree/triangulate/mesher.cpp
@@ -71,7 +72,6 @@ add_library(SbFab STATIC
     src/types/shape.cpp
     src/types/transform.cpp
     src/util/region.c
-    src/util/ustack.c
 
     # Generated files
     ${CMAKE_CURRENT_BINARY_DIR}/v2syntax.lemon.cpp
@@ -111,6 +111,7 @@ add_executable(SbFabTest
     tests/mesher.cpp
     tests/parser.cpp
     tests/shape.cpp
+    tests/tape.cpp
 )
 target_link_libraries(SbFabTest SbFab)
 

@@ -9,8 +9,6 @@
 #include "fab/util/region.h"
 
 #define NODE_CONSTANT   1
-#define NODE_IGNORED    2
-#define NODE_BOOLEAN    4
 #define NODE_IN_TREE    8
 
 #ifdef __cplusplus
@@ -34,8 +32,7 @@ typedef struct Node_ {
     int rank;
 
     /** @var flags
-    Flags (combination of be NODE_CONSTANT, NODE_IGNORED,
-    NODE_BOOLEAN, and NODE_IN_TREE) */
+    Flags (combination of NODE_CONSTANT and NODE_IN_TREE) */
     uint8_t flags;
 
     /** @var lhs
@@ -55,23 +52,10 @@ typedef struct Node_ {
 
     /** @var payload
     Refcounted heap payload, used only by OP_GRID (a MeshGrid*).
-    Cloning retains it; free_node releases it. */
+    deck_from_tree retains it; free_node releases it. */
     void* payload;
-
-    /** @var clone_address
-    Most recent place to which this node was cloned
-    */
-    struct Node_* clone_address;
 } Node;
 
-
-/** @brief  Clones a single node (non-recursively).
-    @details Looks up clone_address of children, which must
-    be populated with a sane value.
-    @param n Node to clone
-    @returns Pointer to clone
-*/
-Node* clone_node(Node* n);
 
 /** @brief Frees a single node, releasing its payload if it has one.
     @details All node deallocation must go through here (not free)

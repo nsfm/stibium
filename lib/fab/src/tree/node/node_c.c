@@ -9,30 +9,6 @@
 
 #include "fab/util/switches.h"
 
-// Non-recursively clone a node.
-Node* clone_node(Node* n)
-{
-    // Allocate memory and copy everything over
-    Node* clone = malloc(sizeof(Node));
-    memcpy(clone, n, sizeof(Node));
-
-    // Update children clone pointers
-    if (n->lhs) clone->lhs = n->lhs->clone_address;
-    if (n->rhs) clone->rhs = n->rhs->clone_address;
-    if (n->mhs) clone->mhs = n->mhs->clone_address;
-
-    // The clone shares the original's payload (grids are immutable
-    // and refcounted, so clones across threads read the same data)
-    if (n->opcode == OP_GRID)
-        grid_retain((MeshGrid*)clone->payload);
-
-    // Record the address of the new clone, so that clones of
-    // its parents can be adjusted to point in the right place
-    n->clone_address = clone;
-
-    return clone;
-}
-
 void free_node(Node* n)
 {
     if (n == NULL)  return;
@@ -57,7 +33,6 @@ Node* binary_n(Node* lhs, Node* rhs, float (*f)(float, float), Opcode op)
         .flags      = constant ? NODE_CONSTANT : 0,
         .lhs        = constant ? NULL : lhs,
         .rhs        = constant ? NULL : rhs,
-        .clone_address = NULL,
     };
 
     if (constant) {
@@ -93,7 +68,6 @@ Node* unary_n(Node* arg, float (*f)(float), Opcode op)
         .flags      = constant ? NODE_CONSTANT : 0,
         .lhs        = constant ? NULL : arg,
         .rhs        = NULL,
-        .clone_address = NULL,
     };
 
     if (constant) {
@@ -114,6 +88,7 @@ Node* asin_n(Node* child) { return unary_n(child, asin_f, OP_ASIN); }
 Node* acos_n(Node* child) { return unary_n(child, acos_f, OP_ACOS); }
 Node* atan_n(Node* child) { return unary_n(child, atan_f, OP_ATAN); }
 Node* neg_n(Node* child) { return unary_n(child, neg_f, OP_NEG); }
+// (constant-fold formerly used abs_f here - exp(const) parsed wrong)
 Node* exp_n(Node* child) { return unary_n(child, exp_f, OP_EXP); }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -128,7 +103,6 @@ Node* nonary_n(Opcode op)
         .flags      = 0,
         .lhs        = NULL,
         .rhs        = NULL,
-        .clone_address = NULL,
     };
 
     return n;
@@ -160,7 +134,6 @@ Node* grid_n(struct MeshGrid_* grid, Node* x, Node* y, Node* z)
         .rhs        = y,
         .mhs        = z,
         .payload    = grid,
-        .clone_address = NULL,
     };
     grid_retain(grid);
 

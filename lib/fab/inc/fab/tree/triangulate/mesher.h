@@ -9,11 +9,9 @@
 #include <vector>
 
 #include "fab/tree/triangulate/triangle.h"
+#include "fab/tree/tape.h"
 
 #include "fab/util/region.h"
-
-// Forward declaration of MathTree
-struct MathTree_;
 
 struct InterpolateCommand {
     enum {INTERPOLATE, CACHED, END_OF_VOXEL} cmd;
@@ -29,8 +27,12 @@ public:
      *  completed (empty regions count when skipped; occupied regions
      *  when their packed block finishes).  It reaches the region's
      *  total voxel count when triangulate_region returns unhalted.
+     *
+     *  The deck is borrowed (the caller frees it after meshing); it
+     *  is immutable, so any number of Meshers can share one deck -
+     *  each brings its own evaluation workspace.
      */
-    Mesher(struct MathTree_* tree, bool detect_edges, volatile int* halt,
+    Mesher(const Deck* deck, bool detect_edges, volatile int* halt,
            std::atomic<uint64_t>* progress=nullptr);
     ~Mesher();
 
@@ -109,10 +111,21 @@ protected:
     void push_vert(const float x, const float y, const float z);
 
     /*
+     *  The recursive worker behind triangulate_region: tape is the
+     *  (already-specialized) tape for this region's ancestors, and is
+     *  pushed further at each ambiguous subdivision.
+     */
+    void triangulate_region(const Region& r, Tape* tape);
+
+    /*
      *  Attempts to evaluate every voxel in the given region.
      *  Returns false if there are too many voxels; true on success.
+     *  On success the tape is remembered as block_tape, so that
+     *  zero-crossing / normal refinement over this block evaluates
+     *  with the same specialization (the old code disabled nodes for
+     *  exactly this scope).
      */
-    bool load_packed(const Region& r);
+    bool load_packed(const Region& r, Tape* tape);
     void unload_packed();
 
     /*
@@ -193,8 +206,14 @@ protected:
      */
     std::vector<uint32_t> get_contour();
 
-    // MathTree that we're evaluating
-    struct MathTree_* tree;
+    // Compiled evaluation deck (borrowed, shared) and our workspace
+    const Deck* deck;
+    TapeCtx* ctx;
+
+    // Tape of the packed block currently being refined (borrowed from
+    // the recursion frame that loaded it; null outside a block)
+    Tape* block_tape;
+
     bool detect_edges;
     volatile int* halt;
     std::atomic<uint64_t>* progress;

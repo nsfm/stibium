@@ -5,8 +5,7 @@
 
 #include "fab/tree/triangulate/mesher.h"
 
-#include "fab/tree/tree.h"
-#include "fab/tree/eval.h"
+#include "fab/tree/tape.h"
 #include "fab/util/switches.h"
 
 #if MIN_VOLUME < 60
@@ -56,9 +55,10 @@ static const int EDGE_MAP[16][2][3][2] = {
     {{{-1,-1}, {-1,-1}, {-1,-1}}, {{-1,-1}, {-1,-1}, {-1,-1}}}, // 3210
 };
 
-Mesher::Mesher(MathTree* tree, bool detect_edges, volatile int* halt,
+Mesher::Mesher(const Deck* deck, bool detect_edges, volatile int* halt,
                std::atomic<uint64_t>* progress)
-    : tree(tree), detect_edges(detect_edges), halt(halt),
+    : deck(deck), ctx(tape_ctx_new(deck)), block_tape(nullptr),
+      detect_edges(detect_edges), halt(halt),
       progress(progress),
       data(new float[MIN_VOLUME]), has_data(false),
       X(new float[MIN_VOLUME]),
@@ -78,6 +78,7 @@ Mesher::Mesher(MathTree* tree, bool detect_edges, volatile int* halt,
 
 Mesher::~Mesher()
 {
+    tape_ctx_free(ctx);
     for (auto ptr : {data, X, Y, Z, ex, ey, ez, nx, ny, nz})
         delete [] ptr;
 }
@@ -179,7 +180,8 @@ std::vector<Vec3f> Mesher::get_normals(const std::vector<uint32_t>& contour)
         i += 7;
     }
 
-    float* out = eval_r(tree, dummy);
+    const float* out = tape_eval_r(block_tape ? block_tape : deck_base(deck),
+                                   ctx, dummy);
 
     // Extract normals from the evaluated data.
     std::vector<Vec3f> normals;
@@ -547,17 +549,17 @@ void Mesher::push_vert(const float x, const float y, const float z)
 
 // Evaluates a region voxel-by-voxel, storing the output in the data
 // member of the tristate struct.
-bool Mesher::load_packed(const Region& r)
+bool Mesher::load_packed(const Region& r, Tape* tape)
 {
     // Only load the packed matrix if we have few enough voxels.
     const unsigned voxels = (r.ni+1) * (r.nj+1) * (r.nk+1);
     if (voxels >= MIN_VOLUME)
         return false;
 
-    // We've already run interval evaluation for this region
-    // (at the beginning of triangulate_region), so here we'll
-    // just disable inactive nodes.
-    disable_nodes(tree);
+    // Zero-crossing / normal refinement over this block must run at
+    // the same specialization, so remember the tape (borrowed: the
+    // recursion frame that loaded the block outlives its unload).
+    block_tape = tape;
 
     // Flatten a 3D region into a 1D list of points that
     // touches every point in the region, one by one.
@@ -586,8 +588,8 @@ bool Mesher::load_packed(const Region& r)
     packed.Z = Z;
     packed.voxels = voxels;
 
-    // Run eval_r and copy the data out
-    memcpy(data, eval_r(tree, packed), voxels * sizeof(float));
+    // Run the region evaluator and copy the data out
+    memcpy(data, tape_eval_r(tape, ctx, packed), voxels * sizeof(float));
     has_data = true;
 
     return true;
@@ -595,7 +597,7 @@ bool Mesher::load_packed(const Region& r)
 
 void Mesher::unload_packed()
 {
-    enable_nodes(tree);
+    block_tape = nullptr;
     has_data = false;
 }
 
@@ -647,7 +649,8 @@ void Mesher::eval_zero_crossings(Vec3f* v0, Vec3f* v1, unsigned count)
             dummy.Y[i] = v0[i][1] * (1 - p[i]) + v1[i][1] * p[i];
             dummy.Z[i] = v0[i][2] * (1 - p[i]) + v1[i][2] * p[i];
         }
-        float* out = eval_r(tree, dummy);
+        const float* out = tape_eval_r(
+                block_tape ? block_tape : deck_base(deck), ctx, dummy);
 
         for (unsigned i=0; i < count; i++)
             if      (out[i] < 0)    p[i] += step;
@@ -791,14 +794,20 @@ void Mesher::triangulate_voxel(const Region& r, const float* const d)
 
 void Mesher::triangulate_region(const Region& r)
 {
+    triangulate_region(r, deck_base(deck));
+}
+
+void Mesher::triangulate_region(const Region& r, Tape* tape)
+{
     // Early abort if the halt flag is set
     if (*halt)
         return;
 
     // Do a round of interval evaluation to skip empty regions.
-    auto interval = eval_i(tree, (Interval){r.X[0], r.X[r.ni]},
-                                 (Interval){r.Y[0], r.Y[r.nj]},
-                                 (Interval){r.Z[0], r.Z[r.nk]});
+    const Interval X = {r.X[0], r.X[r.ni]},
+                   Y = {r.Y[0], r.Y[r.nj]},
+                   Z = {r.Z[0], r.Z[r.nk]};
+    auto interval = tape_eval_i(tape, ctx, X, Y, Z);
     if (interval.lower > 0 || interval.upper < 0)
     {
         // Count skipped voxels toward progress, unless we're inside a
@@ -808,12 +817,18 @@ void Mesher::triangulate_region(const Region& r)
         return;
     }
 
+    // Specialize the tape against the interval results: decided
+    // min/max branches drop out for the whole subtree below here
+    // (values are exact, so the mesh is unchanged - the old code
+    // only pruned once per packed block).
+    Tape* sub = tape_push(tape, ctx, X, Y, Z, TAPE_PUSH_STANDARD);
+
     // If we can calculate all of the points in this region with a single
-    // eval_r call, then do so.  This large chunk will be used in future
-    // recursive calls to make things more efficient.
+    // region-eval call, then do so.  This large chunk will be used in
+    // future recursive calls to make things more efficient.
     bool loaded_data;
     if (!has_data)
-        loaded_data = load_packed(r);
+        loaded_data = load_packed(r, sub);
     else
         loaded_data = false;
 
@@ -824,7 +839,7 @@ void Mesher::triangulate_region(const Region& r)
         const uint8_t split = octsect(r, octants);
         for (int i=0; i < 8; ++i)
             if (split & (1 << i))
-                triangulate_region(octants[i]);
+                triangulate_region(octants[i], sub);
     }
     else
     {
@@ -845,9 +860,9 @@ void Mesher::triangulate_region(const Region& r)
     }
 
     // If this stage of the recursion loaded data into the buffer,
-    // clear the has_data flag (so that future stages will re-run
-    // eval_r on their portion of the space) and re-enable disabled
-    // nodes.
+    // flush the interpolation queue (which evaluates with the block's
+    // tape) and clear the has_data flag, so that future stages will
+    // re-run the region evaluator on their portion of the space.
     if (loaded_data)
     {
         flush_queue();
@@ -855,6 +870,8 @@ void Mesher::triangulate_region(const Region& r)
         if (progress)
             progress->fetch_add(r.voxels, std::memory_order_relaxed);
     }
+
+    tape_release(sub);
 }
 
 float* Mesher::get_verts(unsigned* count)
