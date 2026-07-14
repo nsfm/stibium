@@ -6,6 +6,20 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **STIBIUM_GPU=1: GPU rendering in the app** (doc/TAPE-DESIGN.md
+  "Round 7"): the on-device pipeline is now a library path
+  (fab/tree/gpu.h) hooked into the production renderer behind an
+  env knob, with silent CPU fallback - the exporter, heightmap
+  path, and live viewport all ride it. The merged Zeiss renders
+  BIT-PERFECTLY on the GPU (607,662 pixels, zero depth diffs,
+  byte-identical PNG). Big decks are still slower than the CPU
+  until register spilling lands (the Zeiss's 877 slots collapse
+  occupancy; small decks like the gear are already fast) - so the
+  knob stays opt-in. Dispatches are sliced to dodge driver
+  watchdogs (a killed dispatch returns normally with a half-written
+  buffer - it looks exactly like a math bug and cost an hour of
+  theories; diagnostics live behind STIBIUM_GPU=2 / 
+  STIBIUM_GPU_DEBUG).
 - **The MPR pipeline runs on the GPU** (doc/TAPE-DESIGN.md "Round
   6"): interval tile classification, tape simplification, and
   shortened-tape evaluation now execute as three compute passes on

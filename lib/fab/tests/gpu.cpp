@@ -1249,3 +1249,61 @@ TEST_CASE("GPU tile pipeline tape dump", "[.gpudump]")
     free_arrays(&r);
     deck_free(deck);
 }
+
+TEST_CASE("GPU division exactness", "[.gpudiv]")
+{
+    if (!gpu().ok)
+        return;
+    WARN("GPU renderer: " << gpu().renderer);
+    const char* MODELS[] = {
+        "-r++q/Xf1.7q/Yf1.3qZf1",       // ellipsoid via division
+        "-/+qX*YYf3.1f0.2",             // rational field
+        "i-r++q/Xf2q/Yf2qZf1-/Xf9f0.1", // div + decided min
+    };
+    for (const char* m : MODELS)
+    {
+        const uint64_t diff = referee(m, 128, false);
+        CAPTURE(m);
+        WARN("model " << m << ": " << diff << " mismatched px");
+        CHECK(diff == 0);
+    }
+}
+
+TEST_CASE("GPU big-deck exactness", "[.gpubig]")
+{
+    if (!gpu().ok)
+        return;
+    WARN("GPU renderer: " << gpu().renderer);
+
+    /*  min-of-N-spheres with division transforms: linearly growing
+     *  slot count, exact ops only.  Bisects "deck size breaks the
+     *  GPU" from model-specific causes.  */
+    for (int n_spheres : {176, 208, 256, 288})
+    {
+        std::string expr;
+        for (int s = 0; s < n_spheres - 1; ++s)
+            expr += "i";
+        for (int s = 0; s < n_spheres; ++s)
+        {
+            char sph[160];
+            const float cx = -0.9f + 1.8f * float(s) / n_spheres;
+            const float cy = -0.7f + 1.4f * float((s * 7) % 13) / 13.0f;
+            const float rr = 1.05f + 0.9f * float((s * 5) % 11) / 11.0f;
+            snprintf(sph, sizeof(sph),
+                     "-r++q-/Xf%.3ff%.3fq-/Yf%.3ff%.3fqZf%.3f",
+                     rr, cx, rr, cy, 0.18f);
+            expr += sph;
+        }
+        MathTree* tree = parse(expr.c_str());
+        REQUIRE(tree != nullptr);
+        Deck* deck = deck_from_tree(tree);
+        free_tree(tree);
+        const uint32_t slots = deck_slots(deck);
+        deck_free(deck);
+
+        const uint64_t diff = referee(expr.c_str(), 96, false);
+        WARN("spheres=" << n_spheres << " slots=" << slots
+                        << ": " << diff << " mismatched px");
+        CHECK(diff == 0);
+    }
+}
