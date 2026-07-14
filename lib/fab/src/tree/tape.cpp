@@ -1477,6 +1477,54 @@ extern "C" unsigned tape_length(const Tape* tape)
     return tape->clauses.size();
 }
 
+extern "C" uint32_t tape_export_blob(const Deck* deck, const Tape* tape,
+                                     uint32_t* out, uint32_t cap)
+{
+    for (const Clause& c : tape->clauses)
+        if (c.op == OP_GRID)
+            return 0;   // host-side payload; not serializable
+
+    const uint32_t need = 8
+        + 2 * uint32_t(deck->constants.size())
+        + uint32_t(deck->xs.size() + deck->ys.size() + deck->zs.size())
+        + 5 * uint32_t(tape->clauses.size());
+    if (out == nullptr || cap < need)
+        return need;
+
+    const auto fbits = [](float f) {
+        uint32_t u;
+        memcpy(&u, &f, 4);
+        return u;
+    };
+
+    uint32_t* w = out;
+    *w++ = 1;                                    // format version
+    *w++ = deck->num_slots;
+    *w++ = tape->root;
+    *w++ = uint32_t(deck->constants.size());
+    *w++ = uint32_t(deck->xs.size());
+    *w++ = uint32_t(deck->ys.size());
+    *w++ = uint32_t(deck->zs.size());
+    *w++ = uint32_t(tape->clauses.size());
+    for (const auto& [slot, val] : deck->constants)
+    {
+        *w++ = slot;
+        *w++ = fbits(val);
+    }
+    for (uint32_t s : deck->xs)   *w++ = s;
+    for (uint32_t s : deck->ys)   *w++ = s;
+    for (uint32_t s : deck->zs)   *w++ = s;
+    for (const Clause& c : tape->clauses)
+    {
+        *w++ = uint32_t(c.op);
+        *w++ = c.out;
+        *w++ = c.a;
+        *w++ = c.b;
+        *w++ = fbits(c.imm);
+    }
+    return need;
+}
+
 extern "C" void tape_dump(const Tape* tape, const TapeCtx* ctx)
 {
     fprintf(stderr, "tape %p: %zu clauses, root s%u%s\n",

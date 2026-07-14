@@ -121,6 +121,14 @@ add_executable(SbFabTest
 )
 target_link_libraries(SbFabTest SbFab)
 
+# GPU tape-interpreter prototype (hidden "[.gpu]" tag): headless EGL
+# compute.  Only needs libEGL - GL entry points load at runtime.
+find_package(OpenGL COMPONENTS EGL)
+if (OpenGL_EGL_FOUND)
+    target_sources(SbFabTest PRIVATE tests/gpu.cpp)
+    target_link_libraries(SbFabTest OpenGL::EGL)
+endif()
+
 target_include_directories(SbFabTest SYSTEM PRIVATE
     ../../vendor
     ${Boost_INCLUDE_DIRS}

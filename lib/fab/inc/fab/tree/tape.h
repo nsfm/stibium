@@ -113,6 +113,24 @@ Tape* tape_base_for_region(Tape* tape,
                            float ymin, float ymax,
                            float zmin, float zmax);
 
+/** @brief Serializes a tape (base or pushed) plus its deck's slot
+    layout into a flat u32 blob for foreign interpreters (GPU
+    kernels, the eventual web build).  Format v1, UNSTABLE - readers
+    must check word [0]:
+
+      [0] version (=1)     [1] num_slots      [2] root slot
+      [3] n_const          [4] n_x  [5] n_y   [6] n_z
+      [7] n_clauses
+      n_const  x  (slot, f32 bits)   pinned constants
+      n_x+n_y+n_z slots               axis inputs
+      n_clauses x (op, out, a, b, imm f32 bits)
+
+    @returns The word count required.  Writes only if cap is
+    sufficient.  Returns 0 if the tape is not exportable (OP_GRID
+    clauses reference host-side payloads). */
+uint32_t tape_export_blob(const Deck* deck, const Tape* tape,
+                          uint32_t* out, uint32_t cap);
+
 /*  Introspection (tests / diagnostics) */
 unsigned tape_length(const Tape* tape);
 bool tape_is_terminal(const Tape* tape);

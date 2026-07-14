@@ -6,6 +6,16 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **First light on the GPU** (doc/TAPE-DESIGN.md "Round 5"): decks
+  now serialize to a portable u32 bytecode (`tape_export_blob`),
+  and a headless EGL compute-shader prototype renders heightmaps
+  from it - bit-identical to the CPU renderer, zero mismatched
+  pixels on every test model, on both the Intel iGPU and the
+  discrete NVIDIA card. Brute-force GPU (no pruning at all) already
+  sits within ~2x of a fully-armed CPU thread; porting the pruning
+  pipeline itself (fidget-wgpu's MPR shaders) is the next stage.
+  Run it: `SbFabTest "[.gpu]"`, benchmark with `"[.gpubench]"`,
+  `prime-run` for the discrete GPU.
 - **Mesher edge-dedup cache**: scheduling an edge interpolation
   walked the entire pending queue comparing vertex pairs
   (O(edges x queue) with an Eigen double-vector compare per entry -
