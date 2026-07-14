@@ -32,6 +32,16 @@ what's still ahead.
   per-shape deck caching, the shrinkage curve (saturates ~depth 6 on
   the merged Zeiss - tune tile size against it), and an opt-in
   affine-collapse pass to enable when this lands.
+  First probes (same night): (a) MPR-style wide fan-out in the depth
+  pass exists behind STIBIUM_TILE_RENDER=N but is a mild LOSS on
+  serial CPU (binary bisection + cheap pushes re-specializes every
+  level; fan-out children re-eval the same parent tape) - the fan-out
+  shape needs vectorized interval eval or per-tile threads to pay,
+  which is the actual remaining work here. (b) The shaded pass now
+  pushes per 64px tile against the depth buffer's z-range, so
+  gradients run on pruned tapes instead of the full deck - merged
+  Zeiss ~5% total render, ~30% of the shading portion, and it
+  compounds in the GUI and animation verbs.
 
 - **Parser hardening (upstream #198).** A malformed math expression
   hits a lemon assert and aborts the whole app. We OWN this parser
