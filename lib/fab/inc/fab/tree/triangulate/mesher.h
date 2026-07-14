@@ -4,7 +4,6 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
-#include <list>
 #include <unordered_map>
 #include <vector>
 
@@ -238,8 +237,12 @@ protected:
     float* ny;
     float* nz;
 
-    // Queue of interpolation commands to be run soon
-    std::list<InterpolateCommand> queue;
+    // Queue of interpolation commands to be run soon.  A vector on
+    // purpose: entries are only appended, scanned, and bulk-cleared,
+    // and clear() keeps capacity across packed blocks (the old
+    // std::list re-allocated a node per command - visible in export
+    // profiles).
+    std::vector<InterpolateCommand> queue;
 
     // Dedup index over the queue's INTERPOLATE entries: canonical
     // vertex pair -> INTERPOLATE ordinal.  Replaces the per-edge

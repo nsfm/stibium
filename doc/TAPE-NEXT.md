@@ -83,19 +83,28 @@ table), `std::list` queue → vector (node allocs visible),
 `check_feature`/`get_contour` Eigen-double geometry (Vector3d
 throughout the fan logic — precision audit before touching).
 
-## 2. Per-tile work queue in render_mt
+## 2. Per-tile work queue — MEASURED NEGATIVE, dropped (2026-07-14)
 
-`run_chunked` (render_mt.cpp) splits xy into `threads * 3` chunks -
-far coarser than MPR's tile queue.  A worker that lands on the
-detailed corner of the Zeiss idles everyone else.  Replace with a
-fine tile queue (e.g. 64-128 px tiles, same `split_xy`, count =
-area/tile²), workers pulling via the existing atomic counter.  Tiles
-are xy-disjoint so no image contention; keep one `TapeCtx` per
-worker (they're the expensive part).  Measure repeat renders in one
-process (GUI-shaped load), not one-shot CLI.  Possible refinement:
-per-tile decks are unnecessary, but per-tile ROOT pushes (against
-the tile's frustum, before descending) would let workers start from
-a pre-shrunk tape - test separately.
+Built it (STIBIUM_MT_TILE knob, count = area/tile², same atomic
+queue) and swept the grain on the 2048 px merged Zeiss:
+
+| chunks | wall |
+|---|---|
+| threads×3 = 24 (status quo) | 7.8-8.7 s |
+| 64 (256 px tiles) | 8.2 s |
+| 256 (128 px tiles) | 11.1-11.4 s |
+
+Monotone: finer = slower, 40% worse at MPR-style grain.  Every
+chunk pays its own descent from the base tape, and the top-of-tree
+pushes are exactly what fat chunks amortize — the recursion INSIDE
+a chunk already is the shared-tape hierarchy that makes fine tile
+queues viable in MPR (where parent tiles hand pruned tapes to
+children across the whole frame).  The existing atomic-counter
+queue over threads×3 chunks sits within noise of optimal on this
+workload; imbalance was a theory, the descent tax is a measurement.
+Don't rebuild without sharing pushed tapes ACROSS chunk boundaries
+(that's the GPU pipeline's breadth-first structure, not a CPU
+retrofit).
 
 ## 3. Autovectorizer audit — DONE 2026-07-13 (TAPE-DESIGN Round 4)
 
