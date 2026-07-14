@@ -151,15 +151,23 @@ Port order from here:
    register file - the CPU path keeps unbounded registers.  Merged
    Zeiss needs 465 slots; the prototype's per-thread `regs[]` array
    spills to local memory above ~128 and occupancy dies.
-2. **Stage B - the MPR pipeline on device** (a port, not research):
-   `fidget-wgpu/src/shaders/*.wgsl` - study order: `common.wgsl` →
-   `interval_tiles.wgsl` (tape_eval_i_batch on device) →
-   `tape_simplify.wgsl` (tape_push on device) → `voxel_tiles.wgsl`
-   + `normals.wgsl` → sort/merge/repack glue; `voxel.rs` is the
-   host-side orchestration.  Consumes the stage-A bytecode.  Keep
-   the stage-A referee: every pipeline stage must reproduce the
-   brute-force image before the next stage lands.  WGSL/GLSL runs
-   everywhere - this same work feeds the WASM web-gallery moonshot.
+2. **Stage B - LANDED (2026-07-14, TAPE-DESIGN Round 6)**: interval
+   classify + on-device tape simplify + shortened-tape march, one
+   subdivision level, in tests/gpu.cpp (`[.gpu2]` referee - zero
+   mismatches on both GPUs; `[.gpu2bench]`).  Beats the CPU thread
+   at 512³ already.  Known gaps = **stage C**: (a) z-slab / 3D tile
+   classification + a second subdivision level (CPU's z-octree
+   still wins at 1024³); (b) run on a big deck - needs register
+   spilling (item 1) since Zeiss wants 465 slots; (c) per-tile tape
+   memory is a fixed n_clauses-sized slot - fidget allocates via
+   atomic counters, port that before big decks; (d) normals/shading
+   pass; (e) viewport integration (the Qt viewport is already GL).
+   Gotchas recorded in gpu.cpp comments: Mesa miscompiles
+   interleaved SSBO read/write loops (locals-then-store), GLSL
+   min()/max() NaN-undefined, `precise` on interval endpoints,
+   conservative-is-sound means exotic ops can just widen to
+   [-inf,inf]+taint.  WGSL/GLSL runs everywhere - this same work
+   feeds the WASM web-gallery moonshot.
 3. **fidget-solver** (`solve()` in fidget-solver/src/lib.rs):
    constraint solving over tape gradients - the Tier 3
    differentiable-CAD item.  Later, after stage B.

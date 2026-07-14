@@ -6,6 +6,14 @@ release; newest work at the top of each section.
 
 ## Geometry & export
 
+- **The MPR pipeline runs on the GPU** (doc/TAPE-DESIGN.md "Round
+  6"): interval tile classification, tape simplification, and
+  shortened-tape evaluation now execute as three compute passes on
+  the device - Keeter's 2020 architecture, on consumer hardware,
+  verified pixel-identical against the CPU renderer on every test
+  model (including pruning-heavy ones) on both Intel and NVIDIA.
+  One subdivision level already crosses over the CPU at 512³.
+  `SbFabTest "[.gpu2]"` / `"[.gpu2bench]"`.
 - **First light on the GPU** (doc/TAPE-DESIGN.md "Round 5"): decks
   now serialize to a portable u32 bytecode (`tape_export_blob`),
   and a headless EGL compute-shader prototype renders heightmaps

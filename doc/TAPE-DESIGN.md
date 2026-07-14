@@ -396,3 +396,54 @@ fidget-wgpu's pipeline (interval tile classification =
 tape_eval_i_batch on device; tape_simplify.wgsl = tape_push on
 device) - a port, not research, and the bytecode it consumes is
 the blob above.
+
+## Round 6 (2026-07-14, dawn): the arsenal on the device
+
+Stage B: the MPR pipeline itself now runs on the GPU, one
+subdivision level, three passes (tests/gpu.cpp, tags `[.gpu2]` /
+`[.gpu2bench]` / diagnostics `[.gpudbg]` `[.gpudump]`):
+
+1. **interval_tiles** - one thread per 16px tile evaluates the tape
+   in interval arithmetic over the tile's xy-frustum (full z),
+   recording per-clause min/max choices under the CPU's exact
+   conditions (<=/>= comparisons, operand-taint veto) and
+   classifying EMPTY / FULL / AMBIGUOUS.
+2. **tape_simplify** - one thread per ambiguous tile replays
+   tape_push's backward liveness walk (STANDARD verdicts:
+   dead/elide/copy/keep) and emits a compacted per-tile tape.
+3. **voxel march** - per pixel, the stage-A interpreter runs on the
+   tile's SHORTENED tape; EMPTY/FULL tiles fill without marching.
+
+The soundness frame that makes the GLSL tractable: the GPU's
+choices need not MATCH the CPU's - any sound choice set leaves
+values on the shortened tape exact, and pixels are functions of
+those values' signs.  So hot interval ops are `precise` mirrors of
+math_i, and anything exotic (pow/mod/trig widening) returns
+[-inf,inf] + taint: conservative, sound, and the referee can't
+tell the difference.  Verified: zero mismatched pixels vs the
+production CPU renderer, all 8 models including the decided-min
+PRUNABLE, on Intel and NVIDIA.
+
+Bench (nested-CSG, 1650 Ti Max-Q, dispatch+readback):
+
+| n | GPU brute | GPU pipeline | CPU 1-thread |
+|---|---|---|---|
+| 256³ | 14.0 ms | 7.6 ms | ~5.2 ms |
+| 512³ | 77.3 ms | **33.1 ms** | 42.3 ms |
+| 1024³ | 425.7 ms | 121.8 ms | 75.3 ms |
+
+The pipeline beats brute force everywhere and crosses over the CPU
+at 512³ - with ONE subdivision level, no z-culling, and a ~30-clause
+model where tape shortening barely matters.  The CPU retakes 1024³
+because its octree culls in z; the fix is known (3D tiles / z-slab
+classification + a second subdivision level, i.e. the rest of
+fidget's pipeline).  Big decks are where the device should shine:
+the merged Zeiss drops 3157 -> ~200 clauses under pushing, and the
+GPU pays the full-tape price only once per tile instead of per
+voxel.
+
+War story for the file: Mesa's Intel compiler miscompiled the
+simplify pass - interleaved SSBO reads/writes made the emitted
+copy's out-slot word read back 0 (NVIDIA ran the same source
+correctly).  Locals-then-store fixed it; pattern kept in the
+shader with a comment.  Trust the referee, not the driver.
