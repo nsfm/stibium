@@ -1,21 +1,44 @@
 # TODO — the campaign
 
-Running list of upgrades for this fork. If it goes far enough: upstream the
-good parts to Keeter, or first-class the fork as **Stibium** (the .sb files
-were named for the element symbol all along).
+Shipped work moves out to [CHANGELOG.md](CHANGELOG.md); this file is only
+what's still ahead.
 
-## Tier 1 — would die on these hills
+## Tier 1
 
-(2026-07-13: emptied. Mesh import — the last resident — landed as the
-Import Mesh node / OP_GRID engine; see CHANGELOG. 🎉)
+- **Redistance primitive + true morphology (printability filter,
+  min-wall check).** Two nested offsets do NOT implement open/close:
+  our offset is field-minus-constant, so they cancel textually
+  (discovered 2026-07-13 when a min-wall check built that way passed
+  everything; that node was deleted before shipping - Checks has no
+  min-wall until this lands). The real fix: `redistance(shape, res)` samples
+  the sign on a grid, runs an exact euclidean distance transform
+  (Felzenszwalb, O(n)), and registers the result as a grid field -
+  the OP_GRID machinery from mesh import already handles the rest.
+  With true distances, open/close become exact-to-voxel, unlocking
+  Check: Min Wall (erode by t/2, see what vanished) and the "show me
+  what my printer will actually produce" preview. Also generally
+  fixes offset/shell on non-exact fields.
 
-## Tier 2 — strong wants
+- **Shortened-tape evaluation (the libfive keystone).** Immutable
+  shared shortened-tape evaluation replacing `disable_nodes` - the
+  M-L keystone from the raid (see doc/LIBFIVE-RECON.md). Unlocks a
+  CPU SIMD tile viewport and eventually an MPR-style GPU renderer.
+  The single highest-leverage kernel change on the board; most of
+  Tier 3's rendering moonshots sit downstream of it.
+
+- **Parser hardening (upstream #198).** A malformed math expression
+  hits a lemon assert and aborts the whole app. We OWN this parser
+  (extended it twice) - malformed input must error, not core-dump.
+  Cheapest safety win on the board, and the gate on trusting foreign
+  imports and agent-authored strings.
+
+## Tier 2
 
 - **Mesh import, round two.** The landed core is STL-only, dense
   grids, blocking sampling. Follow-ups in rough priority order:
-  3MF import (needs zip reading — reuse zlib, small parser); an
-  import *dialog* (file browser + resolution suggestion from mesh
-  bbox/feature stats, memory estimate readout — today you type into
+  3MF import (needs zip reading - reuse zlib, small parser); an
+  import _dialog_ (file browser + resolution suggestion from mesh
+  bbox/feature stats, memory estimate readout - today you type into
   datum fields); progress reporting during sampling (big scans block
   the graph thread silently); narrow-band grids for memory (dense
   512³ = 512 MB; band + far-field fallback could be ~10×); script
@@ -24,16 +47,13 @@ Import Mesh node / OP_GRID engine; see CHANGELOG. 🎉)
   a File > "copy mesh into project" helper for the unsaved-project
   nag; consider exposing `fab.shapes.import_mesh` bounds padding.
 
-- **Antialiased render output.** The raymarch samples once per pixel,
-  so exported images have hard staircase edges. Cheapest win:
-  supersample (render at 2x, smooth-downscale - 4x cost, so a dialog
-  checkbox); nicer later: edge-aware refinement only where depth or
-  normals step.
-- **Render menu growth.** Backgrounds beyond transparent/dark (solid
-  color picker, gradients); an exact-viewport-crop option (match pan/
-  zoom framing, not just orientation); and the future residents:
-  turntable GIFs, section-sweep animations, geometric-diff heatmaps,
-  batch gallery renders.
+- **Render polish, next round.** Supersampled AA (default 2x, --aa)
+  and turntable/wiggle/stereo verbs shipped 2026-07-13; remaining:
+  edge-aware AA refinement (only where depth/normals step),
+  backgrounds beyond transparent/dark (solid color picker,
+  gradients), exact-viewport-crop (match pan/zoom framing), GUI menu
+  entries for the animation verbs, section-sweep animations,
+  geometric-diff heatmaps, batch gallery renders.
 
 - **Deep-zoom render quality (micron-scale features as a feature).**
   Now that extreme zoom no longer clips (28d365ad), surfaces get
@@ -41,87 +61,93 @@ Import Mesh node / OP_GRID engine; see CHANGELOG. 🎉)
   z-buffer, and gradient evaluation epsilons aren't scaled to the
   zoom. Approach thoughtfully: adaptive z-budget near surfaces,
   eval epsilon proportional to feature scale, possibly float64 field
-  eval at extreme magnification. F-rep has no meshes to run out of —
+  eval at extreme magnification. F-rep has no meshes to run out of -
   if deep zoom is nailed, modeling micron-scale detail in
   large-format 2D work (photolithography) becomes a genuine
   differentiator no mesh-based tool can follow.
 
 - **Print-centric checks.** Minimum-wall-thickness detection from the
-  field itself (walls thinner than nozzle flagged before slicing);
-  overhang-angle visualization is plausible too (gradient vs build
-  direction). Ends guess-and-check on functional parts.
-- **Audit + expand the smooth-CSG lineup.** blend/shell/offset/morph
-  nodes already exist (a certain agent dreamed them up before reading
-  the CSG folder~). Double-check blend's falloff quality against the
-  standard polynomial/exponential smin family, add smooth-difference/
-  intersection variants if missing, and make sure all of them are in
-  the wiki showcase.
+  field itself (walls thinner than nozzle flagged before slicing;
+  waits on the redistance primitive to be exact); overhang-angle
+  visualization is plausible too (gradient vs build direction). Ends
+  guess-and-check on functional parts.
+
+- **Audit the smooth-CSG lineup.** Smooth Union / Smooth Difference
+  nodes now exist (log-sum-exp `blend_expt_unit` / `blend_difference`
+  from the raid) alongside blend/shell/offset/morph. Remaining:
+  double-check blend's falloff quality against the standard
+  polynomial/exponential smin family, add a smooth-intersection
+  variant if it's the gap, and make sure all of them land in the
+  wiki showcase.
+
 - **Viewport measurement probe.** Click two points: distance, plus
   the field value under the cursor (= exact distance to surface,
   it's an SDF!). The field is a built-in ruler; expose it.
+
 - **Multi-shape export.** One click → N files (print plates, assemblies).
   The export hook currently hard-rejects multiple export tasks per script.
-- **Node editor QoL.** Fuzzy-search add menu (type "cyl"), minimap for big
-  graphs, canvas annotations (sticky notes + named zones behind nodes,
-  persisted in the .sb JSON like node positions).
-- **Light-direction UI for the Enhanced render mode.** The key light is
-  configurable today (`render/key_light = "x,y,z"` in the config file);
-  give it real UI - a drag gizmo in the viewport or at least a dialog.
-  Consider exposing rim/AO strengths the same way.
+
+- **Node editor QoL, round two.** Fuzzy-search add menu shipped
+  (Tab / double-click palette). Still wanted: a minimap for big
+  graphs, and canvas annotations (sticky notes + named zones behind
+  nodes, persisted in the .sb JSON like node positions).
+
+- **Expose rim/AO strengths in the render UI.** The key-light
+  direction already has a draggable trackball gizmo (shipped); rim
+  and ambient-occlusion strengths are still config-file-only. Give
+  them the same real UI.
+
 - **Smart resolution suggestion.** The dialogs now floor at sane
   defaults (7 for mesh, 60 for vector/raster) and show the implied
   minimum feature size (~2 voxels); the real version analyzes the
   model - find the smallest feature via interval probing and suggest
   a resolution that resolves it at the target tolerance (0.1mm print
   vs micron litho).
+
 - **Enum/choice datums with dropdowns.** Nodes that take one of a known
   set (dovetail male/female, teardrop axis X/Y/Z, screw-size presets)
-  should render a combo box instead of a free-text field — e.g.
+  should render a combo box instead of a free-text field - e.g.
   `input('kind', str, 'male', options=['male','female'])` flowing through
   to a QComboBox in the datum row.
-- **UI glow-up.** Full prioritized plan in
-  [doc/UI-MODERNIZATION.md](doc/UI-MODERNIZATION.md): palette refresh,
-  app-wide dark theme, wire/port/node facelift, viewport shader
-  modernization, zoom LOD, icons/fonts — with the Qt6 port as its own
-  later milestone (framework verdict: keep Qt, reject QML rewrite).
+
+- **UI glow-up, remaining milestones.** Tiers A+B shipped (palette,
+  dark theme, wire/port/node facelift, enhanced render mode, zoom
+  LOD, fuzzy palette). Full prioritized plan in
+  [doc/UI-MODERNIZATION.md](doc/UI-MODERNIZATION.md): viewport shader
+  modernization, icons/fonts, and the Qt6 render-path polish - with
+  the QML question already settled (framework verdict: keep Qt,
+  reject QML rewrite; base Qt6 port itself is done).
+
 - **Autosave v2.** Rotating timestamped backups instead of
   overwrite-in-place; crash-recovery prompt on next launch; interval and
   retention in a real preferences dialog (the fork's founding feature,
   un-hacked).
+
 - **Preferences dialog.** Autosave settings, default export deviation,
   default resolution heuristic, viewport colors. The app currently has
   essentially no user configuration surface.
+
 - **Reusable node groups / user parts library.** Save a subgraph cluster
   (e.g. a measurement block + subsystem) as a named, reusable node in a
-  user library folder. Foundation for a community parts ecosystem.
+  user library folder. Foundation for a community parts ecosystem, and
+  the highest-demand feature theme on the upstream tracker
+  (#217/#68/#25/#127/#22).
 
-## Tier 2.5 — adopted from dreaming mode (concrete, just not scheduled)
+- **Geometric diff, follow-ups.** The `--diff` verb shipped (JSON
+  volumes + gray/red/green composite render). Still wanted: a
+  sub-surface heatmap of |f_a - f_b| magnitude, and a `--diff`
+  exit-code mode for CI gates ("fail if anything outside this region
+  changed").
 
-- ~~**Geometric diff**~~ SHIPPED 2026-07-13 (`--diff` verb: JSON
-  volumes + gray/red/green composite render; per-shape color
-  compositing fixed along the way). Future: sub-surface heatmap of
-  |f_a - f_b| magnitude, and a `--diff` exit-code mode for CI gates
-  ("fail if anything outside this region changed").
-- ~~**Assertion nodes**~~ SHIPPED 2026-07-13 (Checks category:
-  Fits Box / Volume / Clearance over a new fab.shapes.measure()
-  binding; red in canvas, --validate exits nonzero, in CI via
-  showcase_gear's own spec). Min Wall waits on the redistance
-  primitive below. Future: Check: COM ("stands upright"), per-check
-  resolution presets, a summary panel.
-- **Redistance primitive + true morphology (printability filter,
-  min-wall check).** Two nested offsets do NOT implement open/close:
-  our offset is field-minus-constant, so they cancel textually
-  (discovered 2026-07-13 when a min-wall check built that way passed
-  everything). The real fix: `redistance(shape, res)` samples the
-  sign on a grid, runs an exact euclidean distance transform
-  (Felzenszwalb, O(n)), and registers the result as a grid field —
-  the OP_GRID machinery from mesh import already handles the rest.
-  With true distances, open/close become exact-to-voxel, unlocking
-  Check: Min Wall (erode by t/2, see what vanished) and the "show me
-  what my printer will actually produce" preview. Also generally
-  fixes offset/shell on non-exact fields.
+- **Assertion nodes, follow-ups.** The Checks category shipped (Fits
+  Box / Volume / Clearance over `fab.shapes.measure()`; red in canvas,
+  --validate exits nonzero, wired into CI via showcase_gear's spec).
+  Min Wall waits on the redistance primitive (Tier 1). Future:
+  Check: COM ("stands upright"), per-check resolution presets, a
+  summary panel.
+
 - **Projected footprint node (project_z).** F(x,y) = min over z of
-  f(x,y,z): the true shadow of a 3D part as a first-class 2D shape —
+  f(x,y,z): the true shadow of a 3D part as a first-class 2D shape -
   straight into the SVG/DXF pipeline for baseplates, gaskets, and
   laser-cut cradles matched to 3D parts.
 
@@ -129,34 +155,42 @@ Import Mesh node / OP_GRID engine; see CHANGELOG. 🎉)
   merges with any uncolored node. Rule: CSG results inherit color from
   colored operand(s) (union of colored+uncolored keeps the color;
   colored+colored could blend or keep-first). Prereq for color export.
+
 - **Color/multi-material 3MF export.** The color nodes already exist and
   die in the viewport; 3MF carries material/color regions and
   multi-material printers are mainstream. ~70% built and doesn't know it.
-- **Parametric ISO thread nodes.** Helix = twisted profile; f-rep handles
-  it natively. Internal/external, standard pitches, printable clearance
-  presets. Every functional-parts tool hits this wall; Stibium doesn't.
-- **Analytics panel (UI).** The engine + `--analyze` verb shipped
-  (volume, COM, tight bounds); still wanted: a live panel in the app,
-  mass-per-material once color propagation lands, stands-upright
-  check, projected footprint, and octree interval pruning to make
-  integration near-instant (the contour tracer's trick, in 3D).
+
+- **Analytics panel, round two.** The engine, `--analyze` verb, and a
+  live Render ▸ Analytics overlay (volume / COM crosshair / tight
+  bounds) all shipped. Still wanted: mass-per-material once color
+  propagation lands, a stands-upright check, projected footprint,
+  and octree interval pruning to make integration near-instant (the
+  contour tracer's trick, in 3D).
+
 - **Procedural noise opcodes.** Perlin/simplex in the C evaluator →
   knurling, stipple, woodgrain-as-a-node (with seed input so "every
   render unique" becomes reproducible-unique). Tactile surfaces on
   functional prints.
+
 - **Lithophane / image-displacement node.** Image import's sibling:
   thickness-modulated surface from a photo. (The archive is full of
   camera and darkroom gear; this audience overlap is not a coincidence.)
+
 - **Slicer modifier-volume export.** Export designated shapes as 3MF
   modifier meshes (PrusaSlicer supports them): "this region 100% infill,
-  this one 0.1mm layers" — print-tuning designed in the graph.
+  this one 0.1mm layers" - print-tuning designed in the graph.
 
-## Tier 3 — moonshots
+- **Inline wire math / cross-node datum references** (upstream
+  #26/#66/#24): "clearance = other_node.dim - 0.2". Core parametric
+  workflow, recurring ask.
+
+## Tier 3
 
 - **GPU field evaluation for the viewport.** CPU raymarching holds back
   complex models (Zeiss ID02: dozens of assemblies). Fidget proves the
   JIT/wide-evaluation approach; upstream has an abandoned `gl-render`
-  branch to study. Months, not days — but it makes the tool feel current.
+  branch to study. Months, not days - but it makes the tool feel current.
+  Downstream of the Tier 1 shortened-tape keystone.
 - **Adaptive meshing (libfive-style manifold dual contouring).** Fewer,
   feature-aligned triangles at the source. MPL-2.0 core, license-safe to
   adapt. The meshoptimizer post-pass covers most of the value meanwhile.
@@ -168,7 +202,7 @@ Import Mesh node / OP_GRID engine; see CHANGELOG. 🎉)
   with no mesh in between.
 - **Proven clearances (interval-verified fit).** eval_i gives
   guaranteed bounds, not samples: subdivide until the interval proves
-  min(gap) ≥ tolerance over the whole domain — a mathematical proof
+  min(gap) ≥ tolerance over the whole domain - a mathematical proof
   that parts mate, that threads clear, that nothing collides. No
   sampling tool can promise this; interval arithmetic can. CAD with
   certificates.
@@ -179,67 +213,65 @@ Import Mesh node / OP_GRID engine; see CHANGELOG. 🎉)
   differentiable: "minimize material s.t. wall ≥ 0.8mm", "solve for the
   parameter where these parts stop colliding." Gradient descent over the
   graph's free datums.
-- **Kinematic scrubber.** A driver datum on a timeline slider — assemblies
+- **Kinematic scrubber.** A driver datum on a timeline slider - assemblies
   articulate in the viewport (the Zeiss focus mechanism actually racking).
   Also: motion GIFs for the gallery.
 - **WASM web viewer.** Field evaluation compiled to WASM (Fidget proves
   it) → the GitHub gallery becomes interactive: visitors orbit models in
   the browser instead of squinting at JPGs.
+- **Convex hull** (upstream #79/#134). Recurring OpenSCAD-migrant ask,
+  but no exact closed-form in f-rep; genuinely a research item.
 
-*The thesis binding all of these: everyone else converts to triangles and
-then fights the triangles. Stay math longer — slice, optimize, texture,
-weigh, and animate the field, upstream of any mesh.*
+_The thesis binding all of these: everyone else converts to triangles and
+then fights the triangles. Stay math longer - slice, optimize, texture,
+weigh, and animate the field, upstream of any mesh._
 
 ## Agent-friendly modeling (LLM/automation as a first-class user)
 
 Antimony already speaks Python-into-math; make the loop closable without
 a GUI so agentic tools can contribute to modeling cleanly. Full design
-plan in [doc/AGENT-SURFACE.md](doc/AGENT-SURFACE.md) (read/verify loop
-shipped 2026-07-13; write surface layered as: deterministic
-serialization -> machine-readable node reference -> Python authoring
-library -> MCP server on the live session):
+plan in [doc/AGENT-SURFACE.md](doc/AGENT-SURFACE.md). Shipped so far: the
+read/verify loop (headless verbs, `--describe-nodes` machine-readable
+node reference, structured errors on stderr/exit) and deterministic
+protocol-7 serialization. Remaining write surface:
 
-- **Live-session control (MCP server, stretch).** The file-watcher
-  reload covers agent-edits-on-disk; a socket API into the running
-  session (add/edit nodes, read errors, render viewport) is the full
-  answer.
+- **Programmatic .sb authoring.** Deterministic serialization is done
+  (protocol 7, byte-identical round-trips, meaningful diffs). Still
+  wanted: document the schema + connection encoding and provide a
+  tiny writer library so agents can emit .sb files directly.
 - **`fab` as an installable pure-Python package.** The shape library
   already imports standalone with a small Shape/Transform shim (proven
   during chamfer testing). Publish it so scripts/agents can compose
   shapes and emit .sb or math strings outside the app.
-- **Programmatic .sb authoring.** The format is JSON; document the
-  schema (protocol 6) + connection encoding, provide a tiny writer
-  library, and keep serialization deterministic so agent edits diff
-  cleanly next to human edits in git.
-- **Machine-readable node reference.** Generate JSON (name, inputs,
-  types, defaults, category, doc line) from the self-describing .node
-  files — same generator feeds the wiki for humans.
-- **Structured errors.** Script/node errors surfaced on stdout/exit
-  codes in the headless verbs, not just red text in a GUI datum.
-- **MCP server (stretch).** load/save graph, list/add/edit nodes, eval
-  bounds, render viewport → any agent-capable editor can drive a live
-  Stibium session interactively.
+- **Live-session control (MCP server, stretch).** The file-watcher
+  reload covers agent-edits-on-disk; a socket API into the running
+  session (load/save graph, list/add/edit nodes, read errors, eval
+  bounds, render viewport) is the full answer - any agent-capable
+  editor could then drive a live Stibium session interactively.
 
 ## Distribution / project health
 
 - freedesktop thumbnailer: .thumbnailer file + shared-mime-info XML
-  for .sb in deploy/ - file managers preview models via `--render`.
-  Cheap and delightful.
+  for .sb in deploy/ - file managers preview models via `--render`
+  (the headless renderer that powers it is shipped). Cheap and
+  delightful.
 - Examples refresh, continued: showcase_gear.sb landed (Parts +
   Repeat + CSG, protocol-7-native, in CI). Still wanted: ISO-thread
   assembly, chamfered-CSG piece, litho-style 2D mask for the vector
   pipeline.
-- GitHub Actions CI (build on push), AppImage/Flatpak releases — "runs on
-  other people's machines" is a feature.
+- GitHub Actions CI (build on push), AppImage/Flatpak releases - "runs on
+  other people's machines" is a feature. Windows build + package
+  managers are the single biggest raw-demand cluster upstream
+  (#71 + 10 others); distribution, not code.
 - Getting-started wiki (GitHub Pages); node reference partially generated
-  from the self-describing .node files. Nothing comparable exists.
-- Headless CLI renderer (`antimony-render model.sb -o front.png`) —
-  render core is pure C, no Qt/GL. Unlocks the antimony-models gallery,
-  wiki illustrations, and turntable GIFs. 2D path is first-class.
+  from the self-describing .node files (the `--describe-nodes` JSON is
+  the seed). Nothing comparable exists.
 - Batch shrink tool for existing STL archives (prototype works; decide
   home + overwrite-vs-suffix policy).
-- Port more libfive stdlib (MPL-2.0-compatible): gyroid/TPMS, rounded
-  primitives, elongate, bend, twirl. Text-on-path for the vector font.
+- Port more libfive stdlib (MPL-2.0-compatible), continued: gyroid,
+  Schwarz P/D, rounded primitives, elongate, bend, twirl, half_space
+  all landed; still wanted are more TPMS variants and text-on-path for
+  the vector font.
 
 ## Small bugs / cleanups
 
@@ -251,261 +283,62 @@ library -> MCP server on the live session):
 
 - **Root-cause the Python-error crash (the autosave origin story).** The
   live code-checker segfaulted randomly mid-typing; the workaround
-  (fork-era, see `lib/graph/src/util.cpp` getPyError — the line-number
+  (fork-era, see `lib/graph/src/util.cpp` getPyError - the line-number
   extraction is commented out and pinned to 0) disables error line
   numbers entirely. Fix properly with defensive PyObject extraction so
   script errors report real line numbers again without the crash.
-- **Renders drop shape colors.** The viewport tints each shape by its
-  r/g/b (color nodes) when compositing; ImageExport unions everything
-  into one field first, so color identity is lost — exports come out
-  monochrome. Fix by rendering per terminal shape and compositing by
-  depth (what the viewport does), keeping per-shape color.
-- **Undo stack survives file loads (use-after-free suspect).**
-  App::loadFile clears the graph but not the undo stack, so undoing
-  after File > Open (or a live reload) replays commands holding
-  pointers into the old, freed graph. Verify and fix (clear the
-  stack on load, or make load itself an undo barrier). Live reload
-  makes this easier to hit than it used to be.
+
 - **Infrequent crash when deleting groups of nodes at once.** Suspect
   the multi-delete undo path (`app/undo/undo_delete_multi.cpp`) or
   dangling proxies during batch removal. Needs a repro harness /
   ASan session like the detect-features hunt.
 
+## Recon digests
 
-## Done
-- 2026-07-13 — UI quality-of-life batch: analytics overlay (Render ▸
-  Analytics overlay: volume/COM/tight-size card + amber center-of-
-  mass crosshair projected in-scene; re-toggle to refresh), File ▸
-  Open Recent (10-entry MRU), exports remember their own directory
-  (shared across mesh/vector/heightmap/image), export resolution
-  defaults floored at practical values (mesh 7, vector+raster 60)
-  with a live "min feature ≈ 2/res" readout in the dialog.
-- 2026-07-13 — analytics engine + `--analyze` verb: dense grid
-  integration (parallel, ~4M samples default, `--resolution`
-  controls) reporting volume/area, center of mass, and tight bounds
-  as JSON; `--node` filters to one node. parallel_eval extracted to
-  shared infrastructure; shape collection shared with the renderer.
-  Verified against analytic spheres/cubes/circles (<1%%) in 4 new
-  CTest cases.
-- 2026-07-13 — interval-pruned contour evaluation: a quadtree of
-  eval_i calls proves regions empty/solid before sampling; culled
-  interiors take sign sentinels while a one-sample evaluated ring
-  guarantees no sentinel ever interpolates against an opposite sign.
-  Sparse content at high res: ~9M-sample grid in 0.09s (was seconds);
-  dense content unchanged wall, ~35%% less CPU. All contour tests
-  bit-stable.
-- 2026-07-13 — agent-surface layer 2: `--describe-nodes` dumps the
-  node library as JSON (165 nodes: name/title/category, typed inputs
-  with defaults, outputs; static text parse, nothing evaluated) and
-  `--render --node NAME` renders one node's shape outputs alone even
-  when they feed other nodes — visual bisection for wrong models.
-  Also: undo stack now clears on every file load (File ▸ Open never
-  cleared it — a long-standing undo-into-freed-graph crash).
-- 2026-07-13 — floating node labels: below ~18% zoom, constant-size
-  labels fade in near nodes (viewport-space, drawn in the canvas
-  foreground pass). Custom-named nodes place first with amber edges;
-  default-named (`[a-z]\d+`) fill remaining space and yield when
-  crowded. Overlaps nudge vertically; pushed labels get leader lines;
-  capped at 150 for huge graphs. Complements the LOD cards.
-- 2026-07-13 — app-level CTest: every example runs --validate,
-  --render, and a double --resave byte-compare (17 tests total with
-  the lib suites, ~7s). Plus Render ▸ Export image in viewport
-  windows: view-matched orientation, current section cut, size and
-  transparency options, rendered through the same ImageExport core
-  as the CLI (one code path, no GL).
-- 2026-07-13 — viewport render parallelism: render16_mt/shaded8_mt
-  chunk the region xy-only (image cells stay disjoint; z intact so
-  depth is exact) across cloned trees. Wired into the viewport, the
-  headless --render, and heightmap export. Gyroid ball @900px:
-  1.79s → 0.55s, byte-identical output. Found + fixed shaded8's
-  relative image indexing (mismatched render16's absolute convention;
-  latent upstream, only visible with sub-regions).
-  STIBIUM_RENDER_THREADS overrides the physical-core default.
-- 2026-07-13 — cross-section preview: press X in any viewport for a
-  section slider that pulls a screen-parallel cut plane through the
-  model (rotate the view to choose the cut direction; hiding the
-  slider restores the full model). Formalizes the accidental z-clip
-  workaround — which was "wandering" with rotation because the clip
-  slab is centered on the view center's rotated z, not a bug. Also
-  `--render --section F` headlessly. Cut faces shade darker than
-  exterior skin (field gradient at the plane), so interiors read
-  clearly.
-- 2026-07-13 — protocol 7: output datums serialize as uid/name/type
-  stubs (bare sigil, no geometry repr — scripts regenerate values on
-  load; the entry only anchors wire uids). Files 8-35% smaller, diffs
-  meaningful, and save/resave is a byte-identical fixed point (key
-  order was already canonical via QJsonObject). New `--resave FILE`
-  verb for batch migration + determinism testing. Loader accepts 6
-  and 7. Verified: all examples migrate, validate clean, and render
-  byte-identically to their protocol-6 sources.
-- 2026-07-13 — headless render verb: `antimony --render out.png
-  [--view iso|top|front] [--size N | --resolution R] model.sb`.
-  Unions the file's 3D shapes (2D construction profiles excluded
-  unless the model is all-2D), renders via the pure-C
-  render16/shaded8 path with a view transform (no GL), applies
-  key+ambient lighting to the packed normals, and writes ARGB with
-  transparent background — thumbnail-ready. The agent's eyes.
-- 2026-07-13 — headless verbs: `antimony --validate model.sb` (script +
-  datum errors to stderr, exit code) and `antimony --export FILE
-  [--resolution R] [--detect-features] model.sb` (runs the file's
-  export node synchronously; offscreen Qt platform auto-selected; no
-  dialogs). Plus live reload: the GUI watches the open .sb and reloads
-  when it changes on disk while the session is clean — agents edit,
-  the viewport follows.
-- 2026-07-12 — DXF export (R12 closed POLYLINEs, y-up, mm) from the
-  same contour pipeline; vector node/dialog/hook are extension-driven
-  (`export.vector`, `.svg`/`.dxf`; export.svg kept as alias).
-  Validated with ezdxf: closed loops, analytic areas. Tier 1's
-  SVG+DXF item fully closed.
-- 2026-07-12 — SVG export for 2D shapes (`export.svg` hook + GUI
-  dialog). Marching squares over one field plane (`contour_field` in
-  lib/fab): exact edge-indexed chaining, saddle cells resolved by
-  center evaluation, padded border so clipped shapes close, and 2D
-  feature detection — tangent-line intersection recovers sharp corners
-  ~5× finer than the grid (<0.002 units on a 0.01 grid). Output in mm,
-  evenodd fill, holes correct. Validated against analytic areas (<1%)
-  and corner positions; 5 new CTest cases. Slices 3D shapes at their
-  z midpoint. Export dialog gained "Contouring..." phase.
-- 2026-07-12 — parallel meshing (`triangulate_indexed_mt`): chunked
-  region → worker pool on cloned trees → seam-exact merge (re-intern)
-  → global dedup/prune. Provably identical to serial with detect off;
-  invariant-verified with detect on. Gyroid 2.57M tris: 11.7s → 2.8s
-  (16 threads). Day total: 16.9s/723 MiB → 2.8s/335 MiB. Plus real
-  export progress bar (exact voxel accounting via atomic, 20 Hz poll).
-- 2026-07-12 — 3MF export (new default; STL stays). Minimal streaming
-  ZIP writer over zlib (already a dep via libpng, no new vendoring) +
-  3MF core-spec model XML in lib/fab/formats/threemf. Extension-driven
-  in ExportMeshWorker, dialog defaults to 3MF; new `export.mesh` script
-  hook (export.stl kept as alias). Simplify now compacts orphaned
-  verts. Verified: python zipfile CRC/topology checks + PrusaSlicer
-  (manifold=yes, correct volume, matches STL of same mesh); ~6× smaller
-  than STL. No color/multi-material yet (color propagation is the
-  prereq, see Tier 2.5).
-- 2026-07-12 — indexed mesh storage in the mesher: interned vertices +
-  3×uint32 triangles (tombstone erases, sort-based dedup/prune), new
-  `triangulate_indexed`/`get_mesh` API, STL export end-to-end indexed
-  (no meshopt re-weld; `save_stl_indexed` streams to disk; also fixed
-  the sizeof(float) count write). ~4.6× less peak RSS, 1.47× faster
-  with detect-features (723→159 MiB, 16.9→11.5 s @ 2.57M tris); 43M-tri
-  export ~12→~3 GB. Output bit-identical (golden-dump verified); new
-  tests/mesher.cpp property + equivalence suite. (all four eval backends, prefix +
-  infix syntax, CTest coverage). Repeat node category: infinite/finite/
-  mirror/polar domain repetition + self-similar scale recursion
-  (repeat_scale, unlimited depth) + Iterate Scaled. All O(1) or
-  documented; numerically verified against the real C engine. NOTE:
-  scale-repeat needs factor > shape's radial span for visible gaps
-  (else gapless solid → blank); r0 auto-derives from bounds.
-- 2026-07-12 — Qt6 port (Qt 6.11, C++17, per-monitor HiDPI). Framework
-  verdict: keep Qt, reject QML rewrite. deploy/ + binary rename deferred.
-- 2026-07-12 — UI glow-up (Tiers A+B): warm amber palette + app-wide
-  Fusion theme, gradient wires / round ports / shadowed nodes,
-  type-tinted + operator-tinted headers, enhanced render mode (ambient/
-  rim/AO/gamma) with draggable light gizmo, zoom LOD name-cards, fuzzy
-  add-node palette (Tab/double-click), sticky wires, eased hovers,
-  startup graph-focus, config system (~/.config/Stibium).
-- 2026-07-12 — cleanup: removed dead update checker (dropped QtNetwork),
-  wired SbGraphTest/SbFabTest into CTest, modernized BUILDING.md.
-- 2026-07-12 — Phase 1 node campaign: 46 new nodes / 60+ shape functions
-  (primitives, deforms, 2D stroke kit, functional-parts kit with ISO
-  tables, ISO threads + involute gears). All numerically verified; new
-  Parts/ node category. See doc/LIBRARY-ROADMAP.md.
+Condensed pointers to the full recon writeups; only the still-actionable
+items remain here (shipped actions - the .vm importer, the stdlib raid,
+protocol 7, mesh import, license declaration - moved to CHANGELOG).
 
-- 2026-07-12 — meshoptimizer simplification in STL export (weld +
-  error-bounded decimation, "max deviation" in the dialog, `simplify=`
-  kwarg for scripted exports). ~94-99% smaller files.
-- 2026-07-12 — chamfer + fillet union/intersection/difference nodes
-  (six), math verified to machine precision.
-- 2026-07-12 — fixed SIGFPE on thin models (region.c div-by-zero), parser
-  new/free mismatch, mesher hardening (contour guard, normals-overflow
-  early-return, safe erase idioms). Detect-features large-model "crash"
-  root-caused as memory exhaustion (~275 B/tri), not a logic bug.
-- 2026-07-12 — detect features enabled by default, "(experimental)"
-  label dropped.
+### Upstream issues + PRs (172 issues, 69 PRs scanned)
 
-## Upstream recon (2026-07-13, issues + PRs sweep)
+~70% was dead build/packaging noise. Live signal:
 
-172 issues and 69 PRs scanned. ~70% is dead build/packaging noise;
-the signal, ranked:
-
-**Testing surface — upstream crash/geometry reports to verify against
-our rewrites** (repro files attached on the issues; none reproduced in
-nate's daily use, so these are audit targets, not known-broken):
-- #198 parser crash: malformed math expression hits a lemon assert and
-  aborts the app. We OWN this parser (extended it twice) — malformed
-  input must error, not core-dump. Cheapest safety win on the board.
-- #20/#29/#177 interaction segfaults (handle drag, view rotate, wire
-  dropped into empty canvas) — canvas overhaul may have fixed; test.
-- #174 geometry: union of exactly-coincident faces leaves a gap in
-  exported meshes. Test against the indexed mesher.
-- #200 geometry: subtracted extruded text flattens in STL export —
-  probably the dead heightmap path, confirm with our mesher.
-- #135 datum formatLink assert on cross-type connections.
-
-**Feature themes by demand:**
-- Node reuse cluster (#217/#68/#25/#127/#22, 5 issues): user node
-  directory (small, enabling), then subgraph-as-node. Highest-ROI
-  feature theme on the tracker.
-- Inline wire math / cross-node datum references (#26/#66/#24):
-  "clearance = other_node.dim - 0.2". Core parametric workflow.
-- Graph organization (#223/#221/#226/#73): grouping, collapse,
-  per-node display toggles. Big-graph usability.
-- #165 partial torus/revolve (sweep angle) — confirmed missing,
-  one-node quick win (wedge intersection).
-- Convex hull (#79/#134) — recurring OpenSCAD-migrant ask, but no
-  exact closed-form in f-rep; research item.
-- Windows build + package managers (#71 + 10 others): the single
-  biggest raw-demand cluster; distribution, not code.
-- #17: declare a clear license for the fork (upstream's was murky).
-
-**From the PR queue (mostly pre-rewrite, two keepers):**
-- PR #228 autosave (unmerged, clean): QTimer -> onSave every minute.
-  Improve to a sidecar file (file.sb.autosave) rather than
-  overwriting; expose interval in settings.
-- PR #222 scalar math nodes (add/multiply/number with the operand
-  echoed in the title) — check py/nodes/Math coverage first.
-- Fragile-area map for future upgrades: Boost::Python ABI matching,
+- **Crash/geometry audit targets** (repro files on the issues; none
+  reproduce in daily use, so these are audit targets against our
+  rewrites): #198 parser core-dump (promoted to Tier 1); #20/#29/#177
+  interaction segfaults (handle drag, view rotate, wire dropped into
+  empty canvas - canvas overhaul may have fixed; test); #174 union of
+  exactly-coincident faces leaves a gap in exported meshes; #200
+  subtracted extruded text flattens in STL export (probably the dead
+  heightmap path); #135 datum formatLink assert on cross-type
+  connections.
+- **Feature demand not yet covered:** node-reuse cluster and graph
+  organization (#223/#221/#226/#73) → the Reusable-node-groups Tier 2
+  item; inline wire math (Tier 2); #165 partial torus/revolve wedge -
+  now a one-node quick win since half_space landed (wedge
+  intersection); #222 scalar math nodes (add/multiply/number) - the
+  Math category still has none, confirm and add.
+- **Fragile-area map for future upgrades:** Boost::Python ABI matching,
   lemon version sensitivity (yy_find_shift_action signature), Qt
   deprecations, C-locale-after-QApplication (we already do this).
+- PR #228 autosave (unmerged) folds into the Autosave-v2 Tier 2 item.
 
-**Already covered (cite in release notes):** #153 mesh import (the
-tracker's most-wanted), #148 lattice repetition, #37 chamfer, #61/#72
-polylines, #56 save-dialog extension, #10 file sizes (3MF+simplify),
-#175 zoom clip, #182 AA (still on our own TODO).
+### libfive — see [doc/LIBFIVE-RECON.md](doc/LIBFIVE-RECON.md)
 
-## libfive recon (2026-07-13) — see doc/LIBFIVE-RECON.md
+Keeter's post-Antimony decade as a ranked steal-list. Headline: libfive
+is ahead on the kernel, we're ahead on the product, and his own
+retrospective says the node-graph tool is the thing he wished someone
+else would build. Shipped from the raid: exact-SDF box/rect primitives,
+log-sum-exp smooth blends + smooth difference (log/exp opcodes),
+half_space, gyroid/TPMS, clearance, mirrors. Still open:
 
-Keeter's post-Antimony decade, distilled to a ranked steal-list.
-Headline: libfive is ahead on the kernel, we're ahead on the product,
-and his own retrospective says the node-graph tool is the thing he
-wished someone else would build. Quick wins (S): exact-SDF box/rect
-primitives, log-sum-exp smooth blends + smooth difference (log/exp
-opcodes already landed), half_space, gyroid/TPMS, clearance. Keystone
-(M-L): immutable shared shortened-tape evaluation replacing
-disable_nodes — unlocks a CPU SIMD tile viewport (M) and eventually an
-MPR-style GPU renderer (L). Marquee (L): adaptive manifold DC mesher
-(MPL 2.0, literal port permitted). Also: maybe_nan interval tracking
-(S-M), affine-collapse pass (M), interval-derived bounds (M).
-
-### Adopted from the raid (quick wins, all S-effort)
-
-- **Exact-SDF primitives.** Port `box_exact` / `rectangle_exact` /
-  `rounded_box` math into shapes.py (true Euclidean fields); today's
-  max-form cube/rectangle make offset/shell/blends misbehave near
-  corners. Highest-leverage single stdlib port.
-- **Log-sum-exp smooth blends.** `blend_expt` / `blend_expt_unit` +
-  `blend_difference` (smooth SUBTRACTION — our blend is union-only).
-  ~3 lines each now that log/exp opcodes exist.
-- **half_space(norm, point).** Arbitrary cut planes; unlocks exact
-  polygons and one-line partial-revolve wedges (pairs with the
-  upstream #165 ask).
-- **gyroid / TPMS lattices.** sin·cos sum + shell, ~5 lines; huge
-  demo/infill value.
-- **clearance(a, b, o)** press-fit gaps, **symmetric_x/y/z** mirrors,
-  **loft_between** skewed lofts.
-- **maybe_nan interval tracking** in math_i.c — silent sqrt/log/acos
+- **Shortened-tape evaluation** (the keystone) - promoted to Tier 1.
+- **maybe_nan interval tracking** in math_i.c - silent sqrt/log/acos
   domain errors currently poison interval bounds; track the flag like
   libfive's eval/interval.hpp does.
-
+- **affine-collapse pass** and **interval-derived bounds** (both M).
+- **Adaptive manifold DC mesher** (MPL 2.0, literal port permitted) -
+  the marquee item, tracked in Tier 3.
 - **Steal Keeter's Meshing Algorithm Idea.** Per his 2026-07-03 post
   literally titled "Please Steal my Meshing Algorithm Idea": decouple
   surface-point generation (QEF sampling) from manifold mesh
@@ -513,17 +346,15 @@ MPR-style GPU renderer (L). Marquee (L): adaptive manifold DC mesher
   DC's thin-feature and self-intersection warts. He asked. We're
   considering it. The audacity of it all.
 
-## Foreign project import (2026-07-13) — see doc/FOREIGN-IMPORT.md
+### Foreign project import — see [doc/FOREIGN-IMPORT.md](doc/FOREIGN-IMPORT.md)
 
-[Tier A SHIPPED 2026-07-13: --import-vm converts Fidget tapes,
-deterministic + in CI; prospero renders. Remaining below.]
-Yes: libfive/Fidget projects can become .sb files. Fidget .vm is a
-flat tape that maps onto our math strings with 100% op coverage on
-every shipped model (measured: worst string 74 KB, worst parse depth
-677 vs our 4096 stack — no size wall). Build order: [S] --import-vm
-converter (~200 lines, ships prospero/bear/menger into Stibium day
-one); [S-M] libfive .io via its own tree-dump API (their interpreter
-does the hard part — never parse Scheme); [M] straight-line transpile
-to parametric script nodes once the stdlib raid lands. Exotic ops:
-ceil/round/recip/nth_root rewrite algebraically; compare/and/or/
-nanfill reject with a clear error (unused in the real corpus).
+Tier A shipped (`--import-vm` converts Fidget tapes, deterministic + in
+CI; prospero renders). Remaining build order:
+
+- **[S-M] libfive `.io` import** via its own tree-dump API (their
+  interpreter does the hard part - never parse Scheme).
+- **[M] straight-line transpile to parametric script nodes** once the
+  stdlib raid fully lands, so imports come in editable rather than as
+  one frozen field node.
+  </content>
+  </invoke>
