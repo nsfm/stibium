@@ -129,31 +129,40 @@ remaining batch-kernel share; re-profile before believing anything.
 
 ## 4. The dowry (Fidget re-recon, clone at ~/code/fidget, MPL-2.0)
 
-Port order:
+**Stage A LANDED (2026-07-14, TAPE-DESIGN Round 5):**
+`tape_export_blob` (u32 bytecode, format v1, OP_GRID refused) +
+headless EGL/GL4.3 compute interpreter in tests/gpu.cpp.  Hidden
+tags: `SbFabTest "[.gpu]"` (referee - ZERO mismatched pixels vs the
+CPU renderer on both the Intel iGPU and the 1650 Ti; prime-run
+drives EGL directly) and `"[.gpubench]"` (STIBIUM_GPU_BENCH_N=512
+etc).  Brute force on the 1650 Ti is within ~2x of the
+fully-armed single CPU thread - the pruning arsenal is the 20-100x,
+and porting IT is stage B.  Gotchas already solved in gpu.cpp:
+GLSL min()/max() have undefined NaN behavior (hand-mirror math_f),
+bake opcode values + blob offsets into generated source, old-catch
+hidden tags need the dot (`"[.gpu]"` not `"[gpu]"`).
 
-1. **Register spilling** (small, unblocks GPU): adopt Load/Store ops
-   with LRU eviction from `fidget-core/src/compiler/alloc.rs` +
-   `lru.rs` + `op.rs` (`Load(u8, u32)` / `Store(u8, u32)`).  Only
-   needed when targeting a bounded register file - the CPU path can
-   keep unbounded registers.  Merged Zeiss currently needs 465;
-   GPU-class caps are ~128.
-2. **GPU renderer** (the big one, now a port not research):
-   `fidget-wgpu/src/shaders/*.wgsl` is the complete MPR pipeline -
-   study order: `common.wgsl` → `interval_tiles.wgsl` (batch
-   classify, our tape_eval_i_batch on device) → `tape_simplify.wgsl`
-   (pushing on device - the part we didn't know how to structure) →
-   `voxel_tiles.wgsl` + `normals.wgsl` → the sort/merge/repack glue;
-   `voxel.rs` shows host-side orchestration.  Our packed-clause
-   export should follow `fidget-bytecode` (u32 words, forward eval
-   order, `iter_ops` introspection - format explicitly unstable, so
-   version-check).  Prototype headless first: GPU-render a deck to
-   PNG, cmp against the CPU render before touching the viewport.
-   WGSL runs on Vulkan/Metal/DX/WebGPU - this same work feeds the
-   WASM web-gallery moonshot.
+Port order from here:
+
+1. **Register spilling** (small, unblocks big models on GPU): adopt
+   Load/Store ops with LRU eviction from
+   `fidget-core/src/compiler/alloc.rs` + `lru.rs` + `op.rs`
+   (`Load(u8, u32)` / `Store(u8, u32)`).  Only needed for a bounded
+   register file - the CPU path keeps unbounded registers.  Merged
+   Zeiss needs 465 slots; the prototype's per-thread `regs[]` array
+   spills to local memory above ~128 and occupancy dies.
+2. **Stage B - the MPR pipeline on device** (a port, not research):
+   `fidget-wgpu/src/shaders/*.wgsl` - study order: `common.wgsl` →
+   `interval_tiles.wgsl` (tape_eval_i_batch on device) →
+   `tape_simplify.wgsl` (tape_push on device) → `voxel_tiles.wgsl`
+   + `normals.wgsl` → sort/merge/repack glue; `voxel.rs` is the
+   host-side orchestration.  Consumes the stage-A bytecode.  Keep
+   the stage-A referee: every pipeline stage must reproduce the
+   brute-force image before the next stage lands.  WGSL/GLSL runs
+   everywhere - this same work feeds the WASM web-gallery moonshot.
 3. **fidget-solver** (`solve()` in fidget-solver/src/lib.rs):
    constraint solving over tape gradients - the Tier 3
-   differentiable-CAD item.  We already have gradient eval; the
-   solver is the driver.  Later, after the GPU rung.
+   differentiable-CAD item.  Later, after stage B.
 
 ## 5. Deferred / parked
 

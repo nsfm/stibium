@@ -359,3 +359,40 @@ inlined now, and batch kernels totalled ~16% of the profile, so it
 keeps.  Candidates if it ever matters: `-march=x86-64-v2` (SSE4.1
 blends; changes no arithmetic results) or an explicit two-phase
 min/NaN-repair formulation.
+
+## Round 5 (2026-07-14, same long night): first light on the GPU
+
+Stage A of the GPU rung (TAPE-NEXT §4) is real: the deck now
+serializes to a flat u32 blob (`tape_export_blob`, format v1 -
+constants, axis slots, 5-word clauses; refuses OP_GRID), and a
+headless EGL + GL 4.3 compute prototype (`tests/gpu.cpp`, hidden
+tags `[.gpu]` / `[.gpubench]`) interprets it per pixel-ray and
+writes the same heightmap the production renderer does.
+
+The referee: because the renderer's BINARY pushes preserve signs
+exactly and a pixel is a pure function of signs (highest k with
+field < 0), a bit-exact GPU eval must reproduce the CPU heightmap
+bit-for-bit.  It does: **zero mismatched pixels** on every test
+model - algebraic CSG, spheres (sqrt), nested min/max, even the
+sin/cos sheet - on BOTH the Intel UHD iGPU and the GTX 1650 Ti
+(prime-run drives EGL directly).  min/max in GLSL are hand-written
+mirrors of math_f's exact semantics (GLSL min() has undefined NaN
+behavior); the C opcode values and every blob offset are baked into
+the generated source, so there is no protocol to drift.
+
+Brute-force bench (nested-CSG model, 1650 Ti, dispatch+readback,
+shader compile excluded as a per-deck cost):
+
+| n | GPU brute force | CPU 1-thread (full tape arsenal) |
+|---|---|---|
+| 256³ | 14.3 ms | ~5 ms |
+| 512³ | 76.2 ms | ~42 ms |
+
+Read that carefully: a laptop GPU evaluating EVERY voxel of the
+FULL tape with NO pruning is within ~2x of a CPU thread wielding
+everything this document describes.  The pruning arsenal is worth
+~20-100x; it currently lives only on the CPU.  Stage B ports it:
+fidget-wgpu's pipeline (interval tile classification =
+tape_eval_i_batch on device; tape_simplify.wgsl = tape_push on
+device) - a port, not research, and the bytecode it consumes is
+the blob above.
