@@ -15,9 +15,14 @@ release; newest work at the top of each section.
   both implementations side by side over the full test suite.
   gear r60 detect-features export 2.25s → 2.05s; quarter-scale
   merged Zeiss r7 export 18.0s → 15.7s; golden meshes bit-identical.
+  The command queue itself is now a vector (was std::list - one
+  node allocation per scheduled edge).
   (Octant batch-classification in the mesher was also built and
   measured: wall-neutral, reverted - the mesher tracks the surface,
-  so children are rarely skippable; see doc/TAPE-NEXT.md §1.)
+  so children are rarely skippable; see doc/TAPE-NEXT.md §1.  A
+  fine per-tile render work queue was likewise built, measured 40%
+  SLOWER than the coarse chunks - each tile re-pays the descent
+  from the base tape - and dropped; see doc/TAPE-NEXT.md §2.)
 - **The fmin toll removed** (doc/TAPE-DESIGN.md "Round 4"): since
   Antimony's first commit, every min/max node evaluated at every
   voxel paid a call into libm - `min_f` was C's double-precision
