@@ -92,9 +92,20 @@ void tape_release(Tape* tape);
     escape the region a tape was pushed for. */
 Tape* tape_base_for_point(Tape* tape, float x, float y, float z);
 
+/** @brief Like tape_base_for_point, for an axis-aligned box: walks up
+    until the whole box lies inside the tape's recorded bounds. */
+Tape* tape_base_for_region(Tape* tape,
+                           float xmin, float xmax,
+                           float ymin, float ymax,
+                           float zmin, float zmax);
+
 /*  Introspection (tests / diagnostics) */
 unsigned tape_length(const Tape* tape);
 bool tape_is_terminal(const Tape* tape);
+
+/** @brief Dumps clauses (and, with a ctx, the ctx's interval results
+    and maybe-NaN taint per slot) to stderr.  Diagnostics only. */
+void tape_dump(const Tape* tape, const TapeCtx* ctx);
 
 #ifdef __cplusplus
 }

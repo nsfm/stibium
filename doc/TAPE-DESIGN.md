@@ -155,6 +155,101 @@ Peak RSS flat everywhere (the N per-thread clones each carried full
 per-node result buffers, so per-thread workspaces are a wash on
 memory until register allocation lands).
 
+## Round 2 (landed 2026-07-13, same night)
+
+The follow-up sweep after the keystone landed: soundness, memory,
+and the instrumentation the tile renderer will steer by.
+
+**Pruning fuzzer + maybe-NaN taint.** New `[fuzzer]` test: random
+expressions (min/max-heavy, domain-error ops included on purpose) x
+random regions, comparing pushed tapes against base pointwise, plus
+nested pushes and binary-mode sign checks (`STIBIUM_FUZZ_COUNT` /
+`STIBIUM_FUZZ_SEED`; 100k trees = 10.6M assertions green). It found
+four real bugs, three of them pre-dating the tape work:
+
+1. **Domain-error bounds poisoning pruning** (ancient, conceptual):
+   sqrt/log/asin/acos/0-div of out-of-domain inputs produce garbage
+   finite intervals, and pruning trusted them.  Fix: per-clause
+   maybe-NaN taint recorded during interval evaluation (libfive's
+   `Interval::maybe_nan`, plus infinity rules it lacks: inf-inf,
+   0*inf, sin/cos/tan(inf) are NaN factories with clean-looking
+   bounds).  Tainted records veto pruning and binary collapse;
+   interval values are never altered, so culling is unchanged.
+2. **pow_i truncated the exponent to int(B.lower)** (ancient,
+   upstream): pow(x, Z) got the bounds of pow(x, 0).  Real/varying
+   exponents now get sound corner bounds for positive bases and
+   +/-inf + taint otherwise; the integer fast path is byte-identical.
+3. **Binary collapse used lower >= 0** (ancient, upstream): a bound
+   touching zero isn't one sign class under negation (neg(+0) stays
+   >= 0, neg(upper) goes negative), so exactly-zero fields could
+   flip fill state.  Now strictly > 0.
+4. OP_COPY missing from arity() (ours, same session - the fuzzer
+   caught it in nested pushes within minutes).
+
+**The taint fix repaired a visible artifact:** the old build's
+showcase_gear render differs from unpruned ground truth by 5,842
+pixels (3.5%, involute-gear domain errors driving bogus collapses);
+the new render matches ground truth bit-for-bit.  That render is
+re-baselined as a correctness fix - every other golden and render
+compares identical.
+
+**Register allocation.** Deck compile now linear-scans clause
+outputs onto a minimal register file (constants/axes stay pinned;
+evaluators are elementwise, so a dying input donates its register
+in-place).  Merged Zeiss: 3157 clauses run in 465 registers -
+workspaces shrink ~4x (and ~7x on smaller decks).  Two structural
+consequences, both MPR-shaped: pushes emit OP_COPY instead of
+remapping readers (a survivor's register may be redefined between
+def and use), and min/max choices + per-clause bounds/taint are
+recorded during the interval pass (`ClauseIv`), because the register
+file only holds values until their last read.  Wall-time neutral on
+CPU meshing today; it's the precondition for the SIMD tile viewport
+and any GPU path (bounded per-thread registers).
+
+**Deck caching.** `Shape::getDeck()` compiles lazily once (thread-
+safe, shared across copies); the multithreaded renderers take a
+Deck* instead of recompiling the tree every frame.  Headless one-
+shots are unchanged; interactive viewport frames stop paying a
+per-frame compile.
+
+**Block-escape fix.** `get_normals`' +/-epsilon probes can step just
+outside the packed block whose specialized tape is in effect; they
+now walk up the tape stack (`tape_base_for_region`) until covered.
+Goldens unchanged (the escape has to actually flip a pruned branch
+to matter), but the hole is closed.
+
+**Churn control.** Thread-local spare-tape freelist (tape objects
+and their clause capacity recycle without locks) and no more pushes
+inside packed blocks, where the curve shows shrinkage has flatlined
+- push count on the merged-Zeiss export drops 4.7M -> 0.6M.
+
+**Shrinkage curve** (`STIBIUM_TAPE_STATS=1`, merged Zeiss export):
+
+| depth | tapes | avg clauses |
+|---|---|---|
+| 0 | 1 | 3157 |
+| 1 | 57 | 1479 |
+| 3 | 1,575 | 591 |
+| 6 | 172,019 | **156 (20x)** |
+| 9 | 2,318,029 | 200 |
+
+Keeter's MPR shrinkage, reproduced on our worst model; the flat tail
+is the near-surface selection effect.  Depth ~6 saturation is the
+number the tile renderer's tile size should be tuned against.
+
+**Affine collapse** (`STIBIUM_AFFINE=1`, off by default): folds
+add/sub-by-constant and mul-by-constant chains (stacked transforms)
+at deck compile - 836 folds on the merged Zeiss, 3157 -> 2914
+clauses.  Wall-neutral on exports (hot loops run on pushed tapes
+where decided mins already dropped those chains), so it stays
+opt-in: reassociation changes float rounding, and bit-identity is
+the default until the tile renderer gives it a workload that pays.
+
+Verification: full suite 625,588 assertions green; 100k-tree fuzz
+green; all four goldens byte-identical; all renders byte-identical
+except showcase_gear, which now matches unpruned ground truth
+exactly (see above).
+
 Notes for the next rung (the SIMD tile viewport):
 
 - Pushed tapes are malloc'd per push; a spares freelist (libfive

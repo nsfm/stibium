@@ -32,6 +32,8 @@ const char* OPCODE_NAMES[] = {
     "OP_Z",
     "OP_CONST",
 
+    "OP_COPY",
+
     "LAST_OP"
 };
 

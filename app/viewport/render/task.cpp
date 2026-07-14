@@ -247,8 +247,8 @@ Bounds RenderTask::render(Shape* shape, Bounds b_, float scale)
 
     build_arrays(&r, b.xmin, b.ymin, b.zmin,
                      b.xmax, b.ymax, b.zmax);
-    render16_mt(shape->tree.get(), r, d16_rows, &halt_flag);
-    shaded8_mt(shape->tree.get(), r, d16_rows, s8_rows, &halt_flag);
+    render16_mt(shape->getDeck(), r, d16_rows, &halt_flag);
+    shaded8_mt(shape->getDeck(), r, d16_rows, s8_rows, &halt_flag);
 
     free_arrays(&r);
 

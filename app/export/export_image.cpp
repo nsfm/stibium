@@ -215,7 +215,7 @@ QImage renderShapesImage(const std::vector<Shape>& shapes, bool flat,
         memset(sd16.data(), 0, px_count * sizeof(uint16_t));
         memset(ss8, 0, px_count * 3);
 
-        render16_mt(t.tree.get(), r, sd16_rows.data(), &halt);
+        render16_mt(t.getDeck(), r, sd16_rows.data(), &halt);
         if (flat)
         {
             // 2D fields have no meaningful z gradient; fill with a
@@ -230,7 +230,7 @@ QImage renderShapesImage(const std::vector<Shape>& shapes, bool flat,
         }
         else
         {
-            shaded8_mt(t.tree.get(), r, sd16_rows.data(), ss8_rows,
+            shaded8_mt(t.getDeck(), r, sd16_rows.data(), ss8_rows,
                        &halt);
         }
 

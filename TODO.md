@@ -27,10 +27,11 @@ what's still ahead.
   the viewport, interval-cull tiles, specialize the tape per
   ambiguous tile, evaluate survivors with the array evaluator
   (thread pool stands in for the GPU grid; SIMD lanes for warp
-  lanes). Follow-ups worth benching while in there: a spares
-  freelist for pushed tapes (libfive Deck::claim) to cut push
-  allocation churn, and Fidget-style register allocation to shrink
-  workspace rows.
+  lanes). Round 2 (2026-07-13) already banked the prerequisites:
+  register allocation (bounded workspaces), spare-tape freelist,
+  per-shape deck caching, the shrinkage curve (saturates ~depth 6 on
+  the merged Zeiss - tune tile size against it), and an opt-in
+  affine-collapse pass to enable when this lands.
 
 - **Parser hardening (upstream #198).** A malformed math expression
   hits a lemon assert and aborts the whole app. We OWN this parser
@@ -345,10 +346,13 @@ half_space, gyroid/TPMS, clearance, mirrors. Still open:
 
 - **Shortened-tape evaluation** - SHIPPED 2026-07-13 (Tier 1 → done;
   doc/TAPE-DESIGN.md).
-- **maybe_nan interval tracking** in math_i.c - silent sqrt/log/acos
-  domain errors currently poison interval bounds; track the flag like
-  libfive's eval/interval.hpp does.
-- **affine-collapse pass** and **interval-derived bounds** (both M).
+- **maybe_nan interval tracking** - SHIPPED 2026-07-13 (per-clause
+  taint in the tape evaluator; found by the pruning fuzzer, fixed a
+  visible showcase_gear artifact - see TAPE-DESIGN "Round 2").
+- **affine-collapse pass** - SHIPPED 2026-07-13 as opt-in
+  STIBIUM_AFFINE=1 (wall-neutral on exports; flip on when the tile
+  renderer stresses base-tape evals). **interval-derived bounds** (M)
+  still open.
 - **Adaptive manifold DC mesher** (MPL 2.0, literal port permitted) -
   the marquee item, tracked in Tier 3.
 - **Steal Keeter's Meshing Algorithm Idea.** Per his 2026-07-03 post

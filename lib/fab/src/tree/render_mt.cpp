@@ -7,7 +7,6 @@
 
 #include "fab/tree/render.h"
 #include "fab/tree/tape.h"
-#include "fab/tree/tree.h"
 
 namespace {
 
@@ -66,16 +65,15 @@ std::vector<Region> split_xy(const Region& r, size_t target)
 }
 
 template <typename F>
-void run_chunked(MathTree* tree, const Region& r, volatile int* halt,
+void run_chunked(const Deck* deck, const Region& r, volatile int* halt,
                  int threads, F&& render_chunk)
 {
     threads = resolve_threads(threads);
     threads = int(std::min<uint64_t>(threads,
                                      uint64_t(r.ni) * r.nj / 64 + 1));
 
-    // One immutable deck serves every worker; each thread only needs
-    // its own workspace (no per-thread tree clones).
-    Deck* deck = deck_from_tree(tree);
+    // The deck is borrowed (compiled once per shape, immutable);
+    // every worker shares it and only needs its own workspace.
     Tape* tape = deck_base(deck);
 
     if (threads < 2)
@@ -83,7 +81,6 @@ void run_chunked(MathTree* tree, const Region& r, volatile int* halt,
         TapeCtx* ctx = tape_ctx_new(deck);
         render_chunk(tape, ctx, r);
         tape_ctx_free(ctx);
-        deck_free(deck);
         return;
     }
 
@@ -105,25 +102,24 @@ void run_chunked(MathTree* tree, const Region& r, volatile int* halt,
     }
     for (auto& th : pool)
         th.join();
-    deck_free(deck);
 }
 
 }  // namespace
 
-void render16_mt(MathTree* tree, Region r,
+void render16_mt(const Deck* deck, Region r,
                  uint16_t** img, volatile int* halt, int threads)
 {
-    run_chunked(tree, r, halt, threads,
+    run_chunked(deck, r, halt, threads,
                 [=](Tape* t, TapeCtx* ctx, const Region& chunk) {
                     render16_tape(t, ctx, chunk, img, halt, nullptr);
                 });
 }
 
-void shaded8_mt(MathTree* tree, Region r,
+void shaded8_mt(const Deck* deck, Region r,
                 uint16_t** depth, uint8_t (**out)[3], volatile int* halt,
                 int threads)
 {
-    run_chunked(tree, r, halt, threads,
+    run_chunked(deck, r, halt, threads,
                 [=](Tape* t, TapeCtx* ctx, const Region& chunk) {
                     shaded8_tape(t, ctx, chunk, depth, out, halt, nullptr);
                 });
