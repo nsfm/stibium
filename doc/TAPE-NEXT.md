@@ -40,10 +40,10 @@ Numbers to beat (8c/16t):
 | workload | current champ |
 |---|---|
 | merged Zeiss --render 512px | ~3.3 s (was 3.5) |
-| merged Zeiss --render 2048px | **12.36 s** (was 14.97) |
-| merged Zeiss --export r7, 1/4 scale | ~19 s |
+| merged Zeiss --render 2048px | **7.6 s** (round 4; was 14.97 pre-tape-batch) |
+| merged Zeiss --export r7, 1/4 scale | ~18 s |
 | merged Zeiss --export r7, full scale | ~310 s / 14.4 GB peak |
-| gear.sb --export r60 detect | ~1.6 s |
+| gear.sb --export r60 detect | ~2.25 s (same-machine A/B; old "1.6" was measured differently) |
 
 ## 1. Mesher batching (biggest CPU win on the board)
 
@@ -86,16 +86,26 @@ per-tile decks are unnecessary, but per-tile ROOT pushes (against
 the tile's frustum, before descending) would let workers start from
 a pre-shrunk tape - test separately.
 
-## 3. Autovectorizer audit (cheap, do first)
+## 3. Autovectorizer audit — DONE 2026-07-13 (TAPE-DESIGN Round 4)
 
-Confirm the batch kernels actually vectorize:
-`ninja -v` the tape.cpp compile line, re-run with
-`-fopt-info-vec-missed` (gcc) and look at `batch_add/sub/mul/min/max`.
-If blocked on aliasing, `__restrict__` the row pointers (safe: the
-locals-then-store pattern already handles the R==A case, but the
-compiler can't see that) or `#pragma GCC ivdep`.  Then `perf record`
-a 2048px merged render and confirm where time actually goes now -
-candidates: batch kernels, leaf `eval_r`, the qsort, `split()`.
+Found something much bigger than missed vectorization: `min_f`/
+`max_f` were libm `fmin`/`fmax` PLT calls — ~40% of render wall
+time.  Now bit-exact inline replicas (see Round 4 for the measured
+platform semantics: ties incl ±0 → B, NaN-vs-NaN → A).  ivdep on the
+batch kernels, `-fno-trapping-math` scoped to SbFab.  2048 px:
+11.8 → 7.6 s, everything bit-identical.
+
+Leftovers if profiles ever point here again: `batch_mul` still
+scalar (SSE2 can't if-convert the 4-product NaN-select chain; fix =
+`-march=x86-64-v2` or explicit reformulation); no `-march` in the
+build at all, so everything is SSE2-width — a `-march` bump doubles
+vector width but is Nate's portability call.  Profiling recipe that
+works here (no perf/valgrind on the box): LD_PRELOAD a
+`prctl(PR_SET_PTRACER_ANY)` shim (ptrace_scope=1), then loop
+`gdb -batch -ex "thread apply all bt 8" -p PID` — scratchpad
+`pmp.sh`/`traceme.c`, aggregate with awk.  Post-round-4 profile
+guess for the next lever: leaf `eval_r` transcendentals + the
+remaining batch-kernel share; re-profile before believing anything.
 
 ## 4. The dowry (Fidget re-recon, clone at ~/code/fidget, MPL-2.0)
 

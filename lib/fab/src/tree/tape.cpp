@@ -937,9 +937,13 @@ namespace {
 constexpr int BH = TAPE_BATCH;   // upper-bound half offset in a row
 
 /*  Locals-then-store keeps every kernel alias-safe: with register
- *  reuse the output row may be one of the input rows.  */
+ *  reuse the output row may be one of the input rows.  Lane k only
+ *  touches indices k and BH+k, so iterations are independent even
+ *  then — ivdep states that, sparing gcc the runtime alias check
+ *  (and the scalar twin) it otherwise versions each loop with.  */
 void batch_add(const float* A, const float* B, float* R, int n)
 {
+    #pragma GCC ivdep
     for (int k = 0; k < n; ++k) {
         const float lo = A[k] + B[k], hi = A[BH+k] + B[BH+k];
         R[k] = lo; R[BH+k] = hi;
@@ -948,6 +952,7 @@ void batch_add(const float* A, const float* B, float* R, int n)
 
 void batch_sub(const float* A, const float* B, float* R, int n)
 {
+    #pragma GCC ivdep
     for (int k = 0; k < n; ++k) {
         const float lo = A[k] - B[BH+k], hi = A[BH+k] - B[k];
         R[k] = lo; R[BH+k] = hi;
@@ -956,17 +961,19 @@ void batch_sub(const float* A, const float* B, float* R, int n)
 
 void batch_mul(const float* A, const float* B, float* R, int n)
 {
+    #pragma GCC ivdep
     for (int k = 0; k < n; ++k) {
         const float c1 = A[k] * B[k],       c2 = A[k] * B[BH+k],
                     c3 = A[BH+k] * B[k],    c4 = A[BH+k] * B[BH+k];
-        const float lo = fmin(fmin(c1, c2), fmin(c3, c4));
-        const float hi = fmax(fmax(c1, c2), fmax(c3, c4));
+        const float lo = min_f(min_f(c1, c2), min_f(c3, c4));
+        const float hi = max_f(max_f(c1, c2), max_f(c3, c4));
         R[k] = lo; R[BH+k] = hi;
     }
 }
 
 void batch_min(const float* A, const float* B, float* R, int n)
 {
+    #pragma GCC ivdep
     for (int k = 0; k < n; ++k) {
         const float lo = A[k] < B[k] ? A[k] : B[k];
         const float hi = A[BH+k] < B[BH+k] ? A[BH+k] : B[BH+k];
@@ -976,6 +983,7 @@ void batch_min(const float* A, const float* B, float* R, int n)
 
 void batch_max(const float* A, const float* B, float* R, int n)
 {
+    #pragma GCC ivdep
     for (int k = 0; k < n; ++k) {
         const float lo = A[k] > B[k] ? A[k] : B[k];
         const float hi = A[BH+k] > B[BH+k] ? A[BH+k] : B[BH+k];
@@ -1018,16 +1026,19 @@ extern "C" void tape_eval_i_batch(const Tape* tape, TapeCtx* ctx,
 
     for (uint32_t s : ctx->deck->xs) {
         float* r = ROW(s);
+        #pragma GCC ivdep
         for (int k = 0; k < count; ++k)
             { r[k] = Xs[k].lower; r[BH+k] = Xs[k].upper; }
     }
     for (uint32_t s : ctx->deck->ys) {
         float* r = ROW(s);
+        #pragma GCC ivdep
         for (int k = 0; k < count; ++k)
             { r[k] = Ys[k].lower; r[BH+k] = Ys[k].upper; }
     }
     for (uint32_t s : ctx->deck->zs) {
         float* r = ROW(s);
+        #pragma GCC ivdep
         for (int k = 0; k < count; ++k)
             { r[k] = Zs[k].lower; r[BH+k] = Zs[k].upper; }
     }
@@ -1079,19 +1090,23 @@ extern "C" void tape_eval_i_batch(const Tape* tape, TapeCtx* ctx,
             }
 
             case OP_CONST:
+                #pragma GCC ivdep
                 for (int k = 0; k < count; ++k)
                     { R[k] = c.imm; R[BH+k] = c.imm; }
                 break;
             case OP_COPY:
-                if (R != A)
+                if (R != A) {
+                    #pragma GCC ivdep
                     for (int k = 0; k < count; ++k)
                         { R[k] = A[k]; R[BH+k] = A[BH+k]; }
+                }
                 break;
             default: ;
         }
     }
 
     const float* root = ROW(tape->root);
+    #pragma GCC ivdep
     for (int k = 0; k < count; ++k)
         out[k] = Interval{ root[k], root[BH+k] };
 #undef ROW

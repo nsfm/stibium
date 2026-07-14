@@ -84,6 +84,12 @@ target_include_directories(SbFab SYSTEM PRIVATE
     ${PNG_INCLUDE_DIR}
 )
 
+# The kernel never reads FP exception flags, and min_f/max_f's
+# NaN-aware selects only if-convert (and hence vectorize) when the
+# compiler may ignore them.  Computed values are unchanged — renders
+# and golden meshes stay bit-identical (verified 2026-07-13).
+target_compile_options(SbFab PRIVATE -fno-trapping-math)
+
 # Add the binary dir to include generated files
 target_include_directories(SbFab PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}

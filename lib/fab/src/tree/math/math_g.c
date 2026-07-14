@@ -2,6 +2,7 @@
 #include <math.h>
 
 #include "fab/tree/math/math_g.h"
+#include "fab/tree/math/math_f.h"
 
 derivative* add_g(const derivative* restrict A,
                   const derivative* restrict B,
@@ -69,7 +70,7 @@ derivative* min_g(const derivative* restrict A,
 {
     for (int q = 0; q < c; ++q)
     {
-        R[q].v = fmin(A[q].v, B[q].v);
+        R[q].v = min_f(A[q].v, B[q].v);
         if (A[q].v < B[q].v)
         {
             R[q].dx = A[q].dx;
@@ -92,7 +93,7 @@ derivative* max_g(const derivative* restrict A,
 {
     for (int q = 0; q < c; ++q)
     {
-        R[q].v = fmax(A[q].v, B[q].v);
+        R[q].v = max_f(A[q].v, B[q].v);
         if (A[q].v >= B[q].v)
         {
             R[q].dx = A[q].dx;

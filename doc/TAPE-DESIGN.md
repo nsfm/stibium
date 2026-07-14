@@ -306,3 +306,56 @@ Notes for the next rung (the SIMD tile viewport):
   Confirmed present before the tape change (old build differs from
   itself the same way). Single-threaded output - the golden referee -
   is bit-stable.
+
+## Round 4 (2026-07-13, post-compact): the fmin toll
+
+The autovec audit (TAPE-NEXT §3) went looking for missed
+vectorization in the batch kernels and instead found the kernel's
+oldest tax.  A gdb-sampled profile of the 2048 px merged-Zeiss
+render put ~64% of busy samples in `tape_eval_r` — and most of THOSE
+inside `fmin@plt`/`fminf64`.  `min_f`/`max_f` were `fmin(A, B)`:
+C's *double* fmin, so every min/max node × every voxel paid
+float→double×2, a PLT call into libm, and a truncation back.  A CSG
+model is mostly min/max nodes.  This predates Antimony's first
+commit.
+
+Fixes, in order of landing:
+
+1. **`#pragma GCC ivdep`** on the batch kernels and fill loops in
+   tape.cpp — each lane k touches only indices k and BH+k, so the
+   pragma is a statement of fact; it removes gcc's runtime aliasing
+   check and versioned scalar twin (~2.5%).
+2. **`min_f`/`max_f` written out** (math_f.h) as the bit-exact
+   replica of this platform's libm/x86 semantics: `isnan(B) → A`,
+   `isnan(A) → B`, else `A < B ? A : B` (ties **including ±0 return
+   B**, NaN-vs-NaN returns A — measured, not assumed: glibc's fmin
+   here is minsd-based asm, NOT its own C template, which returns +0
+   for fmin(+0,-0)).  Parity proven by exhaustive-specials + 100 M
+   random-bit-pattern harness against real libm (`-fno-builtin`),
+   0 mismatches; sNaN quieting is the one divergence, and arithmetic
+   can't produce sNaN.  `mul_i`/`div_i`/`batch_mul`/`min_g`/`max_g`
+   fmin chains routed through them (~31% — the headline).
+3. **`-fno-trapping-math`** scoped to SbFab — the kernel never reads
+   FP exception flags, and the flag is what lets gcc if-convert the
+   NaN selects: `min_r`/`max_r` DUAL loops now vectorize (~6%).
+
+| merged Zeiss --render 2048 px | wall |
+|---|---|
+| round 3 champ (same night, same machine state) | 11.8 s |
+| + ivdep | 11.5 s |
+| + inline min_f/max_f | 8.1 s |
+| + -fno-trapping-math | **7.6 s** |
+
+gear r60 detect-features export: 2.37 s → 2.25 s; quarter-scale
+merged r7 export ~18 s (mesher time is octant classification +
+feature detection, not min chains — mesher batching stays the next
+big export lever).
+
+Verified at every step: full suite (627,666), 100k fuzz (11.4 M),
+goldens bit-identical old-vs-new, 2048 px render byte-identical to
+the round-3 binary's.  `batch_mul` still doesn't vectorize (the
+4-product NaN-select chain defeats SSE2 if-conversion) — it's
+inlined now, and batch kernels totalled ~16% of the profile, so it
+keeps.  Candidates if it ever matters: `-march=x86-64-v2` (SSE4.1
+blends; changes no arithmetic results) or an explicit two-phase
+min/NaN-repair formulation.

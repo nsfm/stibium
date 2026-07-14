@@ -3,6 +3,7 @@
 #include <math.h>
 
 #include "fab/tree/math/math_i.h"
+#include "fab/tree/math/math_f.h"
 
 Interval add_i(Interval A, Interval B)
 {
@@ -25,8 +26,8 @@ Interval mul_i(Interval A, Interval B)
           c3 = A.upper * B.lower,
           c4 = A.upper * B.upper;
 
-    i.lower = fmin(fmin(c1, c2), fmin(c3, c4));
-    i.upper = fmax(fmax(c1, c2), fmax(c3, c4));
+    i.lower = min_f(min_f(c1, c2), min_f(c3, c4));
+    i.upper = max_f(max_f(c1, c2), max_f(c3, c4));
     return i;
 }
 
@@ -48,8 +49,8 @@ Interval div_i(Interval A, Interval B)
           c3 = A.upper * B.lower,
           c4 = A.upper * B.upper;
 
-    i.lower = fmin(fmin(c1, c2), fmin(c3, c4));
-    i.upper = fmax(fmax(c1, c2), fmax(c3, c4));
+    i.lower = min_f(min_f(c1, c2), min_f(c3, c4));
+    i.upper = max_f(max_f(c1, c2), max_f(c3, c4));
     return i;
 }
 
