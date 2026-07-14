@@ -19,6 +19,14 @@ RenderImageDialog::RenderImageDialog(bool section_active, QWidget* parent)
     size_box->setToolTip("Longest side of the exported image");
     layout->addRow("Image size", size_box);
 
+    aa_box = new QSpinBox(this);
+    aa_box->setRange(1, 4);
+    aa_box->setValue(2);
+    aa_box->setPrefix("x");
+    aa_box->setToolTip("Supersampling factor: renders at Nx the size "
+                       "and smooth-downscales (1 disables)");
+    layout->addRow("Antialiasing", aa_box);
+
     transparent_box = new QCheckBox(this);
     transparent_box->setChecked(true);
     layout->addRow("Transparent background", transparent_box);
@@ -41,6 +49,11 @@ RenderImageDialog::RenderImageDialog(bool section_active, QWidget* parent)
 int RenderImageDialog::imageSize() const
 {
     return size_box->value();
+}
+
+int RenderImageDialog::antialias() const
+{
+    return aa_box->value();
 }
 
 bool RenderImageDialog::transparentBackground() const

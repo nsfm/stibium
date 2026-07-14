@@ -47,6 +47,10 @@ what's still ahead.
   a File > "copy mesh into project" helper for the unsaved-project
   nag; consider exposing `fab.shapes.import_mesh` bounds padding.
 
+- Shipped 2026-07-13: light-sweep GIF, startup splash, Ctrl-C
+  graceful close, and the animation export dialog (size/frames/AA)
+  all landed - see CHANGELOG.
+
 - **Render polish, next round.** Supersampled AA (default 2x, --aa)
   and turntable/wiggle/stereo verbs shipped 2026-07-13; remaining:
   edge-aware AA refinement (only where depth/normals step),
@@ -356,5 +360,3 @@ CI; prospero renders). Remaining build order:
 - **[M] straight-line transpile to parametric script nodes** once the
   stdlib raid fully lands, so imports come in editable rather than as
   one frozen field node.
-  </content>
-  </invoke>

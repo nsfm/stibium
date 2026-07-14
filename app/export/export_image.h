@@ -28,6 +28,12 @@ struct Options
                                 instead of its per-view bounds, so
                                 rotating views keep a fixed framing
                                 (turntables)  */
+    bool light_override = false;
+    float light[3] = {0.33f, 0.32f, 0.89f};
+                            /*  view-space key light direction, used
+                                when light_override is set (lighting
+                                sweeps); otherwise the configured
+                                render/key_light applies  */
     bool transparent = true;/*  transparent vs. theme background  */
     QString filename;       /*  output image (format by extension)  */
     QString node_name;      /*  non-empty: render only this node's
