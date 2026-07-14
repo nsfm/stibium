@@ -16,7 +16,9 @@ release; newest work at the top of each section.
   circumsphere framing so the model doesn't swim between frames.
   The GIF writer is a from-scratch GIF89a/LZW encoder (like the 3MF
   ZIP writer: no new dependencies), verified frame-exact against an
-  external decoder.
+  external decoder. All three also live in the viewport's Render
+  menu, rendered in the background with per-frame progress, spinning
+  the model about world z as seen from your current view angle.
 - **Check nodes: unit tests for geometry** (new Checks category).
   Check: Fits Box, Check: Volume, and Check: Clearance measure the
   actual field (grid integration; tight bounds accurate to a cell)

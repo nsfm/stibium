@@ -91,6 +91,10 @@
      <string>Render</string>
     </property>
     <addaction name="actionExportImage"/>
+    <addaction name="separator"/>
+    <addaction name="actionTurntable"/>
+    <addaction name="actionWiggle"/>
+    <addaction name="actionStereo"/>
    </widget>
    <widget class="QMenu" name="menuWindow">
     <property name="title">
@@ -254,6 +258,21 @@
   <action name="actionExportImage">
    <property name="text">
     <string>Export image...</string>
+   </property>
+  </action>
+  <action name="actionTurntable">
+   <property name="text">
+    <string>Turntable GIF...</string>
+   </property>
+  </action>
+  <action name="actionWiggle">
+   <property name="text">
+    <string>Wigglegram GIF...</string>
+   </property>
+  </action>
+  <action name="actionStereo">
+   <property name="text">
+    <string>Stereo pair...</string>
    </property>
   </action>
   <action name="actionAnalytics">
