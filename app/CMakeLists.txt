@@ -274,6 +274,18 @@ $<TARGET_FILE:${STIBIUM_APP}> --render ${CMAKE_CURRENT_BINARY_DIR}/ctest_vm_${ta
         set_tests_properties(app_import_vm_${tape}
                 PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     endforeach()
+
+    # Geometric diff: a model diffed against itself is identical,
+    # and diffing two different models renders a composite image
+    add_test(NAME app_diff_identity
+             COMMAND bash -c "\
+$<TARGET_FILE:${STIBIUM_APP}> ${CMAKE_SOURCE_DIR}/examples/showcase_gear.sb --diff ${CMAKE_SOURCE_DIR}/examples/showcase_gear.sb | grep -q '\"identical\": true'")
+    add_test(NAME app_diff_render
+             COMMAND bash -c "\
+$<TARGET_FILE:${STIBIUM_APP}> ${CMAKE_SOURCE_DIR}/examples/csg.sb --diff ${CMAKE_SOURCE_DIR}/examples/gear.sb --render ${CMAKE_CURRENT_BINARY_DIR}/ctest_diff.png --size 128 && \
+test -s ${CMAKE_CURRENT_BINARY_DIR}/ctest_diff.png")
+    set_tests_properties(app_diff_identity app_diff_render
+            PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
 set_property(TARGET ${STIBIUM_APP} PROPERTY CXX_STANDARD 17)

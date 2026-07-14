@@ -266,6 +266,118 @@ static int resaveHeadless(App& app, const QString& out)
 /*
  *  Implements --render: canned views over the shared image exporter.
  */
+/*
+ *  Implements --diff: loads a second file, splits the two models
+ *  into unchanged / removed / added fields (set algebra on the
+ *  distance fields - meshes can't do this, math can), prints their
+ *  measures as JSON, and optionally renders a composite image
+ *  (unchanged in gray, removed in red, added in green).
+ */
+static int diffHeadless(App& app, const QString& other_file,
+                        const QString& render_file, float resolution,
+                        const QString& view, int size, float section)
+{
+    std::unique_ptr<Shape> a3, a2;
+    QString err = ImageExport::collectShapes(app.getGraph(), "", a3, a2);
+    if (err.isEmpty() && !a3 && !a2)
+        err = "no renderable shapes";
+    if (!err.isEmpty())
+    {
+        fprintf(stderr, "diff: base file: %s\n",
+                err.toLocal8Bit().constData());
+        return 1;
+    }
+
+    app.loadFile(other_file);
+    std::unique_ptr<Shape> b3, b2;
+    err = ImageExport::collectShapes(app.getGraph(), "", b3, b2);
+    if (err.isEmpty() && !b3 && !b2)
+        err = "no renderable shapes";
+    if (!err.isEmpty())
+    {
+        fprintf(stderr, "diff: '%s': %s\n",
+                other_file.toLocal8Bit().constData(),
+                err.toLocal8Bit().constData());
+        return 1;
+    }
+
+    const bool a_flat = !a3, b_flat = !b3;
+    if (a_flat != b_flat)
+    {
+        fprintf(stderr, "diff: one model is 2D and the other 3D\n");
+        return 1;
+    }
+    const bool flat = a_flat;
+    const Shape& A = flat ? *a2 : *a3;
+    const Shape& B = flat ? *b2 : *b3;
+
+    Shape removed = A & ~B;
+    Shape added = B & ~A;
+    Shape unchanged = A & B;
+    removed.r = 220;  removed.g = 60;   removed.b = 50;
+    added.r = 70;     added.g = 190;    added.b = 90;
+
+    // Integrate the changed regions.  The exact-identity shortcut
+    // skips integration when the fields are literally the same math.
+    const bool identical = A.math == B.math;
+    double vol_removed = 0, vol_added = 0;
+    if (!identical)
+    {
+        volatile int halt = 0;
+        for (auto* layer : {&removed, &added})
+        {
+            const Bounds& lb = layer->bounds;
+            if (lb.xmin > lb.xmax || lb.ymin > lb.ymax)
+                continue;               // provably empty
+            FieldStats stats;
+            if (analyze_field(layer->tree.get(),
+                              lb.xmin, lb.ymin, flat ? 0 : lb.zmin,
+                              lb.xmax, lb.ymax, flat ? 0 : lb.zmax,
+                              resolution, flat, -1, &halt, &stats))
+            {
+                (layer == &removed ? vol_removed : vol_added)
+                        = stats.volume;
+            }
+        }
+    }
+
+    QJsonObject out;
+    out["identical"] = identical ||
+            (vol_removed == 0 && vol_added == 0);
+    out[flat ? "removed_area" : "removed_volume"] = vol_removed;
+    out[flat ? "added_area" : "added_volume"] = vol_added;
+    out["flat"] = flat;
+    printf("%s", QJsonDocument(out).toJson().constData());
+
+    if (!render_file.isEmpty())
+    {
+        ImageExport::Options opt;
+        if (view == "front")
+        {
+            opt.M.rotate(-90, 1, 0, 0);
+        }
+        else if (view != "top")  // iso
+        {
+            opt.M.rotate(-55, 1, 0, 0);
+            opt.M.rotate(25, 0, 0, 1);
+        }
+        opt.section = section;
+        opt.resolution = resolution;
+        opt.fit_px = size;
+        opt.filename = render_file;
+
+        err = ImageExport::renderShapes({unchanged, removed, added},
+                                        flat, opt);
+        if (!err.isEmpty())
+        {
+            fprintf(stderr, "diff render: %s\n",
+                    err.toLocal8Bit().constData());
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int renderHeadless(App& app, const QString& out, float resolution,
                           const QString& view, int size, float section,
                           const QString& node)
@@ -358,7 +470,7 @@ int main(int argc, char *argv[])
         if (arg == "--export" || arg == "--validate" ||
             arg == "--render" || arg == "--resave" ||
             arg == "--analyze" || arg == "--describe-nodes" ||
-            arg == "--import-vm")
+            arg == "--import-vm" || arg == "--diff")
         {
             if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM"))
                 qputenv("QT_QPA_PLATFORM", "offscreen");
@@ -490,6 +602,12 @@ int main(int argc, char *argv[])
                 "current protocol (batch migration / canonicalizing), "
                 "then exit", "FILE");
         parser.addOption(resaveOpt);
+        QCommandLineOption diffOpt("diff",
+                "Compare the loaded model against FILE: print the "
+                "removed/added material measures as JSON, and with "
+                "--render, write a composite image (gray unchanged, "
+                "red removed, green added)", "FILE");
+        parser.addOption(diffOpt);
         QCommandLineOption importVmOpt("import-vm",
                 "Translate a Fidget .vm math tape (given as the "
                 "positional argument) into FILE as a Stibium project, "
@@ -511,7 +629,8 @@ int main(int argc, char *argv[])
                               parser.isSet(resaveOpt) ||
                               parser.isSet(analyzeOpt) ||
                               parser.isSet(validateOpt) ||
-                              parser.isSet(importVmOpt);
+                              parser.isSet(importVmOpt) ||
+                              parser.isSet(diffOpt);
 
         auto args = parser.positionalArguments();
         // GUI sessions get a progress dialog for long script-eval
@@ -555,6 +674,13 @@ int main(int argc, char *argv[])
         {
             const float res = parser.isSet(resolutionOpt)
                 ? parser.value(resolutionOpt).toFloat() : -1;
+
+            if (parser.isSet(diffOpt))
+                return diffHeadless(app, parser.value(diffOpt),
+                                    parser.value(renderOpt), res,
+                                    parser.value(viewOpt),
+                                    parser.value(sizeOpt).toInt(),
+                                    parser.value(sectionOpt).toFloat());
 
             int code = runHeadless(app, parser.isSet(validateOpt),
                                    parser.value(exportOpt), res,
