@@ -380,6 +380,29 @@ half_space, gyroid/TPMS, clearance, mirrors. Still open:
   DC's thin-feature and self-intersection warts. He asked. We're
   considering it. The audacity of it all.
 
+### Fidget re-recon (2026-07-13, post-tape; clone at ~/code/fidget)
+
+The repo is ACTIVE (commits through 2026-07-12) and has grown crates
+our 2022-era recon didn't know about. All MPL-2.0:
+
+- **fidget-wgpu: the complete MPR GPU pipeline in WGSL.**
+  interval_tiles / tape_interpreter / **tape_simplify** (pushing on
+  device - the hard open question) / voxel_tiles / normals / sort /
+  merge / repack shaders. The Tier 3 GPU renderer is now a *port*,
+  not research - and WGSL runs everywhere (Vulkan/Metal/DX/WebGPU),
+  which also feeds the WASM web-viewer moonshot.
+- **Register spilling, solved:** fidget-core's allocator emits
+  Load/Store ops with LRU eviction when the register file overflows
+  - the answer to our 465-regs-vs-GPU-cap gap, ready to adopt.
+- **fidget-solver: a constraint solver over tape gradients** - the
+  "differentiable CAD / solve for the parameter" Tier 3 item has a
+  reference implementation now.
+- **fidget-bytecode: a packed u32 tape format explicitly "for
+  non-Rust VMs, e.g. an interpreter running on a GPU."** Doubles as
+  an interop invitation: --import-vm already reads his text format;
+  this is the binary sibling, with iter_ops introspection for
+  version-checking foreign interpreters (format marked unstable).
+
 ### Foreign project import — see [doc/FOREIGN-IMPORT.md](doc/FOREIGN-IMPORT.md)
 
 Tier A shipped (`--import-vm` converts Fidget tapes, deterministic + in
