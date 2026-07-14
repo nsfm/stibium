@@ -114,7 +114,17 @@ void App::showStartupSplash(const QString& subtitle)
         return;
     startup_splash = new QSplashScreen(splashPixmap(subtitle));
     startup_splash->show();
-    processEvents(QEventLoop::ExcludeUserInputEvents);
+    startup_splash->raise();
+
+    // Pump events long enough for the compositor to actually map AND
+    // paint the splash NOW.  A single processEvents flushes the map
+    // request but not the expose that paints it; the blocking startup
+    // that follows (Python init, graph evaluation) runs no event loop,
+    // so the splash would otherwise paint - as a one-frame flash -
+    // only when that work finishes.  The maxtime overload waits on the
+    // round-trip instead of spinning past it.
+    processEvents(QEventLoop::ExcludeUserInputEvents, 150);
+    startup_splash->repaint();
 }
 
 void App::finishStartupSplash(QWidget* w)
