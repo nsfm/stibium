@@ -619,6 +619,37 @@ def fillet_difference(a, b, r):
                                        a.math, b.math, 4*r)
     return Shape(s, (a & ~b).bounds)
 
+def blend_expt(a, b, m):
+    """ Smooth union via log-sum-exp (libfive's blend-expt):
+        -log(exp(-m*a) + exp(-m*b)) / m.
+        C-infinity smooth everywhere (unlike the quadratic fillet,
+        which is exact outside the seam band); larger m = tighter.
+        Assumes distance-like fields.
+    """
+    if m <= 0:
+        return a | b
+    # -log(exp(-m*a) + exp(-m*b)) / m
+    s = '/nl+x*f%(nm)g%(A)sx*f%(nm)g%(B)sf%(m)g' % {
+            'nm': -m, 'm': m, 'A': a.math, 'B': b.math}
+    return Shape(s, (a | b).bounds)
+
+def blend_expt_unit(a, b, m):
+    """ blend_expt with the blend amount m expressed in model units
+        (libfive's blend-expt-unit): m is roughly the fillet size.
+    """
+    if m <= 0:
+        return a | b
+    return blend_expt(a, b, 2.75 / (m * m))
+
+def blend_difference(a, b, m, o=0):
+    """ Smooth subtraction: carves b (optionally offset outward by o)
+        out of a with a blended seam of roughly size m.
+        (libfive's blend-difference: the inverse-of-blended-inverses
+        trick.)
+    """
+    r = ~blend_expt_unit(~a, offset(b, o), m)
+    return Shape(r.math, a.bounds)
+
 def morph(a, b, weight):
     """ Morphs between two shapes.
     """
@@ -1778,6 +1809,52 @@ def box_exact(xmin, xmax, ymin, ymax, zmin, zmax):
     inside = 'ia%sa%s%sf0' % (qx, qy, qz)        # min(max(qx,max(qy,qz)),0)
     return Shape('+%s%s' % (outside, inside),
                  xmin, ymin, zmin, xmax, ymax, zmax)
+
+
+def rectangle_exact(xmin, xmax, ymin, ymax):
+    """ Rectangle with an EXACT signed distance field (2D sdBox).
+        The plain `rectangle` uses the cheap max-form, which is not a
+        true distance away from the faces - offset/shell/blends
+        misbehave near its corners.  This one is exact everywhere.
+    """
+    cx, cy = (xmin + xmax)/2.0, (ymin + ymax)/2.0
+    bx, by = (xmax - xmin)/2.0, (ymax - ymin)/2.0
+    qx = '-b-Xf%gf%g' % (cx, bx)                 # |X-cx| - bx
+    qy = '-b-Yf%gf%g' % (cy, by)
+    outside = 'r+qa%sf0qa%sf0' % (qx, qy)
+    inside = 'ia%s%sf0' % (qx, qy)               # min(max(qx,qy), 0)
+    return Shape('+%s%s' % (outside, inside),
+                 xmin, ymin, xmax, ymax)
+
+
+def rounded_box(xmin, xmax, ymin, ymax, zmin, zmax, r):
+    """ Box with rounded corners and edges, exact field (libfive's
+        rounded-box): the exact box shrunk by r, then offset back out.
+        Unlike `rounded_cube`, r is an ABSOLUTE radius in model units,
+        and the field stays a true distance (clean under offset/shell).
+    """
+    r = min(abs(r), (xmax - xmin)/2.0, (ymax - ymin)/2.0,
+            (zmax - zmin)/2.0)
+    if r == 0:
+        return box_exact(xmin, xmax, ymin, ymax, zmin, zmax)
+    return offset(box_exact(xmin + r, xmax - r, ymin + r, ymax - r,
+                            zmin + r, zmax - r), r)
+
+
+def gyroid(x_period, y_period, z_period, thickness):
+    """ Infinite gyroid lattice (triply periodic minimal surface):
+        |sin(x/px)cos(y/py) + sin(y/py)cos(z/pz) + sin(z/pz)cos(x/px)|
+        - thickness.  Unbounded - intersect it with a solid to make an
+        infill (the Gyroid node does exactly that).  thickness is in
+        field units (0..~1.5), not model units.
+    """
+    fx = 2 * math.pi / x_period
+    fy = 2 * math.pi / y_period
+    fz = 2 * math.pi / z_period
+    g = ('++*s*f%(fx)gXc*f%(fy)gY'
+         '*s*f%(fy)gYc*f%(fz)gZ'
+         '*s*f%(fz)gZc*f%(fx)gX' % locals())
+    return Shape('-b%sf%g' % (g, thickness))
 
 
 ################################################################################

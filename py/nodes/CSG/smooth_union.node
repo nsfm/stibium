@@ -1,0 +1,10 @@
+import fab.types
+import fab.shapes
+
+title('Smooth Union')
+
+input('a', fab.types.Shape)
+input('b', fab.types.Shape)
+input('m', float, 0.5)
+
+output('shape', fab.shapes.blend_expt_unit(a, b, m))
