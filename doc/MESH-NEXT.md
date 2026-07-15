@@ -231,6 +231,14 @@ rounds, 28 repairs, ZERO topology damage; csg improves 244 to 187
 sharp folds with zero pinches (was 3,377 inserts and 60 pinches
 unguarded).  Gate-free crease-seek is now the DEFAULT
 (STIBIUM_DMESH_REPAIR=1 for the conservative fold-gated mode).
+The dial sweep (Nate's second wind): tolerance 5% / guard 0.25 =
+0 pinches, shallow repair; 2% / 0.15 = pinches return (tighter
+tolerance floods the crease, needing MORE guard, not less);
+**3% / 0.25 / 16 rounds = the sweet spot**, now baked in: the
+union presses to 36 repairs with ZERO pinches and ZERO sharp
+folds; csg converges at 13 rounds keeping exactly 2 pinches at its
+sharp point - structurally beyond greedy repair, the concrete
+CDT_3 case.
 The COMPLETE cure for csg's residue remains crease topology - and
 CGAL 6.2 ships Conforming_constrained_Delaunay_triangulation_3,
 so the feature polyline can be genuinely constrained edges.  Next
