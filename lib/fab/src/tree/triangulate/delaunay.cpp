@@ -875,7 +875,22 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
     if (repair_round >= MAX_REPAIR || *halt)
         break;
 
-    /*  Wart hunt on the freshly extracted mesh.  */
+    /*  Wart hunt on the freshly extracted mesh.  Two strategies
+     *  behind STIBIUM_DMESH_REPAIR:
+     *   1 - fold-gated: only edges whose adjacent triangles
+     *     disagree past ~78 degrees are checked.  Conservative;
+     *     misses shallow-crease chords (on-surface warts remain).
+     *   2 (default) - gate-free crease-seek: EVERY edge midpoint
+     *     checked; wart edges split at the |f| peak along the
+     *     chord (the branch switch = the crease), with a crowding
+     *     guard (no inserts within a quarter edge of an existing
+     *     vertex).  The guard is what makes it converge: without
+     *     it, crease-crossing chords are self-similar and the loop
+     *     churns into sliver pinches; with it, union-crease warts
+     *     press down in ~5 rounds with zero topology damage.  */
+    static const char* rep_env = getenv("STIBIUM_DMESH_REPAIR");
+    const int repair_mode = rep_env ? atoi(rep_env) : 2;
+
     std::unordered_map<uint64_t, std::pair<uint32_t, uint32_t>> em;
     for (uint32_t t = 0; t < out->tris.size() / 3; ++t)
         for (int e = 0; e < 3; ++e)
@@ -903,16 +918,20 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
         const double l = sqrt(n[0]*n[0] + n[1]*n[1] + n[2]*n[2]);
         if (l > 0) { n[0] /= l; n[1] /= l; n[2] /= l; }
     };
-    std::vector<float> wx2, wy2, wz2, whs, wclamp, wf;
+    std::vector<float> wx2, wy2, wz2, whs, wclamp;
+    std::vector<float> eax, eay, eaz, ebx, eby, ebz;
     for (const auto& [k, pr] : em)
     {
-        if (pr.second == UINT32_MAX)
-            continue;
-        double n1[3], n2[3];
-        tri_normal(pr.first, n1);
-        tri_normal(pr.second, n2);
-        if (n1[0]*n2[0] + n1[1]*n2[1] + n1[2]*n2[2] >= 0.2)
-            continue;   // no fold here
+        if (repair_mode < 2)
+        {
+            if (pr.second == UINT32_MAX)
+                continue;
+            double n1[3], n2[3];
+            tri_normal(pr.first, n1);
+            tri_normal(pr.second, n2);
+            if (n1[0]*n2[0] + n1[1]*n2[1] + n1[2]*n2[2] >= 0.2)
+                continue;   // no fold here
+        }
         const uint32_t va = uint32_t(k >> 32), vb = uint32_t(k);
         const float* A2 = &out->verts[3*va];
         const float* B2 = &out->verts[3*vb];
@@ -926,6 +945,10 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
         wz2.push_back((A2[2]+B2[2]) * 0.5f);
         whs.push_back(len * 0.01f);
         wclamp.push_back(len);
+        eax.push_back(A2[0]);  eay.push_back(A2[1]);
+        eaz.push_back(A2[2]);
+        ebx.push_back(B2[0]);  eby.push_back(B2[1]);
+        ebz.push_back(B2[2]);
     }
     if (wx2.empty())
         break;
@@ -949,7 +972,7 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
             gzs[i*7+5] += whs[i];  gzs[i*7+6] -= whs[i];
         }
         eval_points(base2, ctx, gxs, gys, gzs, gv);
-        std::vector<float> kx, ky, kz, kh, kc;
+        std::vector<size_t> cand;
         for (size_t i = 0; i < wx2.size(); ++i)
         {
             const float f = gv[i*7];
@@ -962,6 +985,58 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
                 continue;
             const float dist = fabsf(f) / gl;
             if (dist > wclamp[i] * 0.05f)
+                cand.push_back(i);
+        }
+        if (cand.empty())
+            break;
+
+        std::vector<float> kx, ky, kz, kh, kc;
+        if (repair_mode >= 2)
+        {
+            /*  Crease-seek: a midpoint split of a crease-crossing
+             *  chord is self-similar and never converges; split at
+             *  the |f| peak along the chord instead - the branch
+             *  switch, i.e. the crease.  */
+            constexpr int NSAMP = 9;
+            std::vector<float> sx(cand.size() * NSAMP),
+                    sy(cand.size() * NSAMP),
+                    sz(cand.size() * NSAMP), sv;
+            for (size_t q = 0; q < cand.size(); ++q)
+            {
+                const size_t i = cand[q];
+                for (int u = 0; u < NSAMP; ++u)
+                {
+                    const float t = float(u + 1) / (NSAMP + 1);
+                    sx[q*NSAMP + u] = eax[i] + t * (ebx[i] - eax[i]);
+                    sy[q*NSAMP + u] = eay[i] + t * (eby[i] - eay[i]);
+                    sz[q*NSAMP + u] = eaz[i] + t * (ebz[i] - eaz[i]);
+                }
+            }
+            eval_points(base2, ctx, sx, sy, sz, sv);
+            for (size_t q = 0; q < cand.size(); ++q)
+            {
+                const size_t i = cand[q];
+                int best = 0;
+                float bf = -1;
+                for (int u = 0; u < NSAMP; ++u)
+                {
+                    const float av = fabsf(sv[q*NSAMP + u]);
+                    if (std::isfinite(av) && av > bf)
+                    {
+                        bf = av;
+                        best = u;
+                    }
+                }
+                kx.push_back(sx[q*NSAMP + best]);
+                ky.push_back(sy[q*NSAMP + best]);
+                kz.push_back(sz[q*NSAMP + best]);
+                kh.push_back(whs[i]);
+                kc.push_back(wclamp[i]);
+            }
+        }
+        else
+        {
+            for (const size_t i : cand)
             {
                 kx.push_back(wx2[i]);
                 ky.push_back(wy2[i]);
@@ -970,14 +1045,28 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
                 kc.push_back(wclamp[i]);
             }
         }
-        if (kx.empty())
-            break;
         project_points_impl(deck, ctx, kx, ky, kz, kh, kc);
         uint64_t added = 0;
         for (size_t i = 0; i < kx.size(); ++i)
         {
+            const DPoint3 pt(kx[i], ky[i], kz[i]);
+            if (repair_mode >= 2)
+            {
+                /*  Crowding guard: an insert within a quarter of
+                 *  its edge of an existing vertex makes the sliver
+                 *  pinches - skip it (the pinch preventer).  */
+                const auto nv = dt.nearest_vertex(pt);
+                if (nv != DT::Vertex_handle())
+                {
+                    const double d2 = CGAL::squared_distance(
+                            nv->point(), pt);
+                    const double r = 0.25 * kc[i];
+                    if (d2 < r * r)
+                        continue;
+                }
+            }
             const auto before = dt.number_of_vertices();
-            auto vh = dt.insert(DPoint3(kx[i], ky[i], kz[i]));
+            auto vh = dt.insert(pt);
             if (dt.number_of_vertices() > before)
             {
                 vh->info() = 0;
