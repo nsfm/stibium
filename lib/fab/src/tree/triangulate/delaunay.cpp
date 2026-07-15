@@ -2011,6 +2011,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     uint64_t repaired_total = 0;
     int repair_round = 0;
     std::vector<VH> xvh;   // extraction order -> vertex handle
+    std::vector<std::pair<CH, CH>> tri_cells;  // per emitted tri
     for (;; ++repair_round)
     {
     /*  Stage C: cell signs.  After convergence a finite cell cannot
@@ -2071,6 +2072,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     out->verts.clear();
     out->tris.clear();
     xvh.clear();
+    tri_cells.clear();
     const auto vertex_index = [&](VH v) -> uint32_t {
         const auto found = vidx.find(&*v);
         if (found != vidx.end())
@@ -2128,6 +2130,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         out->tris.push_back(a);
         out->tris.push_back(b);
         out->tris.push_back(cc);
+        tri_cells.push_back({ c, n });
     }
 
     if (repair_round >= MAX_REPAIR || *halt)
@@ -2178,6 +2181,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     };
     std::vector<float> wx2, wy2, wz2, whs, wclamp;
     std::vector<float> eax, eay, eaz, ebx, eby, ebz;
+    std::vector<uint32_t> wt1, wt2;
     for (const auto& [k, pr] : em)
     {
         if (repair_mode < 2)
@@ -2207,6 +2211,8 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         eaz.push_back(A2[2]);
         ebx.push_back(B2[0]);  eby.push_back(B2[1]);
         ebz.push_back(B2[2]);
+        wt1.push_back(pr.first);
+        wt2.push_back(pr.second);
     }
     if (wx2.empty())
         break;
@@ -2233,6 +2239,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         std::vector<size_t> cand;
         std::vector<uint8_t> cspec;   // 1 = chip (f < 0)
         uint64_t n_chip = 0, n_wart = 0;
+        float worst_chip = 0;
         for (size_t i = 0; i < wx2.size(); ++i)
         {
             const float f = gv[i*7];
@@ -2253,17 +2260,149 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                  *  species, diagnosed by eyeball 2026-07-15).  */
                 cspec.push_back(f < 0 ? 1 : 0);
                 (f < 0 ? n_chip : n_wart)++;
+                if (f < 0 && dist > worst_chip)
+                    worst_chip = dist;
             }
         }
         static const char* chip_env =
                 getenv("STIBIUM_DMESH_CHIP_DEBUG");
         if (chip_env && (n_chip || n_wart))
             fprintf(stderr, "REPAIR round %d: %llu chips (f<0), "
-                    "%llu warts (f>0)\n", repair_round,
+                    "%llu warts (f>0), worst depth %.3f sp\n",
+                    repair_round,
                     (unsigned long long)n_chip,
-                    (unsigned long long)n_wart);
+                    (unsigned long long)n_wart,
+                    worst_chip / soup.spacing);
         if (cand.empty())
             break;
+
+        /*  TBP refinement targets for chips (DelIso lineage; see
+         *  doc/research/2026-07-15-pinch-manifoldness.md): a divot
+         *  facet's dual Voronoi edge crosses the surface more than
+         *  once, and the crossing point - the surface-Delaunay-
+         *  ball center - is ON the surface and inside both
+         *  adjacent circumballs, so inserting it destroys the
+         *  facet.  A principled target, unlike the chord-derived
+         *  midpoint.  Dense-sample each chip's adjacent facets'
+         *  dual segments, linear-interp the crossings (projection
+         *  Newton-polishes afterward), take the crossing nearest
+         *  the sagging midpoint.  */
+        std::vector<float> sdbx(cand.size()), sdby(cand.size()),
+                sdbz(cand.size());
+        std::vector<uint8_t> sdb_ok(cand.size(), 0);
+        /*  Opt-in (STIBIUM_DMESH_SDB=1): measured 2026-07-15 on
+         *  csg at 96^3, the depth trajectory (worst chip 0.500 ->
+         *  0.196 sp over 4 rounds) is IDENTICAL to plain midpoint
+         *  repair - the plateau is set by the guards and the
+         *  sampling density, not the target choice.  Kept as a
+         *  knob for revisiting at other densities.  */
+        static const char* sdb_env = getenv("STIBIUM_DMESH_SDB");
+        if (repair_mode >= 2 && sdb_env && atoi(sdb_env) != 0)
+        {
+            constexpr int DS = 33;
+            struct Seg
+            {
+                size_t q;
+                float ax, ay, az, bx, by, bz;
+                size_t o;
+            };
+            std::vector<Seg> segs;
+            std::vector<float> px, py, pz, pv;
+            for (size_t q = 0; q < cand.size(); ++q)
+            {
+                if (!cspec[q])
+                    continue;
+                const size_t i = cand[q];
+                for (const uint32_t t : { wt1[i], wt2[i] })
+                {
+                    if (t == UINT32_MAX || t >= tri_cells.size())
+                        continue;
+                    const CH tc = tri_cells[t].first;
+                    const CH tn = tri_cells[t].second;
+                    if (dt.is_infinite(tc) || dt.is_infinite(tn))
+                        continue;
+                    /*  Kernel circumcenter (our cell bases carry
+                     *  info, not the Delaunay cell base's cached
+                     *  circumcenter, so dt.dual() won't compile).  */
+                    const auto d1 = CGAL::circumcenter(
+                            tc->vertex(0)->point(),
+                            tc->vertex(1)->point(),
+                            tc->vertex(2)->point(),
+                            tc->vertex(3)->point());
+                    const auto d2 = CGAL::circumcenter(
+                            tn->vertex(0)->point(),
+                            tn->vertex(1)->point(),
+                            tn->vertex(2)->point(),
+                            tn->vertex(3)->point());
+                    Seg s;
+                    s.q = q;
+                    s.o = px.size();
+                    s.ax = float(d1.x());
+                    s.ay = float(d1.y());
+                    s.az = float(d1.z());
+                    s.bx = float(d2.x());
+                    s.by = float(d2.y());
+                    s.bz = float(d2.z());
+                    /*  Degenerate tets throw circumcenters far
+                     *  away; a dual segment much longer than the
+                     *  local scale is useless.  */
+                    const float sx2 = s.bx - s.ax,
+                                sy2 = s.by - s.ay,
+                                sz2 = s.bz - s.az;
+                    if (sx2*sx2 + sy2*sy2 + sz2*sz2 >
+                        25.f * wclamp[i] * wclamp[i])
+                        continue;
+                    for (int u = 0; u < DS; ++u)
+                    {
+                        const float tt = float(u) / (DS - 1);
+                        px.push_back(s.ax + tt * sx2);
+                        py.push_back(s.ay + tt * sy2);
+                        pz.push_back(s.az + tt * sz2);
+                    }
+                    segs.push_back(s);
+                }
+            }
+            if (!px.empty())
+            {
+                eval_points(base2, ctx, px, py, pz, pv);
+                std::vector<float> bestd(cand.size(), 1e30f);
+                for (const Seg& s : segs)
+                {
+                    const size_t i = cand[s.q];
+                    for (int u = 0; u + 1 < DS; ++u)
+                    {
+                        const float f0 = pv[s.o + u];
+                        const float f1 = pv[s.o + u + 1];
+                        if (!std::isfinite(f0) ||
+                            !std::isfinite(f1) ||
+                            (f0 < 0) == (f1 < 0))
+                            continue;
+                        const float tt =
+                                (float(u) + f0 / (f0 - f1)) /
+                                (DS - 1);
+                        const float cx2 =
+                                s.ax + tt * (s.bx - s.ax);
+                        const float cy2 =
+                                s.ay + tt * (s.by - s.ay);
+                        const float cz2 =
+                                s.az + tt * (s.bz - s.az);
+                        const float dx = cx2 - wx2[i],
+                                    dy = cy2 - wy2[i],
+                                    dz = cz2 - wz2[i];
+                        const float d2m = dx*dx + dy*dy + dz*dz;
+                        if (d2m < bestd[s.q] &&
+                            d2m < 4.f * wclamp[i] * wclamp[i])
+                        {
+                            bestd[s.q] = d2m;
+                            sdbx[s.q] = cx2;
+                            sdby[s.q] = cy2;
+                            sdbz[s.q] = cz2;
+                            sdb_ok[s.q] = 1;
+                        }
+                    }
+                }
+            }
+        }
 
         std::vector<float> kx, ky, kz, kh, kc;
         std::vector<uint8_t> kspec;
@@ -2302,9 +2441,18 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 const size_t i = cand[q];
                 if (cspec[q])
                 {
-                    kx.push_back(wx2[i]);
-                    ky.push_back(wy2[i]);
-                    kz.push_back(wz2[i]);
+                    if (sdb_ok[q])
+                    {
+                        kx.push_back(sdbx[q]);
+                        ky.push_back(sdby[q]);
+                        kz.push_back(sdbz[q]);
+                    }
+                    else
+                    {
+                        kx.push_back(wx2[i]);
+                        ky.push_back(wy2[i]);
+                        kz.push_back(wz2[i]);
+                    }
                 }
                 else
                 {
@@ -2325,7 +2473,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 }
                 kh.push_back(whs[i]);
                 kc.push_back(wclamp[i]);
-                kspec.push_back(cspec[q]);
+                kspec.push_back(cspec[q] ? (sdb_ok[q] ? 2 : 1) : 0);
             }
         }
         else
@@ -2338,7 +2486,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 kz.push_back(wz2[i]);
                 kh.push_back(whs[i]);
                 kc.push_back(wclamp[i]);
-                kspec.push_back(cspec[q]);
+                kspec.push_back(cspec[q] ? (sdb_ok[q] ? 2 : 1) : 0);
             }
         }
         project_points_impl(deck, ctx, kx, ky, kz, kh, kc);
@@ -2368,9 +2516,12 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
              *  better.  The residue is the greedy-repair
              *  asymptote; the structural cure is extraction-level
              *  (MESH-NEXT).  */
-            const float ko = (kspec[i] ? 0.35f : 0.75f) *
-                    soup.spacing;
-            if (!cseg.empty() &&
+            /*  Species 2 (SDB centers) skip the segment keep-out:
+             *  they are principled insert locations, gated by the
+             *  crowding guard and refereed by the counters.  */
+            const float ko = (kspec[i] == 2 ? 0.0f
+                    : kspec[i] ? 0.35f : 0.75f) * soup.spacing;
+            if (ko > 0 && !cseg.empty() &&
                 near_crease(kx[i], ky[i], kz[i], ko))
             {
                 ++blk_keepout;
