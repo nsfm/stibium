@@ -384,6 +384,73 @@ doc/research/2026-07-15-*.md)**, the load-bearing findings:
    normal-spread QEF heuristics with exact geometry and makes
    junction topology bookkeeping instead of inference.
 
+## The manifold pass + crease tracer (2026-07-15, later the same day)
+
+Both research recommendations LANDED (commits 8577cb88, 085664ac);
+suite green throughout.
+
+**Manifold pass** (STIBIUM_DMESH_MANIFOLD, default on): Manifold-DC
+style vertex duplication.  Around a pinch edge, the two extracted
+facets bounding the same INSIDE run of the cell ring are one wedge
+of the solid = one sheet; facets pair by inside-run, and any vertex
+whose facet fan is disconnected splits into one coincident output
+vertex per sheet.  Zero geometric change; 2-manifold at every
+vertex by construction.  Gotchas paid for: fan adjacency must read
+a SNAPSHOT of the triangle list (per-vertex rewrites perturb later
+edge keys - measured as 6 open edges); unrecoverable ring pairings
+must KEEP the pinch (union everything), never tear.  DMesh
+.split_verts reports.
+
+**The crease tracer** (STIBIUM_DMESH_TRACE, default on;
+delaunay_trace): the campaign's crown.  Tape APIs (tape.h):
+tape_pairs enumerates min/max clauses; tape_eval_r_prefix +
+tape_ctx_r_row read a pair's operand values f_A, f_B with all
+upstream transforms applied - prefix [0, clause) evaluation works
+because linear-scan register allocation keeps operand slots live
+until their reader executes.  March {f_A=0, f_B=0} with the SSI
+predictor-corrector (tangent = grad A x grad B by central
+differences, minimal-norm 2-eq Newton corrector), seeds = QEF
+feature points, trim by the full oracle (|f|/|grad f| > 0.05 sp =
+a third branch owns the surface = the junction).  Junction
+endpoints bisect onto the corner with a TIGHT tolerance (5e-4 sp -
+bisecting against the marching trim leaves endpoints trim-short;
+measured worst |f| exactly 0.05 sp before the fix), then cluster
+(0.75 sp) to a shared Newton-projected corner vertex, so incident
+curves carry IDENTICAL coords and the triangulation's coincidence
+guard makes them one constrained vertex.
+
+Failure modes measured and guarded (all three bit on csg):
+- tangency stall: the corrector pulls every predictor step back to
+  the same point, emitting float-noise micro-segments (three
+  "points" 1e-15 apart threw CGAL's vertex-on-constraint error) ->
+  minimum-progress check per step;
+- duplicate traces: seeds converge onto an already-traced curve
+  from beyond the consumption radius (Newton moves seeds up to 1.5
+  cells) -> reject by converged-seed-position against same-pair
+  polylines;
+- anything else the conforming machinery hates -> try/catch around
+  the constrained path, falling back to the plain DT mesher
+  (degrade, never crash).
+
+Traced chains REPLACE the QEF chain extractor when present; QEF
+features stay as plain surface points (the crease band drop
+retires the redundant ones).  Referee [.dtrace] (cube 4 pillar
+edges + 2 closed face loops = all 12; union 1 loop at |f|=1e-7;
+csg seam arc + closed cut-boundary loop traced through its
+branch-switch kinks, worst |f| 7.8e-4 from kink-straddling central
+differences - under the 1.3e-3 QEF noise).  Showcase 96^3: EVERY
+model 0 open / 0 non-manifold, 0 repairs, 0 splits, csg fully
+constrained (483 edges) with no rescue machinery at all.
+STIBIUM_DMESH_TRACE_DEBUG=1 dumps per-polyline stats.
+
+Remaining tracer niceties (not blockers): kink-point refinement
+(solve the 3-field corner system instead of accepting loose Newton
+at branch switches), seeds independent of QEF features (interval-
+guided seeding would catch creases QEF misses entirely, e.g. below
+lattice pitch), OP_ABS as a crease generator (|x| kinks at x=0;
+enumerate ABS clauses the same way), and blend-aware skipping once
+smooth-min ops exist.
+
 ## The original round map (2026-07-15, kept for the record)
 
 **Primitive confirmed**: CGAL 6.2's
