@@ -16,6 +16,7 @@
 
 #include "fab/util/region.h"
 #include "fab/tree/triangulate.h"
+#include "fab/tree/triangulate/delaunay.h"
 #include "fab/formats/stl.h"
 #include "fab/formats/threemf.h"
 
@@ -148,8 +149,35 @@ void ExportMeshWorker::async()
     progress_total = r.voxels;
     std::vector<float> verts;
     std::vector<uint32_t> indices;
-    triangulate_indexed_mt(shape.tree.get(), r, _detect_features, &halt,
-                           verts, indices, -1, &progress_done);
+    /*  STIBIUM_EXPORT_DMESH=1 routes the export through the
+     *  adaptive-Delaunay mesher (doc/MESH-NEXT.md) instead of the
+     *  production Kobbelt path - the final-quality pipeline, single
+     *  threaded, no progress reporting.  Experimental.  */
+    if (getenv("STIBIUM_EXPORT_DMESH"))
+    {
+        Deck* deck = deck_from_tree(shape.tree.get());
+        DMesh m;
+        const bool ok = delaunay_mesh(deck, r, &halt, &m);
+        deck_free(deck);
+        fprintf(stderr, "dmesh export: %s, %zu tris, %llu open, "
+                "%llu non-manifold, %llu constrained, %llu steiner, "
+                "%llu repaired, %llu split, %llu snapped\n",
+                ok ? "ok" : "FAILED (built without CGAL?)",
+                m.tris.size() / 3,
+                (unsigned long long)m.open_edges,
+                (unsigned long long)m.nonmanifold_edges,
+                (unsigned long long)m.constrained,
+                (unsigned long long)m.steiner,
+                (unsigned long long)m.repaired,
+                (unsigned long long)m.split_verts,
+                (unsigned long long)m.snapped);
+        verts = std::move(m.verts);
+        indices = std::move(m.tris);
+    }
+    else
+        triangulate_indexed_mt(shape.tree.get(), r, _detect_features,
+                               &halt, verts, indices, -1,
+                               &progress_done);
 
     // Simplification and file writing can't report granular progress;
     // drop the bar back to its busy animation instead of a full bar.

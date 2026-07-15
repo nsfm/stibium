@@ -1717,6 +1717,96 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         }
         if (!sx.empty())
             eval_points(base, ctx, sx, sy, sz, sv);
+        /*  Cross-pair duplicate-coverage dedupe (zeiss run,
+         *  2026-07-15): a merged CSG tree repeats surfaces, so the
+         *  SAME physical crease is traced by several min/max pairs
+         *  with different vertex spacing.  Overlapping collinear
+         *  constraints throw the conforming machinery into an
+         *  encroachment cascade - Steiner points ping-pong toward
+         *  the mutual corner until femtometer segments trip the
+         *  through-vertex assertion (measured: Steiner triplet
+         *  7e-15 apart at (-5, 3.75, 26); the coordinates are
+         *  doubles, so they can only be CGAL constructions, not
+         *  soup points).  A segment whose endpoints AND midpoint
+         *  all lie on already-accepted coverage adds nothing: drop
+         *  it.  0.2 sp keeps chain continuations (their far
+         *  endpoint sticks 0.5 sp out) and junction spokes (they
+         *  leave the corner perpendicular).  */
+        uint64_t dup_dropped = 0, cross_dropped = 0;
+        /*  Interior-interior closest approach between the candidate
+         *  and an accepted segment.  The three-point coverage probe
+         *  is blind to a mid-segment crossing (endpoints and
+         *  midpoint all sit far from the other segment; only the
+         *  crossing point is near), and CCDT_3's contract forbids
+         *  constraints meeting anywhere but shared endpoints - a
+         *  shallow-angle crossing Steiner-cascades to femtometer
+         *  segments and the through-vertex assertion.  Closest
+         *  approach with BOTH parameters interior and distance
+         *  under 0.05 sp = crossing or partial collinear overlap;
+         *  shared junction corners approach at t ~ 0/1 and are
+         *  exempt.  */
+        const auto crosses = [&](float ax, float ay, float az,
+                                 float bx, float by, float bz,
+                                 float r) {
+            const float ux = bx - ax, uy = by - ay, uz = bz - az;
+            const float uu = ux*ux + uy*uy + uz*uz;
+            for (const auto& s : cseg)
+            {
+                const float cx = s[0], cy = s[1], cz = s[2];
+                const float vx = s[3] - cx, vy = s[4] - cy,
+                            vz = s[5] - cz;
+                const float vv = vx*vx + vy*vy + vz*vz;
+                const float wx = ax - cx, wy = ay - cy,
+                            wz = az - cz;
+                const float uv = ux*vx + uy*vy + uz*vz;
+                const float uw = ux*wx + uy*wy + uz*wz;
+                const float vw = vx*wx + vy*wy + vz*wz;
+                const float den = uu*vv - uv*uv;
+                float t1, t2;
+                if (den > 1e-12f * uu * vv)
+                {
+                    t1 = (uv*vw - vv*uw) / den;
+                    t2 = (uu*vw - uv*uw) / den;
+                }
+                else
+                {
+                    /*  Near-parallel: probe the candidate midpoint
+                     *  against the other segment.  */
+                    t1 = 0.5f;
+                    t2 = vv > 0 ? (vw + 0.5f*uv) / vv : 0;
+                }
+                t1 = t1 < 0 ? 0 : t1 > 1 ? 1 : t1;
+                t2 = t2 < 0 ? 0 : t2 > 1 ? 1 : t2;
+                if (t1 < 0.05f || t1 > 0.95f ||
+                    t2 < 0.05f || t2 > 0.95f)
+                    continue;   // touches near a corner: legal
+                const float px = ax + t1*ux - (cx + t2*vx);
+                const float py = ay + t1*uy - (cy + t2*vy);
+                const float pz = az + t1*uz - (cz + t2*vz);
+                if (px*px + py*py + pz*pz < r * r)
+                    return true;
+            }
+            return false;
+        };
+        const auto covered = [&](float x, float y, float z,
+                                 float r) {
+            for (const auto& s : cseg)
+            {
+                const float ax = s[0], ay = s[1], az = s[2];
+                const float bx = s[3] - ax, by = s[4] - ay,
+                            bz = s[5] - az;
+                const float px = x - ax, py = y - ay, pz = z - az;
+                const float bb = bx*bx + by*by + bz*bz;
+                float t = bb > 0
+                        ? (px*bx + py*by + pz*bz) / bb : 0;
+                t = t < 0 ? 0 : t > 1 ? 1 : t;
+                const float dx = px - t*bx, dy = py - t*by,
+                            dz = pz - t*bz;
+                if (dx*dx + dy*dy + dz*dz < r * r)
+                    return true;
+            }
+            return false;
+        };
         for (size_t i = 0; i < cand.size(); ++i)
         {
             bool good = slen[i] > 0;
@@ -1743,9 +1833,25 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             }
             if (good)
             {
-                accepted.push_back(cand[i]);
                 const DSurfPoint& A = soup.surface[cand[i].first];
                 const DSurfPoint& B = soup.surface[cand[i].second];
+                const float rr = 0.2f * soup.spacing;
+                if (covered(A.x, A.y, A.z, rr) &&
+                    covered(B.x, B.y, B.z, rr) &&
+                    covered((A.x + B.x) * 0.5f,
+                            (A.y + B.y) * 0.5f,
+                            (A.z + B.z) * 0.5f, rr))
+                {
+                    ++dup_dropped;
+                    continue;
+                }
+                if (crosses(A.x, A.y, A.z, B.x, B.y, B.z,
+                            0.05f * soup.spacing))
+                {
+                    ++cross_dropped;
+                    continue;
+                }
+                accepted.push_back(cand[i]);
                 cseg.push_back({ A.x, A.y, A.z, B.x, B.y, B.z });
             }
             else if (getenv("STIBIUM_DMESH_SEG_DEBUG"))
@@ -1783,12 +1889,51 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
          *  Fall back to unconstrained behavior for the model;
          *  junction-aware chain extraction is the designed next
          *  round.  */
-        if (!cand.empty() &&
-            float(cand.size() - accepted.size()) >
-                    0.10f * float(cand.size()))
+        /*  Duplicate-coverage drops are not rejections - the crease
+         *  is constrained, just by its first copy - so they leave
+         *  the gate arithmetic entirely.  */
+        const size_t judged = cand.size() -
+                size_t(dup_dropped + cross_dropped);
+        if (judged > 0 &&
+            float(judged - accepted.size()) > 0.10f * float(judged))
         {
             accepted.clear();
             cseg.clear();
+        }
+        if ((dup_dropped || cross_dropped) &&
+            getenv("STIBIUM_DMESH_SEG_DEBUG"))
+            fprintf(stderr, "constraints: %llu duplicate-coverage, "
+                    "%llu crossing segments dropped\n",
+                    (unsigned long long)dup_dropped,
+                    (unsigned long long)cross_dropped);
+        /*  Targeted forensics: STIBIUM_DMESH_PROBE="x,y,z" dumps
+         *  every accepted segment within one cell of the point
+         *  (chasing a recurring conforming-cascade corner).  */
+        if (const char* pe = getenv("STIBIUM_DMESH_PROBE"))
+        {
+            float px2, py2, pz2;
+            if (sscanf(pe, "%f,%f,%f", &px2, &py2, &pz2) == 3)
+            {
+                const float pr2 =
+                        soup.spacing * soup.spacing;
+                for (const auto& s : cseg)
+                {
+                    float best = 1e30f;
+                    for (int q = 0; q < 2; ++q)
+                    {
+                        const float dx = s[3*q] - px2,
+                                    dy = s[3*q+1] - py2,
+                                    dz = s[3*q+2] - pz2;
+                        best = std::min(best,
+                                dx*dx + dy*dy + dz*dz);
+                    }
+                    if (best < pr2)
+                        fprintf(stderr, "PROBE seg (%.6f,%.6f,%.6f)"
+                                "-(%.6f,%.6f,%.6f)\n",
+                                s[0], s[1], s[2],
+                                s[3], s[4], s[5]);
+                }
+            }
         }
     }
     const auto near_crease = [&](float x, float y, float z,
@@ -1902,11 +2047,41 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             surf_vh.push_back(VH());
             continue;
         }
+        /*  Near-coincidence weld (zeiss run, 2026-07-15): traced
+         *  corners from different chains Newton-converge onto the
+         *  same machined corner within double noise (measured
+         *  7e-15 apart at (-5, 3.75, 26)).  Two distinct DT
+         *  vertices that close produce femtometer constraint
+         *  segments (whose length UNDERFLOWS float) and
+         *  constraints passing through a near-coincident third
+         *  copy - the CGAL through-vertex assertion.  Within
+         *  1e-3 sp everything is the same point: reuse the
+         *  existing vertex, and the micro-segment collapses into
+         *  the va == vb guard below.  */
+        const TPoint sp3(s.x, s.y, s.z);
+        if constexpr (CCDT_MODE)
+        {
+            if (dt.number_of_vertices() > 0)
+            {
+                const auto nv = dt.nearest_vertex(sp3);
+                if (nv != VH())
+                {
+                    const double w = 1e-3 * soup.spacing;
+                    if (CGAL::squared_distance(nv->point(), sp3) <
+                        w * w)
+                    {
+                        nv->info() = 0;
+                        surf_vh.push_back(nv);
+                        continue;
+                    }
+                }
+            }
+        }
         const auto before = dt.number_of_vertices();
         VH vh;
         if constexpr (CCDT_MODE)
         {
-            vh = dt.insert(TPoint(s.x, s.y, s.z), CH{}, false);
+            vh = dt.insert(sp3, CH{}, false);
             vh->ccdt_3_data().set_vertex_type(
                     CGAL::CDT_3_vertex_type::CORNER);
         }
@@ -1920,23 +2095,118 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         surf_vh.push_back(vh);
     }
 
-    /*  The constrained-crease round: chain segments become
-     *  constrained edges, batched with one Delaunay restoration at
-     *  the end (each insert_constrained_edge(…, true) would restore
-     *  individually).  */
     /*  Insert the refereed chain segments as constrained edges,
-     *  batched with one Delaunay restoration at the end.  */
-    uint64_t constrained = 0;
+     *  batched with one Delaunay restoration at the end (each
+     *  insert_constrained_edge(…, true) would restore
+     *  individually).
+     *
+     *  Through-vertex pre-split (zeiss run, 2026-07-15): mechanical
+     *  models put lattice vertices EXACTLY on straight creases
+     *  (grid-aligned geometry at rational coordinates), and a
+     *  constraint passing exactly through a non-endpoint vertex is
+     *  a CGAL assertion ("The constraint passes through a
+     *  vertex!") - one such vertex out of 345K threw the whole
+     *  model back to unconstrained DT.  A vertex on the crease
+     *  line IS a crease point: split the constraint there and
+     *  chain through it.  */
+    uint64_t constrained = 0, through_splits = 0;
     if constexpr (CCDT_MODE)
     {
+        /*  Bin-grid of every finite vertex, one cell per lattice
+         *  pitch, so each segment only inspects its own tube.  */
+        const float bin = soup.spacing;
+        const auto cell_key = [&](float x, float y, float z) {
+            const int64_t ix = int64_t(floorf(x / bin));
+            const int64_t iy = int64_t(floorf(y / bin));
+            const int64_t iz = int64_t(floorf(z / bin));
+            return (uint64_t(ix & 0x1FFFFF) << 42) |
+                   (uint64_t(iy & 0x1FFFFF) << 21) |
+                    uint64_t(iz & 0x1FFFFF);
+        };
+        std::unordered_map<uint64_t, std::vector<VH>> vgrid;
+        for (auto v = dt.finite_vertices_begin();
+             v != dt.finite_vertices_end(); ++v)
+            vgrid[cell_key(float(v->point().x()),
+                           float(v->point().y()),
+                           float(v->point().z()))].push_back(v);
+        const float eps = 1e-4f * soup.spacing;
+        const float eps2 = eps * eps;
         for (const auto& [a, b] : accepted)
         {
             VH va = surf_vh[a], vb = surf_vh[b];
             if (va == VH() || vb == VH() || va == vb)
                 continue;
-            dt.insert_constrained_edge(va, vb, false);
-            ++constrained;
+            const float ax = float(va->point().x()),
+                        ay = float(va->point().y()),
+                        az = float(va->point().z());
+            const float bx = float(vb->point().x()),
+                        by = float(vb->point().y()),
+                        bz = float(vb->point().z());
+            const float ux = bx - ax, uy = by - ay, uz = bz - az;
+            const float uu = ux*ux + uy*uy + uz*uz;
+            std::vector<std::pair<float, VH>> mids;
+            if (uu > 0)
+            {
+                const int ix0 = int(floorf(std::min(ax, bx)/bin)) - 1,
+                          ix1 = int(floorf(std::max(ax, bx)/bin)) + 1,
+                          iy0 = int(floorf(std::min(ay, by)/bin)) - 1,
+                          iy1 = int(floorf(std::max(ay, by)/bin)) + 1,
+                          iz0 = int(floorf(std::min(az, bz)/bin)) - 1,
+                          iz1 = int(floorf(std::max(az, bz)/bin)) + 1;
+                for (int ix = ix0; ix <= ix1; ++ix)
+                for (int iy = iy0; iy <= iy1; ++iy)
+                for (int iz = iz0; iz <= iz1; ++iz)
+                {
+                    const uint64_t k =
+                            (uint64_t(int64_t(ix) & 0x1FFFFF) << 42) |
+                            (uint64_t(int64_t(iy) & 0x1FFFFF) << 21) |
+                             uint64_t(int64_t(iz) & 0x1FFFFF);
+                    const auto gi = vgrid.find(k);
+                    if (gi == vgrid.end())
+                        continue;
+                    for (const VH& v : gi->second)
+                    {
+                        if (v == va || v == vb)
+                            continue;
+                        const float px = float(v->point().x()) - ax,
+                                    py = float(v->point().y()) - ay,
+                                    pz = float(v->point().z()) - az;
+                        const float t = (px*ux + py*uy + pz*uz) / uu;
+                        if (t <= 1e-4f || t >= 1.f - 1e-4f)
+                            continue;
+                        const float dx = px - t*ux, dy = py - t*uy,
+                                    dz = pz - t*uz;
+                        if (dx*dx + dy*dy + dz*dz < eps2)
+                            mids.push_back({ t, v });
+                    }
+                }
+            }
+            std::sort(mids.begin(), mids.end(),
+                      [](const auto& l, const auto& r) {
+                          return l.first < r.first;
+                      });
+            VH prev = va;
+            for (const auto& [t, v] : mids)
+            {
+                (void)t;
+                if (v == prev)
+                    continue;
+                v->info() = 0;   // on the crease line, by measure
+                dt.insert_constrained_edge(prev, v, false);
+                ++constrained;
+                ++through_splits;
+                prev = v;
+            }
+            if (prev != vb)
+            {
+                dt.insert_constrained_edge(prev, vb, false);
+                ++constrained;
+            }
         }
+        if (through_splits && getenv("STIBIUM_DMESH_SEG_DEBUG"))
+            fprintf(stderr, "constraints: %llu split at "
+                    "through-vertices\n",
+                    (unsigned long long)through_splits);
         dt.restore_Delaunay();
         sweep_steiner();
     }
@@ -2419,6 +2689,20 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             if (!(gl > 0) || !std::isfinite(f))
                 continue;
             const float dist = fabsf(f) / gl;
+            /*  Credibility gate (zeiss run, 2026-07-15): a chord
+             *  with both endpoints on the surface cannot sag more
+             *  than half its length; central differences at a
+             *  wedge underestimate |grad| (they average the two
+             *  face normals), inflating honest readings by
+             *  1/cos(half-angle) - csg's real chips read
+             *  0.53 x edge.  2 x edge admits every plausible
+             *  wedge and still rejects gradient garbage (blend
+             *  plateaus, scale nodes - the merged zeiss read
+             *  576 sp on a 1.24 sp edge and the repair loop
+             *  churned 300K inserts chasing it; repairs aimed by
+             *  a garbage gradient insert garbage points).  */
+            if (dist > 2.0f * wclamp[i])
+                continue;
             if (dist > wclamp[i] * 0.03f)
             {
                 cand.push_back(i);
@@ -3302,6 +3586,8 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             if (!(gl > 0) || !std::isfinite(f) || f >= 0)
                 continue;
             const float dist = fabsf(f) / gl;
+            if (dist > 2.0f * flen[i])
+                continue;   // gradient not credible (see repair gate)
             if (dist <= flen[i] * 0.03f)
                 continue;
             ++nfinal;
