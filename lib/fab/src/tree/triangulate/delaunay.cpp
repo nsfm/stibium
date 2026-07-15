@@ -328,6 +328,62 @@ void bisect_edges(Collector& c)
 
 namespace {
 
+/*  Batched Newton projection onto the surface: p -= f * grad /
+ *  |grad|^2, two rounds, gradients by 6-tap central differences.
+ *  Steps are clamped so a bad gradient can't launch a point.  */
+void project_points_impl(const Deck* deck, TapeCtx* ctx,
+                    std::vector<float>& px, std::vector<float>& py,
+                    std::vector<float>& pz, const std::vector<float>& hs,
+                    const std::vector<float>& clamp)
+{
+    const size_t n = px.size();
+    Tape* base = deck_base(deck);
+    std::vector<float> xs, ys, zs, vals;
+    for (int round = 0; round < 2; ++round)
+    {
+        xs.resize(n * 7);
+        ys.resize(n * 7);
+        zs.resize(n * 7);
+        for (size_t i = 0; i < n; ++i)
+        {
+            const float h = hs[i];
+            for (int q = 0; q < 7; ++q)
+            {
+                xs[i*7 + q] = px[i];
+                ys[i*7 + q] = py[i];
+                zs[i*7 + q] = pz[i];
+            }
+            xs[i*7 + 1] += h;   xs[i*7 + 2] -= h;
+            ys[i*7 + 3] += h;   ys[i*7 + 4] -= h;
+            zs[i*7 + 5] += h;   zs[i*7 + 6] -= h;
+        }
+        eval_points(base, ctx, xs, ys, zs, vals);
+        for (size_t i = 0; i < n; ++i)
+        {
+            const float f = vals[i*7];
+            const float gx = vals[i*7 + 1] - vals[i*7 + 2];
+            const float gy = vals[i*7 + 3] - vals[i*7 + 4];
+            const float gz = vals[i*7 + 5] - vals[i*7 + 6];
+            const float h2 = 2 * hs[i];
+            const float g2 = (gx*gx + gy*gy + gz*gz) / (h2 * h2);
+            if (!(g2 > 0) || !std::isfinite(g2) || !std::isfinite(f))
+                continue;
+            float sx = -f * (gx / h2) / g2;
+            float sy = -f * (gy / h2) / g2;
+            float sz = -f * (gz / h2) / g2;
+            const float sl = sqrtf(sx*sx + sy*sy + sz*sz);
+            if (sl > clamp[i])
+            {
+                const float k = clamp[i] / sl;
+                sx *= k;  sy *= k;  sz *= k;
+            }
+            px[i] += sx;
+            py[i] += sy;
+            pz[i] += sz;
+        }
+    }
+}
+
 /*  Keeter step 3: sharp-feature points.  For every candidate cell,
  *  probe normals at its crossing points (batched central
  *  differences); if the normals disagree enough, the cell straddles
@@ -440,6 +496,88 @@ void feature_points(Collector& c)
     }
     c.soup.feature_points = added;
 
+    /*  Chain mediation (the 'outliers' Nate spotted): a feature
+     *  point whose two nearest siblings run roughly THROUGH it
+     *  (chain-interior; a cube corner's neighbors turn 90 degrees,
+     *  so corners are immune) but which deviates from their segment
+     *  is a bad QEF solve - replace it with the siblings' midpoint
+     *  projected onto the surface.  Straight chains measure zero
+     *  deviation and are untouched.  */
+    if (added > 2)
+    {
+        const size_t f0 = np;   // features start here (pre-compact)
+        const size_t nf = added;
+        std::vector<uint32_t> med_idx;
+        std::vector<float> mx, my, mz, mh, mc;
+        for (size_t i = 0; i < nf; ++i)
+        {
+            const DSurfPoint& F = c.soup.surface[f0 + i];
+            /*  two nearest siblings within 2.5 cells  */
+            float d1 = 1e30f, d2 = 1e30f;
+            size_t i1 = SIZE_MAX, i2 = SIZE_MAX;
+            const float lim = c.spacing * 2.5f;
+            for (size_t j = 0; j < nf; ++j)
+            {
+                if (j == i)
+                    continue;
+                const DSurfPoint& G = c.soup.surface[f0 + j];
+                const float dx = G.x - F.x, dy = G.y - F.y,
+                            dz = G.z - F.z;
+                const float d = sqrtf(dx*dx + dy*dy + dz*dz);
+                if (d > lim)
+                    continue;
+                if (d < d1)
+                    { d2 = d1; i2 = i1; d1 = d; i1 = j; }
+                else if (d < d2)
+                    { d2 = d; i2 = j; }
+            }
+            if (i2 == SIZE_MAX)
+                continue;
+            const DSurfPoint& A = c.soup.surface[f0 + i1];
+            const DSurfPoint& B = c.soup.surface[f0 + i2];
+            /*  chain-interior test: A-F and F-B roughly opposed  */
+            const float ax = F.x - A.x, ay = F.y - A.y, az = F.z - A.z;
+            const float bx = B.x - F.x, by = B.y - F.y, bz = B.z - F.z;
+            const float la = sqrtf(ax*ax + ay*ay + az*az);
+            const float lb = sqrtf(bx*bx + by*by + bz*bz);
+            if (!(la > 0) || !(lb > 0))
+                continue;
+            const float cosang =
+                    (ax*bx + ay*by + az*bz) / (la * lb);
+            if (cosang < 0.7f)
+                continue;   // corner or junction: leave it alone
+            /*  deviation of F from segment AB  */
+            const float abx = B.x - A.x, aby = B.y - A.y,
+                        abz = B.z - A.z;
+            const float ab2 = abx*abx + aby*aby + abz*abz;
+            if (!(ab2 > 0))
+                continue;
+            float t = ((F.x - A.x) * abx + (F.y - A.y) * aby +
+                       (F.z - A.z) * abz) / ab2;
+            t = t < 0 ? 0 : (t > 1 ? 1 : t);
+            const float qx = A.x + t * abx - F.x;
+            const float qy = A.y + t * aby - F.y;
+            const float qz = A.z + t * abz - F.z;
+            const float dev = sqrtf(qx*qx + qy*qy + qz*qz);
+            if (dev <= c.spacing * 0.35f)
+                continue;
+            med_idx.push_back(uint32_t(f0 + i));
+            mx.push_back((A.x + B.x) * 0.5f);
+            my.push_back((A.y + B.y) * 0.5f);
+            mz.push_back((A.z + B.z) * 0.5f);
+            mh.push_back(c.spacing * 0.01f);
+            mc.push_back(c.spacing);
+        }
+        if (!med_idx.empty())
+        {
+            project_points_impl(c.deck, c.ctx, mx, my, mz, mh, mc);
+            for (size_t q = 0; q < med_idx.size(); ++q)
+                c.soup.surface[med_idx[q]] =
+                        { mx[q], my[q], mz[q] };
+            c.soup.mediated = med_idx.size();
+        }
+    }
+
     if (added)
     {
         /*  Compact: drop suppressed crossings, keep the appended
@@ -465,6 +603,7 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt)
     descend(c, r, deck_base(deck));
     bisect_edges(c);
     feature_points(c);
+    c.soup.spacing = c.spacing;
     tape_ctx_free(c.ctx);
     return std::move(c.soup);
 }
@@ -526,67 +665,6 @@ std::vector<DSurfPoint> bisect_pending(const Deck* deck, TapeCtx* ctx,
                         (ed.ay + ed.by) * 0.5f,
                         (ed.az + ed.bz) * 0.5f });
     return out;
-}
-
-}  // namespace
-
-namespace {
-
-/*  Batched Newton projection onto the surface: p -= f * grad /
- *  |grad|^2, two rounds, gradients by 6-tap central differences.
- *  Steps are clamped to `clamp` (callers pass the local edge
- *  length) so a bad gradient can't launch a point.  */
-void project_points(const Deck* deck, TapeCtx* ctx,
-                    std::vector<float>& px, std::vector<float>& py,
-                    std::vector<float>& pz, const std::vector<float>& hs,
-                    const std::vector<float>& clamp)
-{
-    const size_t n = px.size();
-    Tape* base = deck_base(deck);
-    std::vector<float> xs, ys, zs, vals;
-    for (int round = 0; round < 2; ++round)
-    {
-        xs.resize(n * 7);
-        ys.resize(n * 7);
-        zs.resize(n * 7);
-        for (size_t i = 0; i < n; ++i)
-        {
-            const float h = hs[i];
-            for (int q = 0; q < 7; ++q)
-            {
-                xs[i*7 + q] = px[i];
-                ys[i*7 + q] = py[i];
-                zs[i*7 + q] = pz[i];
-            }
-            xs[i*7 + 1] += h;   xs[i*7 + 2] -= h;
-            ys[i*7 + 3] += h;   ys[i*7 + 4] -= h;
-            zs[i*7 + 5] += h;   zs[i*7 + 6] -= h;
-        }
-        eval_points(base, ctx, xs, ys, zs, vals);
-        for (size_t i = 0; i < n; ++i)
-        {
-            const float f = vals[i*7];
-            const float gx = vals[i*7 + 1] - vals[i*7 + 2];
-            const float gy = vals[i*7 + 3] - vals[i*7 + 4];
-            const float gz = vals[i*7 + 5] - vals[i*7 + 6];
-            const float h2 = 2 * hs[i];
-            const float g2 = (gx*gx + gy*gy + gz*gz) / (h2 * h2);
-            if (!(g2 > 0) || !std::isfinite(g2) || !std::isfinite(f))
-                continue;
-            float sx = -f * (gx / h2) / g2;
-            float sy = -f * (gy / h2) / g2;
-            float sz = -f * (gz / h2) / g2;
-            const float sl = sqrtf(sx*sx + sy*sy + sz*sz);
-            if (sl > clamp[i])
-            {
-                const float k = clamp[i] / sl;
-                sx *= k;  sy *= k;  sz *= k;
-            }
-            px[i] += sx;
-            py[i] += sy;
-            pz[i] += sz;
-        }
-    }
 }
 
 }  // namespace
@@ -894,7 +972,7 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
         }
         if (kx.empty())
             break;
-        project_points(deck, ctx, kx, ky, kz, kh, kc);
+        project_points_impl(deck, ctx, kx, ky, kz, kh, kc);
         uint64_t added = 0;
         for (size_t i = 0; i < kx.size(); ++i)
         {

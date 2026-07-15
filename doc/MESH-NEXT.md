@@ -194,7 +194,22 @@ a curved crease need to act as an ordered CHAIN (crease polyline),
 and refinement inserts near a chain should harmonize with it
 (snap-to-crease or keep-out) instead of fighting it.
 
-Stage D remains: the curved-crease chain design (above),
+**The wart hunt, round two** (error-driven repair landed; two
+approaches measured and rejected): the repair loop (fold edges
+with off-surface midpoints -> Newton-project -> insert -> repeat)
+KILLED the csg model's non-manifold edges and proved by exclusion
+that the union's residual ~20 warts are ON-surface crease
+crowding - refinement rebuilds landing a hair from the chain.
+Chain mediation (outlier feature points pulled to their neighbors'
+segment) found nothing to mediate; feature keep-out (drop rebuilds
+near the chain) broke closure - 79 open edges - because those
+rebuilds perform topological separation.  Closure outranks
+cosmetics; keep-out reverted.  The open design: separation points
+near a crease need to exist AND cooperate with the chain
+(candidate: snap the rebuild onto the crease direction rather than
+the segment's f-zero, keeping separation while joining the chain).
+
+Stage D remains: the curved-crease cooperation design (above),
 hidden-candidate drill-down, error-driven adaptive insertion,
 performance (CGAL predicate fallbacks - jitter tried and reverted,
 see above; next: shell-thinning + incremental edge scans), MT, and
