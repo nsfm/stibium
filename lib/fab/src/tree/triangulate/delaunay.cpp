@@ -371,6 +371,12 @@ void feature_points(Collector& c)
 
     constexpr float SPREAD_DOT = 0.9f;   // ~25 degrees
     uint64_t added = 0;
+    /*  A QEF vertex REPLACES the crossings it consumed (dual-
+     *  contouring semantics): leaving both in the soup makes the
+     *  triangulation alternate between on-crease and off-crease
+     *  vertices - a beautifully regular sawtooth (caught by eyeball
+     *  review, as usual).  */
+    std::vector<uint8_t> suppress(np, 0);
     for (const FeatCell& fc : c.cells)
     {
         /*  Spread test: does any normal pair disagree?  */
@@ -427,8 +433,23 @@ void feature_points(Collector& c)
 
         c.soup.surface.push_back({ x(0), x(1), x(2) });
         ++added;
+        for (uint8_t q = 0; q < fc.n; ++q)
+            suppress[fc.pts[q]] = 1;
     }
     c.soup.feature_points = added;
+
+    if (added)
+    {
+        /*  Compact: drop suppressed crossings, keep the appended
+         *  feature points (they live past index np).  */
+        std::vector<DSurfPoint> kept;
+        kept.reserve(c.soup.surface.size());
+        for (size_t i = 0; i < c.soup.surface.size(); ++i)
+            if (i >= np || !suppress[i])
+                kept.push_back(c.soup.surface[i]);
+        c.soup.suppressed = c.soup.surface.size() - kept.size();
+        c.soup.surface.swap(kept);
+    }
 }
 
 }  // namespace
