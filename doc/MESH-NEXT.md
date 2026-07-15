@@ -253,6 +253,46 @@ STANDARD-pushed tapes for descent/sampling; bisection batches still
 use the base tape (bit-identical values; switching to covering
 pushed tapes is a pure speed move when performance round opens).
 
+## The constrained-crease round (mapped 2026-07-15, API recon done)
+
+**Primitive confirmed**: CGAL 6.2's
+`Conforming_constrained_Delaunay_triangulation_3` exposes
+`insert_constrained_edge(va, vb)` returning a
+`Constrained_polyline_id`, with conforming Steiner insertion.
+Crease chain segments as constrained edges make crossing chords
+geometrically impossible - the complete cure for csg's sharp-point
+residue and the last two pinches.
+
+Plan, referee-gated as always:
+
+1. **Chain extraction** (CGAL-independent, buildable first):
+   order feature points into polylines by nearest-neighbor walking
+   with the collinearity test from mediation (corners break
+   chains).  Referee on known topology: the de-aligned cube yields
+   12 open chains (edges) meeting at 8 corners; the union yields
+   ONE closed loop; csg one loop + the plane-circle.  Chain count,
+   closure, and length statistics are all checkable.
+2. **CDT_3 integration**: swap/augment the DT with the CCDT_3
+   class (check vertex-info support in its Tds; the extraction and
+   refinement loops port over).  Insert chains as constrained
+   edges BEFORE the refinement loop; Steiner points the CCDT adds
+   along constraints must be projected onto the crease (they land
+   on the straight segment, not the curve - project via the
+   crease-seek sampler).
+3. **Referee**: csg sharp point clean (0 pinches, folds -> crease-
+   legitimate only); union loop constrained (warts structurally
+   impossible); cubes unchanged; suite green; STLs to Nate -
+   glorious, for Keeter.
+
+Also banked from the wart campaign: the mental model, stated
+plainly (Nate's formulation, verified): f-rep -> point soup ->
+Delaunay -> COMPARE the mesh against the f-rep via the oracle
+(|f|/|grad| at edge midpoints = exact local deviation) -> insert
+on-surface points where it sags -> repeat.  Two nested loops share
+the oracle: topological (inside/outside separation) then geometric
+(surface fidelity).  Vertices are never moved, only added; the
+mesh converges by densification-where-needed.
+
 ## Open questions for Nate
 
 - CGAL as a dependency (prototype: yes; shipping: revisit).

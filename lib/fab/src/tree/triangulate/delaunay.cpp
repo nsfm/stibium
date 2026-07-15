@@ -7,6 +7,7 @@
  *  proven-sign box corners, and bisection batches through eval_r.
  */
 
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <unordered_map>
@@ -593,6 +594,193 @@ void feature_points(Collector& c)
 }
 
 }  // namespace
+
+DChains delaunay_chains(const DSoup& soup)
+{
+    DChains out;
+    const size_t nf_raw = size_t(soup.feature_points);
+    if (nf_raw < 2)
+    {
+        out.stray = nf_raw;
+        return out;
+    }
+    const size_t f0 = soup.surface.size() - nf_raw;
+
+    /*  1. Merge near-duplicates: adjacent cells\' QEFs converge to
+     *  nearly the same crease point on curved creases, clumping the
+     *  graph into junction storms.  Representatives only, within
+     *  half a cell.  */
+    const float mr = soup.spacing * 0.5f;
+    const float mr2 = mr * mr;
+    std::vector<uint32_t> rep;   // indices into soup.surface
+    for (size_t i = 0; i < nf_raw; ++i)
+    {
+        const DSurfPoint& P = soup.surface[f0 + i];
+        bool dup = false;
+        for (const uint32_t r : rep)
+        {
+            const DSurfPoint& Q = soup.surface[r];
+            const float dx = Q.x - P.x, dy = Q.y - P.y,
+                        dz = Q.z - P.z;
+            if (dx*dx + dy*dy + dz*dz < mr2)
+            {
+                dup = true;
+                break;
+            }
+        }
+        if (!dup)
+            rep.push_back(uint32_t(f0 + i));
+    }
+    const size_t nf = rep.size();
+    out.reps = nf;
+    if (nf < 2)
+    {
+        out.stray = nf;
+        return out;
+    }
+
+    /*  2. Two-sided linking: each point takes its nearest neighbor,
+     *  then its nearest neighbor in the OPPOSING direction (dot <
+     *  -0.3).  Chains get at most two links per node; corners end
+     *  chains naturally (the second edge turns 90 degrees and fails
+     *  the opposition test).  */
+    const float lim = soup.spacing * 2.0f;
+    const float lim2 = lim * lim;
+    std::vector<std::array<uint32_t, 2>> link(
+            nf, { UINT32_MAX, UINT32_MAX });
+    for (size_t i = 0; i < nf; ++i)
+    {
+        const DSurfPoint& P = soup.surface[rep[i]];
+        float d1 = 1e30f;
+        size_t n1 = SIZE_MAX;
+        for (size_t j = 0; j < nf; ++j)
+        {
+            if (j == i)
+                continue;
+            const DSurfPoint& Q = soup.surface[rep[j]];
+            const float dx = Q.x - P.x, dy = Q.y - P.y,
+                        dz = Q.z - P.z;
+            const float d = dx*dx + dy*dy + dz*dz;
+            if (d < d1 && d < lim2)
+            {
+                d1 = d;
+                n1 = j;
+            }
+        }
+        if (n1 == SIZE_MAX)
+            continue;
+        link[i][0] = uint32_t(n1);
+        const DSurfPoint& N1 = soup.surface[rep[n1]];
+        const float ax = N1.x - P.x, ay = N1.y - P.y,
+                    az = N1.z - P.z;
+        const float la = sqrtf(ax*ax + ay*ay + az*az);
+        float d2 = 1e30f;
+        size_t n2 = SIZE_MAX;
+        for (size_t j = 0; j < nf; ++j)
+        {
+            if (j == i || j == n1)
+                continue;
+            const DSurfPoint& Q = soup.surface[rep[j]];
+            const float bx = Q.x - P.x, by = Q.y - P.y,
+                        bz = Q.z - P.z;
+            const float d = bx*bx + by*by + bz*bz;
+            if (d >= d2 || d >= lim2)
+                continue;
+            const float lb = sqrtf(d);
+            if (!(la > 0) || !(lb > 0))
+                continue;
+            const float cosang =
+                    (ax*bx + ay*by + az*bz) / (la * lb);
+            if (cosang < -0.3f)
+            {
+                d2 = d;
+                n2 = j;
+            }
+        }
+        if (n2 != SIZE_MAX)
+            link[i][1] = uint32_t(n2);
+    }
+
+    /*  3. Symmetrize: an edge exists only if EITHER endpoint links
+     *  the other (one-sided is enough - curved spacing is uneven),
+     *  capped at degree 2 by construction of the walk.  */
+    const auto linked = [&](size_t i, uint32_t j) {
+        return link[i][0] == j || link[i][1] == j;
+    };
+    const auto next_of = [&](size_t cur, uint32_t prev,
+                             std::vector<uint8_t>& used) -> uint32_t {
+        for (const uint32_t cand : link[cur])
+        {
+            if (cand == UINT32_MAX || cand == prev || used[cand])
+                continue;
+            if (linked(cand, uint32_t(cur)) || true)
+                return cand;
+        }
+        return UINT32_MAX;
+    };
+
+    std::vector<uint8_t> used(nf, 0);
+    const auto walk = [&](size_t start) {
+        std::vector<uint32_t> chain;
+        /*  Walk both directions from start  */
+        std::vector<uint32_t> fwd, bwd;
+        uint32_t prev = UINT32_MAX, cur = uint32_t(start);
+        used[start] = 1;
+        fwd.push_back(uint32_t(start));
+        while (true)
+        {
+            const uint32_t nx = next_of(cur, prev, used);
+            if (nx == UINT32_MAX)
+                break;
+            prev = cur;
+            cur = nx;
+            used[cur] = 1;
+            fwd.push_back(cur);
+        }
+        prev = fwd.size() > 1 ? fwd[1] : UINT32_MAX;
+        cur = uint32_t(start);
+        while (true)
+        {
+            const uint32_t nx = next_of(cur, prev, used);
+            if (nx == UINT32_MAX)
+                break;
+            prev = cur;
+            cur = nx;
+            used[cur] = 1;
+            bwd.push_back(cur);
+        }
+        std::vector<uint32_t> chain_idx;
+        for (auto it = bwd.rbegin(); it != bwd.rend(); ++it)
+            chain_idx.push_back(*it);
+        for (const uint32_t v : fwd)
+            chain_idx.push_back(v);
+        return chain_idx;
+    };
+
+    for (size_t i = 0; i < nf; ++i)
+    {
+        if (used[i])
+            continue;
+        auto local = walk(i);
+        if (local.size() < 2)
+        {
+            ++out.stray;
+            continue;
+        }
+        /*  Closed if the two ends link each other  */
+        const bool closed =
+                local.size() >= 3 &&
+                (linked(local.front(), local.back()) ||
+                 linked(local.back(), local.front()));
+        std::vector<uint32_t> chain;
+        chain.reserve(local.size());
+        for (const uint32_t v : local)
+            chain.push_back(rep[v]);
+        out.chains.push_back(std::move(chain));
+        out.closed.push_back(closed ? 1 : 0);
+    }
+    return out;
+}
 
 DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt)
 {

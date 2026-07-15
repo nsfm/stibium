@@ -434,3 +434,58 @@ TEST_CASE("Delaunay showcase STLs at higher resolution", "[.dmeshSTL]")
              << m.repair_rounds << " rounds -> " << fname);
     }
 }
+
+TEST_CASE("Crease chains: known topology recovered", "[.dchain]")
+{
+    /*  The chain extractor judged against models whose crease
+     *  topology is known a priori.  */
+    struct Case
+    {
+        const char* name;
+        const char* expr;
+        int min_loops;      // closed chains expected (at least)
+        int min_open;       // open chains expected (at least)
+    };
+    const Case CASES[] = {
+        /*  de-aligned cube: 12 edges between 8 corner junctions  */
+        { "cube", "aa-f-0.6135X-Xf0.6135aa-f-0.6135Y-Yf0.6135a-f-0.6135Z-Zf0.6135",
+          0, 8 },
+        /*  two-sphere union: one closed intersection circle  */
+        { "union", "i-r++qXqYqZf1-r++q-Xf0.5q-Yf0.25q-Zf0.1f0.8",
+          1, 0 },
+        /*  csg: sphere cut by plane - at least one closed crease  */
+        { "csg", "ai-r++qXqYqZf1-r++q-Xf0.5qYqZf0.7n-Zf0.2",
+          1, 0 },
+    };
+    for (const Case& tc : CASES)
+    {
+        CAPTURE(tc.name);
+        DeckRegion d(tc.expr, 64, 1.6f);
+        volatile int halt = 0;
+        const DSoup soup = delaunay_sample(d.deck, d.r, &halt);
+        const DChains ch = delaunay_chains(soup);
+
+        int loops = 0, open = 0;
+        size_t chained = 0, longest = 0;
+        for (size_t c = 0; c < ch.chains.size(); ++c)
+        {
+            (ch.closed[c] ? loops : open)++;
+            chained += ch.chains[c].size();
+            longest = std::max(longest, ch.chains[c].size());
+        }
+        WARN(tc.name << ": " << soup.feature_points << " features ("
+             << ch.reps << " after merge) -> " << loops
+             << " loops + " << open << " open chains ("
+             << ch.stray << " stray, longest " << longest
+             << ", chained " << chained << ")");
+        CHECK(loops >= tc.min_loops);
+        CHECK(open >= tc.min_open);
+        /*  The chains should account for most REPRESENTATIVES
+         *  (curved creases clump duplicates; merge collapses them) */
+        if (ch.reps > 0)
+        {
+            const double frac = double(chained) / double(ch.reps);
+            CHECK(frac > 0.7);
+        }
+    }
+}
