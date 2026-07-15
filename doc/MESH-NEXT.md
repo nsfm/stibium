@@ -479,6 +479,25 @@ divot FACETS identified first (sharp fold edges with f<0
 midpoints already locate them - reuse the wart machinery's
 classification, not its repair).
 
+**CHIP ROUND 3 (b0769526): TBP/SDB refinement built, measured
+EQUAL, defaulted off.**  The DelIso cure is implemented and works
+mechanically (tri_cells at extraction, kernel circumcenters -
+dt.dual() needs the Delaunay cell base our info stacks lack, dual-
+segment oracle sampling, SDB-center inserts bypassing the segment
+keep-out) - but the new WORST-CHIP-DEPTH metric (the honest one;
+the count is polluted by an evergreen marginal-chord population,
+128 even on the perfect sphere) shows an identical trajectory to
+plain midpoint repair: 0.500 -> 0.196 sp plateau on csg at 96^3.
+Three repair strategies now hit the same plateau; it is set by the
+crowding guard + sampling density, NOT target choice.  Conclusion
+for the next attempt: the ~0.2 sp residue needs either (a) finer
+LOCAL density near concave creases (adaptive band refinement of
+the initial lattice - the sampler's octree could descend one extra
+level in crease bands), or (b) the DC-semantics extraction change.
+Repair itself is exhausted - three strategies, one plateau, stop
+pulling that lever.  STIBIUM_DMESH_SDB=1 re-arms the SDB path;
+depth prints in STIBIUM_DMESH_CHIP_DEBUG.
+
 **CONCAVE CHIPS: round landed same day** (918f3c89).  Mechanism
 confirmed by count (STIBIUM_DMESH_CHIP_DEBUG): 87 of csg's 90
 repair candidates were material-crossing chords (f < 0 at
