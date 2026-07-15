@@ -639,23 +639,68 @@ DChains delaunay_chains(const DSoup& soup)
         return out;
     }
 
+    /*  1b. Junction classification (the junction-split walk): a
+     *  crease-interior point's neighborhood is a LINE (one dominant
+     *  covariance eigenvalue); where crease curves meet or cross
+     *  (cube corners, csg's seam-meets-circle points) it is not.
+     *  Junction reps are cut out before linking - the walk cannot
+     *  hop between curves through a crossing it never sees - and
+     *  reattached afterward as SHARED chain endpoints.  (Gumhold
+     *  2001 / Pauly 2003 covariance classification; see
+     *  MESH-NEXT.)  */
+    const float lim = soup.spacing * 2.0f;
+    const float lim2 = lim * lim;
+    std::vector<uint8_t> junction(nf, 0);
+    for (size_t i = 0; i < nf; ++i)
+    {
+        const DSurfPoint& P = soup.surface[rep[i]];
+        float c[6] = { 0, 0, 0, 0, 0, 0 };   // xx xy xz yy yz zz
+        int nn = 0;
+        for (size_t j = 0; j < nf; ++j)
+        {
+            if (j == i)
+                continue;
+            const DSurfPoint& Q = soup.surface[rep[j]];
+            const float dx = Q.x - P.x, dy = Q.y - P.y,
+                        dz = Q.z - P.z;
+            if (dx*dx + dy*dy + dz*dz >= lim2)
+                continue;
+            c[0] += dx*dx;  c[1] += dx*dy;  c[2] += dx*dz;
+            c[3] += dy*dy;  c[4] += dy*dz;  c[5] += dz*dz;
+            ++nn;
+        }
+        if (nn < 3)
+            continue;
+        Eigen::Matrix3f m;
+        m << c[0], c[1], c[2],
+             c[1], c[3], c[4],
+             c[2], c[4], c[5];
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> es(m);
+        const auto& ev = es.eigenvalues();   // ascending
+        if (ev[2] > 0 && ev[1] / ev[2] > 0.2f)
+        {
+            junction[i] = 1;
+            ++out.junctions;
+        }
+    }
+
     /*  2. Two-sided linking: each point takes its nearest neighbor,
      *  then its nearest neighbor in the OPPOSING direction (dot <
      *  -0.3).  Chains get at most two links per node; corners end
      *  chains naturally (the second edge turns 90 degrees and fails
-     *  the opposition test).  */
-    const float lim = soup.spacing * 2.0f;
-    const float lim2 = lim * lim;
+     *  the opposition test).  Junction reps do not link.  */
     std::vector<std::array<uint32_t, 2>> link(
             nf, { UINT32_MAX, UINT32_MAX });
     for (size_t i = 0; i < nf; ++i)
     {
+        if (junction[i])
+            continue;
         const DSurfPoint& P = soup.surface[rep[i]];
         float d1 = 1e30f;
         size_t n1 = SIZE_MAX;
         for (size_t j = 0; j < nf; ++j)
         {
-            if (j == i)
+            if (j == i || junction[j])
                 continue;
             const DSurfPoint& Q = soup.surface[rep[j]];
             const float dx = Q.x - P.x, dy = Q.y - P.y,
@@ -678,7 +723,7 @@ DChains delaunay_chains(const DSoup& soup)
         size_t n2 = SIZE_MAX;
         for (size_t j = 0; j < nf; ++j)
         {
-            if (j == i || j == n1)
+            if (j == i || j == n1 || junction[j])
                 continue;
             const DSurfPoint& Q = soup.surface[rep[j]];
             const float bx = Q.x - P.x, by = Q.y - P.y,
@@ -757,13 +802,58 @@ DChains delaunay_chains(const DSoup& soup)
         return chain_idx;
     };
 
+    /*  Reattach: chains end where junctions were cut out; each
+     *  open end takes the nearest junction rep within reach as a
+     *  SHARED endpoint - three cube edges meet at one corner
+     *  vertex, crossing curves share the crossing.  A curve
+     *  passing through a single junction comes back as an open
+     *  chain with the junction at both ends (the segments still
+     *  close the loop through it).  */
+    const auto nearest_junction = [&](uint32_t v,
+                                      uint32_t exclude) -> uint32_t {
+        const DSurfPoint& P = soup.surface[rep[v]];
+        float best = lim2;
+        uint32_t bj = UINT32_MAX;
+        for (size_t j = 0; j < nf; ++j)
+        {
+            if (!junction[j] || uint32_t(j) == exclude)
+                continue;
+            const DSurfPoint& Q = soup.surface[rep[j]];
+            const float dx = Q.x - P.x, dy = Q.y - P.y,
+                        dz = Q.z - P.z;
+            const float d = dx*dx + dy*dy + dz*dz;
+            if (d < best)
+            {
+                best = d;
+                bj = uint32_t(j);
+            }
+        }
+        return bj;
+    };
+
     for (size_t i = 0; i < nf; ++i)
     {
-        if (used[i])
+        if (used[i] || junction[i])
             continue;
         auto local = walk(i);
         if (local.size() < 2)
         {
+            /*  A lone rep between two junctions is still an arm:
+             *  bridge it.  */
+            if (local.size() == 1)
+            {
+                const uint32_t j1 =
+                        nearest_junction(local[0], UINT32_MAX);
+                const uint32_t j2 = j1 == UINT32_MAX ? UINT32_MAX
+                        : nearest_junction(local[0], j1);
+                if (j1 != UINT32_MAX && j2 != UINT32_MAX)
+                {
+                    out.chains.push_back(
+                            { rep[j1], rep[local[0]], rep[j2] });
+                    out.closed.push_back(0);
+                    continue;
+                }
+            }
             ++out.stray;
             continue;
         }
@@ -773,9 +863,20 @@ DChains delaunay_chains(const DSoup& soup)
                 (linked(local.front(), local.back()) ||
                  linked(local.back(), local.front()));
         std::vector<uint32_t> chain;
-        chain.reserve(local.size());
+        chain.reserve(local.size() + 2);
         for (const uint32_t v : local)
             chain.push_back(rep[v]);
+        if (!closed)
+        {
+            const uint32_t jf =
+                    nearest_junction(local.front(), UINT32_MAX);
+            const uint32_t jb =
+                    nearest_junction(local.back(), UINT32_MAX);
+            if (jf != UINT32_MAX)
+                chain.insert(chain.begin(), rep[jf]);
+            if (jb != UINT32_MAX)
+                chain.push_back(rep[jb]);
+        }
         out.chains.push_back(std::move(chain));
         out.closed.push_back(closed ? 1 : 0);
     }
