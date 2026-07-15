@@ -73,6 +73,8 @@ struct DMesh
     uint64_t inserted = 0;         // surface points added by refinement
     uint64_t open_edges = 0;       // boundary edges not shared by 2 tris
     uint64_t nonmanifold_edges = 0;
+    uint64_t repaired = 0;         // wart midpoints projected+inserted
+    uint64_t repair_rounds = 0;
 };
 
 /*  Stages B+C: point soup -> Delaunay -> refine -> extract.
