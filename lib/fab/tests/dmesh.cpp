@@ -10,6 +10,8 @@
  */
 
 #include <chrono>
+#include <functional>
+#include <unordered_set>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -49,6 +51,42 @@ struct DeckRegion
         deck_free(deck);
     }
 };
+
+/*  Connected components over shared vertices: floating slivers are
+ *  CLOSED, so they pass open/non-manifold edge checks - only a
+ *  component count exposes them (spotted by eyeball on the cube's
+ *  chamfered edges).  */
+uint32_t mesh_components(const DMesh& m)
+{
+    const uint32_t nv = uint32_t(m.verts.size() / 3);
+    std::vector<uint32_t> parent(nv);
+    for (uint32_t v = 0; v < nv; ++v)
+        parent[v] = v;
+    std::function<uint32_t(uint32_t)> find =
+            [&](uint32_t v) -> uint32_t {
+        while (parent[v] != v)
+        {
+            parent[v] = parent[parent[v]];
+            v = parent[v];
+        }
+        return v;
+    };
+    for (size_t t = 0; t < m.tris.size(); t += 3)
+    {
+        const uint32_t a = find(m.tris[t]);
+        const uint32_t b = find(m.tris[t + 1]);
+        const uint32_t c = find(m.tris[t + 2]);
+        parent[b] = a;
+        parent[c] = a;
+    }
+    std::unordered_set<uint32_t> roots;
+    std::unordered_set<uint32_t> used;
+    for (size_t t = 0; t < m.tris.size(); ++t)
+        used.insert(m.tris[t]);
+    for (uint32_t v : used)
+        roots.insert(find(v));
+    return uint32_t(roots.size());
+}
 
 double mesh_volume(const DMesh& m)
 {
@@ -256,10 +294,12 @@ TEST_CASE("Delaunay vs Manifold DC: head to head", "[.dmeshVS]")
             return std::chrono::duration<double, std::milli>(b - a)
                     .count();
         };
+        const uint32_t comps = mesh_components(m);
         WARN(tc.name << ": delaunay " << m.tris.size() / 3
              << " tris in " << ms(t0, t1) << " ms ("
              << m.open_edges << " open, " << m.nonmanifold_edges
-             << " non-manifold) | manifold-DC " << dc_count / 9
+             << " non-manifold, " << comps
+             << " components) | manifold-DC " << dc_count / 9
              << " tris in " << ms(t2, t3) << " ms");
 
         char fname[128];
@@ -267,7 +307,7 @@ TEST_CASE("Delaunay vs Manifold DC: head to head", "[.dmeshVS]")
         save_stl_indexed(m.verts.data(), m.tris.data(),
                          uint32_t(m.tris.size() / 3), fname);
         snprintf(fname, sizeof(fname), "dcref_%s.stl", tc.name);
-        save_stl(dc_verts, dc_count / 9, fname);
+        save_stl(dc_verts, dc_count, fname);   // count = FLOATS
         free(dc_verts);
     }
 }
@@ -292,4 +332,36 @@ TEST_CASE("Thin feature below the lattice: the stage-D case",
          << soup.leaf_blocks);
     CHECK(soup.surface.empty());          // invisible to point sampling
     CHECK(soup.hidden_candidates > 0);    // visible to the intervals
+}
+
+TEST_CASE("Delaunay showcase STLs at higher resolution", "[.dmeshSTL]")
+{
+    /*  One-off generation for human eyeballs - resolution via
+     *  STIBIUM_DMESH_N (default 96).  */
+    uint32_t n = 96;
+    if (const char* env = getenv("STIBIUM_DMESH_N"))
+        if (atoi(env) > 0)
+            n = uint32_t(atoi(env));
+    const struct { const char* name; const char* expr; } CASES[] = {
+        { "sphere",  "-r++qXqYqZf1" },
+        { "cube",    "aa-f-0.6X-Xf0.6aa-f-0.6Y-Yf0.6a-f-0.6Z-Zf0.6" },
+        { "csg",     "ai-r++qXqYqZf1-r++q-Xf0.5qYqZf0.7n-Zf0.2" },
+        { "spheres", "i-r++qXqYqZf1-r++q-Xf0.5q-Yf0.25q-Zf0.1f0.8" },
+    };
+    for (const auto& tc : CASES)
+    {
+        DeckRegion d(tc.expr, n, 1.6f);
+        volatile int halt = 0;
+        DMesh m;
+        if (!delaunay_mesh(d.deck, d.r, &halt, &m))
+            return;
+        char fname[128];
+        snprintf(fname, sizeof(fname), "dmesh_hi_%s.stl", tc.name);
+        save_stl_indexed(m.verts.data(), m.tris.data(),
+                         uint32_t(m.tris.size() / 3), fname);
+        WARN(tc.name << " @" << n << ": " << m.tris.size() / 3
+             << " tris, " << m.open_edges << " open, "
+             << m.nonmanifold_edges << " non-manifold, "
+             << mesh_components(m) << " components -> " << fname);
+    }
 }
