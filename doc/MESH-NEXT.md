@@ -144,11 +144,15 @@ tests `[.dmesh]`, `[.dmeshBC]`, `[.dmeshVS]`):
 - The 45x is profiled, not guessed: CGAL exact-predicate fallbacks
   (Mpzf) firing on our maximally-cospherical lattice samples, plus
   full-triangulation edge iteration per refinement round.  Stage-D
-  leads, in order: deterministic sub-cell jitter on lattice samples
-  (breaks cosphericality; re-check signs after, batched), interior
-  sample thinning to a near-surface shell + sparse far field,
-  incremental edge scanning (only cells touched since last round),
-  and batched-oracle sign evaluation for all-surface cells.
+  leads, in order: interior sample thinning to a near-surface shell
+  + sparse far field, incremental edge scanning (only cells touched
+  since last round), and batched-oracle sign evaluation for
+  all-surface cells.  **Jitter: tried and REVERTED** - deterministic
+  sub-cell jitter measured slower AND broke manifoldness (cube grew
+  110 non-manifold edges: jittered samples landing within epsilon
+  of flat faces make degenerate slivers next to their own bisected
+  surface points).  Any future jitter needs a minimum-distance-to-
+  surface guard (the interval oracle can provide one).
 
 Stage D remains: feature points (QEF, reuse Kobbelt machinery),
 hidden-candidate drill-down, error-driven adaptive insertion,
