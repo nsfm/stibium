@@ -179,7 +179,8 @@ TEST_CASE("Delaunay stage A: surface points sit on the surface",
              << soup.leaf_blocks << " leaf blocks, "
              << soup.culled_empty << "/" << soup.culled_full
              << " culled E/F, " << soup.hidden_candidates
-             << " hidden candidates");
+             << " hidden candidates, " << soup.dense_blocks
+             << " dense");
 
         REQUIRE(soup.surface.size() > 100);
         bool any_in = false, any_out = false;
@@ -211,6 +212,32 @@ TEST_CASE("Delaunay stage A: surface points sit on the surface",
         CHECK(worst < 1e-3);
         if (soup.feature_points)
             CHECK(worst_feat < 0.05);
+    }
+
+    /*  Crease-band density smoke (the STIBIUM_DMESH_DENSE knob is
+     *  off by default - keep the machinery referee'd): dense leaves
+     *  fire exactly where the pushed tape keeps a live min/max
+     *  choice, so the sphere has none and csg has many, and the
+     *  band's midpoint lattice must grow the point soup.  */
+    {
+        DeckRegion d(MODELS[3], 48, 1.1f);
+        volatile int halt = 0;
+        const DSoup base = delaunay_sample(d.deck, d.r, &halt);
+        setenv("STIBIUM_DMESH_DENSE", "1", 1);
+        const DSoup dense = delaunay_sample(d.deck, d.r, &halt);
+        DeckRegion ds(MODELS[0], 48, 1.1f);
+        const DSoup sphere = delaunay_sample(ds.deck, ds.r, &halt);
+        unsetenv("STIBIUM_DMESH_DENSE");
+        WARN("dense smoke: csg " << base.dense_blocks << " -> "
+             << dense.dense_blocks << " dense blocks, "
+             << base.samples.size() << " -> " << dense.samples.size()
+             << " samples; sphere " << sphere.dense_blocks
+             << " dense blocks");
+        CHECK(base.dense_blocks == 0);
+        CHECK(dense.dense_blocks > 0);
+        CHECK(dense.samples.size() > base.samples.size());
+        CHECK(dense.spacing == base.spacing);   // base pitch kept
+        CHECK(sphere.dense_blocks == 0);        // no min/max clauses
     }
 }
 
@@ -434,7 +461,7 @@ TEST_CASE("Delaunay showcase STLs at higher resolution", "[.dmeshSTL]")
              << m.repair_rounds << " rounds; constrained "
              << m.constrained << " edges, " << m.steiner
              << " steiner, " << m.split_verts
-             << " split -> " << fname);
+             << " split, " << m.snapped << " snapped -> " << fname);
     }
 }
 
@@ -452,7 +479,10 @@ TEST_CASE("Crease tracer: exact curves with junctions", "[.dtrace]")
     };
     const Case CASES[] = {
         /*  de-aligned cube: 4 pillar edges (one min/max pair) +
-         *  2 closed face loops (the outer pair) = all 12 edges  */
+         *  2 closed face loops (the outer pair) = all 12 edges.
+         *  (Under STIBIUM_DMESH_DENSE the loops arrive instead as
+         *  corner-shared open arcs - 12 edge arcs, same wireframe,
+         *  same constraint graph.)  */
         { "cube", "aa-f-0.6135X-Xf0.6135aa-f-0.6135Y-Yf0.6135a-f-0.6135Z-Zf0.6135",
           4, 2 },
         /*  union: one closed seam loop, no junctions  */
@@ -529,6 +559,13 @@ TEST_CASE("Crease chains: known topology recovered", "[.dchain]")
         { "csg", "ai-r++qXqYqZf1-r++q-Xf0.5qYqZf0.7n-Zf0.2",
           1, 0 },
     };
+    /*  The fallback extractor's contract is BASE-density features:
+     *  the crease-band dense lattice (2026-07-15) halves feature
+     *  spacing and its covariance junction-split dissolves (cube
+     *  corners sail through).  Production is protected by the
+     *  oracle trust gate (>10% rejected segments -> DT semantics);
+     *  dense-input robustness is queued in MESH-NEXT.  */
+    setenv("STIBIUM_DMESH_DENSE", "0", 1);
     for (const Case& tc : CASES)
     {
         CAPTURE(tc.name);
@@ -560,4 +597,5 @@ TEST_CASE("Crease chains: known topology recovered", "[.dchain]")
             CHECK(frac > 0.7);
         }
     }
+    unsetenv("STIBIUM_DMESH_DENSE");
 }

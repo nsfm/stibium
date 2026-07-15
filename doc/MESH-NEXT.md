@@ -1,41 +1,80 @@
 # The meshing campaign: adaptive Delaunay on sound intervals
 
-## >>> NEXT SESSION OPENS HERE (note to self, 2026-07-15) <<<
+## >>> CAMPAIGN STATE (2026-07-15, chip round CLOSED) <<<
 
-Nate wants BOTH remaining tracks explored ("a few small nits from
-perfection - we can't stop now"), speed explicitly a non-concern
-for final meshes.  The chip plateau (0.196 sp worst depth, three
-repair strategies, one wall) is guard x density - so:
+**The chip class is dead.**  End-of-pipeline referee (full-mesh
+sweep, 3%-of-edge species bar): **0 chip edges, worst depth
+0.000 sp on every showcase model**, all 0 open / 0 non-manifold /
+1 component, at +34 triangles over baseline (csg 21742 -> 21776).
+Two landings and a pile of refereed negatives:
 
-1. **Crease-band density round** (my pick, start here).  Goal:
-   worst-chip-depth < 0.1 sp on csg at 96^3 (metric prints via
-   STIBIUM_DMESH_CHIP_DEBUG; count is a LYING metric, use depth).
-   Two designs, cheapest first:
-   (a) elegant: during octree descent, a box whose pushed tape
-       kept an AMBIGUOUS min/max choice is crease-suspect -
-       descend it ONE extra level.  Uses existing push machinery
-       (ClauseIv choices); zero new oracles.  Look at descend()/
-       LEAF_VOXELS in delaunay.cpp + tape_push choice records.
-   (b) brute: two-pass - sample, trace creases, re-sample boxes
-       within 1 sp of traced polylines at double density.
-   Watch: CGAL cospherical slowdowns with denser lattices (known,
-   accepted); the drop-band will thin the new points near
-   constraints (good - they exist to feed refinement/repair).
-   Re-test SDB (STIBIUM_DMESH_SDB=1) at the new density - its
-   plateau may separate from midpoint's there.
-2. **DC-semantics extraction** (reserve, only if density fails):
-   facets at concave-crease wedges forced to use crease edges.
-3. **Flat-face decimation** (Nate's ask, sketch under "Queued
-   rounds"): oracle-certified planar patch re-triangulation.
-   Isolated output pass - good palate cleanser between rounds.
-4. Someday: kink-corner 3-field solve, OP_ABS creases, zeiss-scale
-   run, upstream letter (doc/DELAUNAY-MESHER.md is written for it).
+1. **The crease-snap pass** (the cure; STIBIUM_DMESH_SNAP=0
+   disables).  The residual chips were chords of MOSTLY-AIR tets
+   whose bottom facet (three surface corners) dips under a concave
+   crease - a facet-level defect of restricted-Delaunay extraction
+   that NO cell classification or insert-repair can reach.  But
+   the traced polylines know exactly where the corner is: after
+   the manifold pass, each residual chip edge's two triangles are
+   split at the nearest traced-crease point, tenting the chord up
+   onto the crease.  Pure output surgery (no CGAL insert, no
+   Steiner, no keep-out); wave-based re-lookup by POSITION because
+   consecutive chips share triangles (defer, don't conclude, when
+   a wave-mate already rewrote one).  17 tents on csg at base
+   density; manifoldness preserved by construction.
+2. **Crease-band density** (quality knob, STIBIUM_DMESH_DENSE=n
+   extra levels, default OFF).  Detection is free: a min/max
+   clause SURVIVING in a leaf's pushed tape means the box kept an
+   ambiguous choice (decided clauses are rewritten to copies) -
+   sample that leaf on a midpoint-refined lattice.  Raw chip depth
+   tracks the band pitch (0.500/0.375/0.192/0.098 sp at 1/2/4/8x),
+   but the snap pass zeroes the metric at EVERY density, and the
+   band costs 2.2x triangles on csg for sub-bar smoothness only.
+   8x also produced 28 open edges and 492K tris - brute density is
+   the wrong shape.  Corridor + chip keep-out scale as
+   0.35 sp / 2^levels when the band is on (they must move with the
+   local pitch or the band starves repair entirely - measured
+   281/281 blocked at fixed radii).
+
+Refereed negatives (full numbers in "Density round" below):
+- Insert-repair can NEVER clear the chip residue, at any density:
+  the chip target and the keep-out both scale with local pitch, so
+  the blocked set is self-similar - plateau 0.196/0.198/0.192 sp
+  at 1/2/4x band density, midpoint AND SDB strategies.
+- DC cell classification (5-probe all-surface rule, kept behind
+  STIBIUM_DMESH_DC, default on, measured no-op): the clipping cell
+  is NOT all-surface - it has an air apex and is correctly
+  classified by it.  The defect is the facet, not the cell.
+- Scaling the tracer march step with the band: chord distribution
+  byte-identical (chords track the LATTICE pitch), constraint
+  count doubled, kink-straddle noise pushed past the [.dtrace]
+  bound.  Reverted.
+- The dense band halves QEF feature spacing and delaunay_chains'
+  covariance junction-split dissolves (cube corners sail through);
+  the fallback extractor's contract is base-density features
+  ([.dchain] pins DENSE=0; production is protected by the oracle
+  trust gate).  Dense-input robustness queued.
+- A subtle self-inflicted wound, caught by anchoring against the
+  committed baseline: spacing = (X[ni]-X[0])/ni instead of
+  X[1]-X[0] flips exact-tie merge comparisons on grid-ALIGNED
+  models (one ulp -> cube_aligned 45908-vs-16444 tris, spheres
+  grew a phantom second component).  When aligned-model numbers
+  swing wildly, check spacing-derived radii for tie flips FIRST.
+
+Next tracks, in order:
+1. **Flat-face decimation** (Nate's ask): oracle-certified planar
+   patch re-triangulation; sketch under "Queued rounds".  Isolated
+   output pass, like the snap pass - the pattern works.
+2. Someday: kink-corner 3-field solve, OP_ABS creases, zeiss-scale
+   run, chain-extractor dense robustness, upstream letter
+   (doc/DELAUNAY-MESHER.md is written for it).
 
 House rules that saved this campaign, do not forget: measure
-before productionize; negative results get numbers and ledger
-entries; depth not count; Nate's eyeballs are a formal referee
+before productionize (and on EVERY model, not just the showcase
+you're staring at); negative results get numbers and ledger
+entries; depth not count; anchor against the committed baseline
+before believing a delta; Nate's eyeballs are a formal referee
 and they out-diagnose your instruments.  Suite must stay green:
-627,666 assertions as of b0769526/4e5df4e1.
+627,666 assertions.
 
 ---
 
