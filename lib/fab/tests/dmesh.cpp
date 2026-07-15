@@ -431,7 +431,9 @@ TEST_CASE("Delaunay showcase STLs at higher resolution", "[.dmeshSTL]")
              << "medium/gentle: " << mesh_warts(m, -0.2f) << "/"
              << mesh_warts(m, 0.2f) << "/" << mesh_warts(m, 0.5f)
              << "; repaired " << m.repaired << " in "
-             << m.repair_rounds << " rounds -> " << fname);
+             << m.repair_rounds << " rounds; constrained "
+             << m.constrained << " edges, " << m.steiner
+             << " steiner -> " << fname);
     }
 }
 

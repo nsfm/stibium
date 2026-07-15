@@ -95,6 +95,12 @@ struct DMesh
     uint64_t nonmanifold_edges = 0;
     uint64_t repaired = 0;         // wart midpoints projected+inserted
     uint64_t repair_rounds = 0;
+    /*  Constrained-crease round (STIBIUM_DMESH_CCDT, default on):
+     *  crease-chain segments inserted as constrained edges, and the
+     *  Steiner vertices the conforming machinery placed on them
+     *  (on-crease surface vertices by construction).  */
+    uint64_t constrained = 0;
+    uint64_t steiner = 0;
 };
 
 /*  Stages B+C: point soup -> Delaunay -> refine -> extract.
