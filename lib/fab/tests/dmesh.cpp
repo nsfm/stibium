@@ -139,18 +139,29 @@ TEST_CASE("Delaunay stage A: surface points sit on the surface",
         REQUIRE(any_in);
         REQUIRE(any_out);
 
+        /*  Bisected points sit ON the surface; QEF feature points
+         *  (the tail of the array) sit on crease intersections and
+         *  carry O(solver) error - judged to a looser bound.  */
         TapeCtx* ctx = tape_ctx_new(d.deck);
-        double worst = 0;
-        for (const DSurfPoint& p : soup.surface)
+        const size_t n_bisected =
+                soup.surface.size() - soup.feature_points;
+        double worst = 0, worst_feat = 0;
+        for (size_t i = 0; i < soup.surface.size(); ++i)
         {
+            const DSurfPoint& p = soup.surface[i];
             const float v =
                     tape_eval_f(deck_base(d.deck), ctx, p.x, p.y, p.z);
-            if (fabs(v) > worst)
-                worst = fabs(v);
+            double& w = i < n_bisected ? worst : worst_feat;
+            if (fabs(v) > w)
+                w = fabs(v);
         }
         tape_ctx_free(ctx);
-        WARN("worst |f(surface point)| = " << worst);
+        WARN("worst |f|: bisected " << worst << ", feature "
+             << worst_feat << " (" << soup.feature_points
+             << " feature pts)");
         CHECK(worst < 1e-3);
+        if (soup.feature_points)
+            CHECK(worst_feat < 0.05);
     }
 }
 

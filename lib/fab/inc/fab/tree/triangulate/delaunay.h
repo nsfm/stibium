@@ -51,6 +51,8 @@ struct DSoup
      *  the block agrees on sign: a candidate hidden thin feature.
      *  Stage-D drill-down hook; counted from day one.  */
     uint64_t hidden_candidates = 0;
+    /*  QEF-placed sharp-feature points appended to `surface`.  */
+    uint64_t feature_points = 0;
 };
 
 /*  Stage A: collect the point soup for a region.  */

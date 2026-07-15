@@ -12,6 +12,9 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include <Eigen/Dense>
+#include <Eigen/SVD>
+
 #include "fab/tree/triangulate/delaunay.h"
 #include "fab/util/switches.h"
 
@@ -46,6 +49,17 @@ struct PendingEdge
     float bx, by, bz;
 };
 
+/*  A lattice cell that might straddle a sharp feature: its bounds
+ *  and the indices (into the edge/surface-point arrays) of its
+ *  crossing edges.  Collected during block sampling, judged after
+ *  bisection when positions and normals exist.  */
+struct FeatCell
+{
+    float lo[3], hi[3];
+    uint32_t pts[12];
+    uint8_t n = 0;
+};
+
 struct Collector
 {
     const Deck* deck;
@@ -54,8 +68,10 @@ struct Collector
 
     DSoup soup;
     std::unordered_set<uint64_t> seen_samples;
-    std::unordered_set<uint64_t> seen_edges;
+    std::unordered_map<uint64_t, uint32_t> edge_index;
     std::vector<PendingEdge> edges;
+    std::vector<FeatCell> cells;
+    float spacing = 0;   // finest lattice pitch (uniform grid)
 
     void add_sample(float x, float y, float z, bool inside)
     {
@@ -63,13 +79,29 @@ struct Collector
             soup.samples.push_back({ x, y, z, inside });
     }
 
+    static uint64_t edge_hash(float ax, float ay, float az,
+                              float bx, float by, float bz)
+    {
+        return coord_hash(ax, ay, az) ^ (coord_hash(bx, by, bz) * 31);
+    }
+
+    /*  Returns the crossing's index, or UINT32_MAX if this edge has
+     *  no sign change recorded.  */
+    uint32_t find_edge(float ax, float ay, float az,
+                       float bx, float by, float bz) const
+    {
+        const auto it = edge_index.find(edge_hash(ax, ay, az,
+                                                  bx, by, bz));
+        return it == edge_index.end() ? UINT32_MAX : it->second;
+    }
+
     void add_edge(float ax, float ay, float az, bool a_in,
                   float bx, float by, float bz)
     {
-        const uint64_t h =
-                coord_hash(ax, ay, az) ^ (coord_hash(bx, by, bz) * 31);
-        if (!seen_edges.insert(h).second)
+        const uint64_t h = edge_hash(ax, ay, az, bx, by, bz);
+        if (edge_index.count(h))
             return;
+        edge_index.emplace(h, uint32_t(edges.size()));
         if (a_in)
             edges.push_back({ ax, ay, az, bx, by, bz });
         else
@@ -162,6 +194,41 @@ void sample_block(Collector& c, const Region& r, Tape* tape)
     ++c.soup.leaf_blocks;
     if (!(any_in && any_out))
         ++c.soup.hidden_candidates;   // interval said maybe; samples say no
+
+    if (c.spacing == 0)
+        c.spacing = r.X[1] - r.X[0];
+
+    /*  Candidate feature cells: any voxel with >= 3 crossing edges.
+     *  Judged later, once bisected positions and normals exist.  */
+    for (uint32_t k = 0; k < nk; ++k)
+        for (uint32_t j = 0; j < nj; ++j)
+            for (uint32_t i = 0; i < ni; ++i)
+            {
+                FeatCell fc;
+                fc.lo[0] = r.X[i];    fc.hi[0] = r.X[i + 1];
+                fc.lo[1] = r.Y[j];    fc.hi[1] = r.Y[j + 1];
+                fc.lo[2] = r.Z[k];    fc.hi[2] = r.Z[k + 1];
+                /*  12 edges: 4 per axis  */
+                for (int axis = 0; axis < 3; ++axis)
+                    for (int u = 0; u < 2; ++u)
+                        for (int v = 0; v < 2; ++v)
+                        {
+                            float a[3] = { fc.lo[0], fc.lo[1], fc.lo[2] };
+                            float b[3];
+                            const int u_ax = (axis + 1) % 3;
+                            const int v_ax = (axis + 2) % 3;
+                            a[u_ax] = u ? fc.hi[u_ax] : fc.lo[u_ax];
+                            a[v_ax] = v ? fc.hi[v_ax] : fc.lo[v_ax];
+                            b[0] = a[0];  b[1] = a[1];  b[2] = a[2];
+                            b[axis] = fc.hi[axis];
+                            const uint32_t e = c.find_edge(
+                                    a[0], a[1], a[2], b[0], b[1], b[2]);
+                            if (e != UINT32_MAX && fc.n < 12)
+                                fc.pts[fc.n++] = e;
+                        }
+                if (fc.n >= 3)
+                    c.cells.push_back(fc);
+            }
 }
 
 /*  Octree descent, mirroring the production mesher's structure:
@@ -257,6 +324,115 @@ void bisect_edges(Collector& c)
 
 }  // namespace
 
+namespace {
+
+/*  Keeter step 3: sharp-feature points.  For every candidate cell,
+ *  probe normals at its crossing points (batched central
+ *  differences); if the normals disagree enough, the cell straddles
+ *  a crease - solve the QEF (SVD with singular-value clamping,
+ *  regularized toward the centroid, the classic robust DC solve)
+ *  and add the minimizer as a surface point, rejecting solutions
+ *  that escape the cell.  */
+void feature_points(Collector& c)
+{
+    if (c.cells.empty() || c.soup.surface.empty())
+        return;
+
+    /*  Normals at every surface point (many cells share points) -
+     *  six probes per point, batched.  */
+    const size_t np = c.soup.surface.size();
+    const float h = c.spacing * 0.01f;
+    std::vector<float> xs(np * 6), ys(np * 6), zs(np * 6), vals;
+    for (size_t i = 0; i < np; ++i)
+    {
+        const DSurfPoint& p = c.soup.surface[i];
+        for (int q = 0; q < 6; ++q)
+        {
+            xs[i * 6 + q] = p.x;
+            ys[i * 6 + q] = p.y;
+            zs[i * 6 + q] = p.z;
+        }
+        xs[i * 6 + 0] += h;   xs[i * 6 + 1] -= h;
+        ys[i * 6 + 2] += h;   ys[i * 6 + 3] -= h;
+        zs[i * 6 + 4] += h;   zs[i * 6 + 5] -= h;
+    }
+    eval_points(deck_base(c.deck), c.ctx, xs, ys, zs, vals);
+
+    std::vector<Eigen::Vector3f> normals(np);
+    for (size_t i = 0; i < np; ++i)
+    {
+        Eigen::Vector3f n(vals[i * 6 + 0] - vals[i * 6 + 1],
+                          vals[i * 6 + 2] - vals[i * 6 + 3],
+                          vals[i * 6 + 4] - vals[i * 6 + 5]);
+        const float len = n.norm();
+        normals[i] = len > 0 ? Eigen::Vector3f(n / len)
+                             : Eigen::Vector3f::Zero();
+    }
+
+    constexpr float SPREAD_DOT = 0.9f;   // ~25 degrees
+    uint64_t added = 0;
+    for (const FeatCell& fc : c.cells)
+    {
+        /*  Spread test: does any normal pair disagree?  */
+        float min_dot = 1;
+        for (uint8_t a = 0; a < fc.n; ++a)
+            for (uint8_t b = uint8_t(a + 1); b < fc.n; ++b)
+            {
+                const float d = normals[fc.pts[a]]
+                                        .dot(normals[fc.pts[b]]);
+                if (d < min_dot)
+                    min_dot = d;
+            }
+        if (min_dot > SPREAD_DOT)
+            continue;
+
+        Eigen::MatrixXf A(fc.n, 3);
+        Eigen::VectorXf b(fc.n);
+        Eigen::Vector3f centroid = Eigen::Vector3f::Zero();
+        for (uint8_t q = 0; q < fc.n; ++q)
+        {
+            const DSurfPoint& p = c.soup.surface[fc.pts[q]];
+            centroid += Eigen::Vector3f(p.x, p.y, p.z);
+        }
+        centroid /= float(fc.n);
+        for (uint8_t q = 0; q < fc.n; ++q)
+        {
+            const DSurfPoint& p = c.soup.surface[fc.pts[q]];
+            A.row(q) = normals[fc.pts[q]];
+            b(q) = normals[fc.pts[q]].dot(
+                    Eigen::Vector3f(p.x, p.y, p.z) - centroid);
+        }
+        Eigen::JacobiSVD<Eigen::MatrixXf> svd(
+                A, Eigen::ComputeThinU | Eigen::ComputeThinV);
+        Eigen::Vector3f sv = svd.singularValues();
+        const float cutoff = sv(0) * 0.1f;
+        Eigen::Vector3f inv = Eigen::Vector3f::Zero();
+        for (int q = 0; q < 3; ++q)
+            if (sv(q) > cutoff)
+                inv(q) = 1.0f / sv(q);
+        const Eigen::Vector3f x = centroid +
+                svd.matrixV() *
+                        inv.asDiagonal() *
+                        (svd.matrixU().transpose() * b);
+
+        /*  Reject escapes (with a small margin): a QEF that leaves
+         *  its cell is extrapolating noise.  */
+        const float margin = c.spacing * 0.25f;
+        bool ok = true;
+        for (int q = 0; q < 3; ++q)
+            if (x(q) < fc.lo[q] - margin || x(q) > fc.hi[q] + margin)
+                ok = false;
+        if (!ok)
+            continue;
+
+        c.soup.surface.push_back({ x(0), x(1), x(2) });
+        ++added;
+    }
+    c.soup.feature_points = added;
+}
+
+}  // namespace
+
 DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt)
 {
     Collector c;
@@ -265,6 +441,7 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt)
     c.halt = halt;
     descend(c, r, deck_base(deck));
     bisect_edges(c);
+    feature_points(c);
     tape_ctx_free(c.ctx);
     return std::move(c.soup);
 }
