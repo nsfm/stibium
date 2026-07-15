@@ -101,6 +101,9 @@ struct DMesh
      *  (on-crease surface vertices by construction).  */
     uint64_t constrained = 0;
     uint64_t steiner = 0;
+    /*  Manifold pass (STIBIUM_DMESH_MANIFOLD, default on): pinched
+     *  fans split into one coincident vertex per surface sheet.  */
+    uint64_t split_verts = 0;
 };
 
 /*  Stages B+C: point soup -> Delaunay -> refine -> extract.
