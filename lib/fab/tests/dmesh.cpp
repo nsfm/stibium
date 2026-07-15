@@ -93,7 +93,7 @@ uint32_t mesh_components(const DMesh& m)
  *  double back (dihedral far past any real crease).  Count pairs
  *  whose normals oppose (dot < -0.2 ~ fold sharper than 100
  *  degrees) - Nate counts ~20 by eye on the spheres model.  */
-uint32_t mesh_warts(const DMesh& m)
+uint32_t mesh_warts(const DMesh& m, float fold_dot = -0.2f)
 {
     std::unordered_map<uint64_t, std::pair<uint32_t, uint32_t>> em;
     const auto tri_normal = [&](uint32_t t, double n[3]) {
@@ -131,7 +131,7 @@ uint32_t mesh_warts(const DMesh& m)
         tri_normal(pr.first, n1);
         tri_normal(pr.second, n2);
         const double d = n1[0]*n2[0] + n1[1]*n2[1] + n1[2]*n2[2];
-        if (d < -0.2)
+        if (d < fold_dot)
             ++warts;
     }
     return warts;
@@ -425,6 +425,9 @@ TEST_CASE("Delaunay showcase STLs at higher resolution", "[.dmeshSTL]")
         WARN(tc.name << " @" << n << ": " << m.tris.size() / 3
              << " tris, " << m.open_edges << " open, "
              << m.nonmanifold_edges << " non-manifold, "
-             << mesh_components(m) << " components -> " << fname);
+             << mesh_components(m) << " components; folds sharp/"
+             << "medium/gentle: " << mesh_warts(m, -0.2f) << "/"
+             << mesh_warts(m, 0.2f) << "/" << mesh_warts(m, 0.5f)
+             << " -> " << fname);
     }
 }

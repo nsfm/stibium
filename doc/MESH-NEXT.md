@@ -180,8 +180,16 @@ one neighborhood: ~20 gentle warts on the spheres-union
 intersection (96^3), 'chipped' csg crease, csg 91 sharp folds
 (dot < -0.2) + 3 non-manifold edges at 48^3 - the csg crease is a
 sphere meeting a GRID-ALIGNED cut plane (z=0.2), both hard cases
-stacked.  A fold/wart detector now runs in [.dmeshVS], so the next
-round opens with numbers.  Design direction: feature points along
+stacked.  A fold/wart detector now runs in [.dmeshVS] and
+(graduated sharp/medium/gentle) in [.dmeshSTL].  Reading the 96^3
+numbers taught the next spec: ANGLE ALONE CANNOT TELL A CREASE
+FROM A WART - the cube's 444 medium folds are its twelve intended
+edges (~37 segments each), the union's 84 mix legitimate crease
+segments with Nate's ~20 warts, and even the visually-perfect
+sphere carries 128 sub-visual sliver folds.  The next detector
+validates folds against the surface itself: a wart is a fold whose
+edge midpoint is off-surface (an |f| probe - the oracle gives it
+for free); a crease is a fold that belongs.  Design direction: feature points along
 a curved crease need to act as an ordered CHAIN (crease polyline),
 and refinement inserts near a chain should harmonize with it
 (snap-to-crease or keep-out) instead of fighting it.
