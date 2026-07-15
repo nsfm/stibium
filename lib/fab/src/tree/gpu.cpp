@@ -1350,6 +1350,34 @@ extern "C" bool gpu_render16(const Deck* deck, Region r,
     }
     const BlobInfo bi = parse_blob(blob);
 
+    /*  STIBIUM_GPU_BLOB_DUMP=path: write the (rescheduled) blob plus
+     *  the region bounds to a file, so offline experiments (e.g. the
+     *  affine-arithmetic prototype in tests/aa.cpp) can work on real
+     *  app decks without the python graph evaluator.  Format: u32
+     *  words - [ni nj nk] [xmin xmax ymin ymax zmin zmax as f32
+     *  bits] [blob...].  */
+    if (const char* dump = getenv("STIBIUM_GPU_BLOB_DUMP"))
+    {
+        FILE* f = fopen(dump, "wb");
+        if (f)
+        {
+            const auto fb = [](float v) {
+                uint32_t u;
+                memcpy(&u, &v, 4);
+                return u;
+            };
+            uint32_t hdr[9] = {
+                r.ni, r.nj, r.nk,
+                fb(r.X[0]), fb(r.X[r.ni]),
+                fb(r.Y[0]), fb(r.Y[r.nj]),
+                fb(r.Z[0]), fb(r.Z[r.nk]),
+            };
+            fwrite(hdr, 4, 9, f);
+            fwrite(blob.data(), 4, blob.size(), f);
+            fclose(f);
+        }
+    }
+
     /*  STIBIUM_GPU_DEBUG=1: dump deck shape + opcode census once
      *  per deck (helps chase CPU-vs-GPU pixel divergence to the op
      *  responsible).  */

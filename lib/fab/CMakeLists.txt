@@ -126,6 +126,7 @@ add_executable(SbFabTest
     tests/mesh.cpp
     tests/mesher.cpp
     tests/parser.cpp
+    tests/aa.cpp
     tests/shape.cpp
     tests/tape.cpp
 )
