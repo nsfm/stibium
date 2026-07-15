@@ -765,7 +765,7 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
      *  Newton-projected onto the surface and inserted, and the mesh
      *  re-extracted, until clean or capped (error-driven insertion,
      *  after Wang et al. 2025).  */
-    constexpr int MAX_REPAIR = 8;
+    constexpr int MAX_REPAIR = 16;
     uint64_t repaired_total = 0;
     int repair_round = 0;
     for (;; ++repair_round)
@@ -984,7 +984,7 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
             if (!(gl > 0) || !std::isfinite(f))
                 continue;
             const float dist = fabsf(f) / gl;
-            if (dist > wclamp[i] * 0.05f)
+            if (dist > wclamp[i] * 0.03f)
                 cand.push_back(i);
         }
         if (cand.empty())
@@ -997,7 +997,7 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
              *  chord is self-similar and never converges; split at
              *  the |f| peak along the chord instead - the branch
              *  switch, i.e. the crease.  */
-            constexpr int NSAMP = 9;
+            constexpr int NSAMP = 15;
             std::vector<float> sx(cand.size() * NSAMP),
                     sy(cand.size() * NSAMP),
                     sz(cand.size() * NSAMP), sv;
