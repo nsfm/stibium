@@ -67,6 +67,22 @@ struct DSoup
 /*  Stage A: collect the point soup for a region.  */
 DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt);
 
+/*  Crease chains: feature points ordered into polylines by a
+ *  radius graph (1.6 cells).  Degree-2 runs are chains; degree>=3
+ *  vertices are junctions (cube corners) and terminate chains;
+ *  all-degree-2 cycles are closed loops.  Indices refer into
+ *  soup.surface (the feature tail).  Feeds the constrained-edge
+ *  round (MESH-NEXT).  */
+struct DChains
+{
+    std::vector<std::vector<uint32_t>> chains;
+    std::vector<uint8_t> closed;   // parallel to chains
+    uint64_t junctions = 0;
+    uint64_t stray = 0;            // representatives in no chain
+    uint64_t reps = 0;             // features after duplicate merge
+};
+DChains delaunay_chains(const DSoup& soup);
+
 struct DMesh
 {
     std::vector<float> verts;      // xyz triples
