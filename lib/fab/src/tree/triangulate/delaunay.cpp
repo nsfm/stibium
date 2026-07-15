@@ -11,6 +11,8 @@
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <iostream>
+#include <sstream>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -1624,7 +1626,9 @@ std::vector<DSurfPoint> bisect_pending(const Deck* deck, TapeCtx* ctx,
  *  batch is followed by a sweep marking them.  */
 template <bool CCDT_MODE, class Tri>
 bool mesh_impl(const Deck* deck, const DSoup& soup,
-               volatile int* halt, DMesh* out)
+               volatile int* halt, DMesh* out,
+               const std::vector<std::array<float, 3>>* quarantine
+                       = nullptr)
 {
     using TPoint = typename Tri::Point;
     using VH     = typename Tri::Vertex_handle;
@@ -1733,6 +1737,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
          *  endpoint sticks 0.5 sp out) and junction spokes (they
          *  leave the corner perpendicular).  */
         uint64_t dup_dropped = 0, cross_dropped = 0;
+        uint64_t quar_dropped = 0;
         /*  Interior-interior closest approach between the candidate
          *  and an accepted segment.  The three-point coverage probe
          *  is blind to a mid-segment crossing (endpoints and
@@ -1745,13 +1750,75 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
          *  under 0.05 sp = crossing or partial collinear overlap;
          *  shared junction corners approach at t ~ 0/1 and are
          *  exempt.  */
+        /*  Round two of the crossing rules (zeiss again): the
+         *  t-based corner exemption excused a REAL crossing at
+         *  t = 0.046 ("Steiner point coincides with an existing
+         *  vertex ... two input segments are too close").  What
+         *  legalizes corner contact is SHARING a vertex, not
+         *  parameter proximity to any endpoint:
+         *   - segments sharing one endpoint (welded junction
+         *     spokes) are judged by their FAR parts - midpoint or
+         *     far endpoint hugging the other segment = shallow
+         *     spoke, dropped;
+         *   - segments sharing nothing get full closest-approach
+         *     with NO exemption, except endpoint-to-interior
+         *     contacts within the pre-split tolerance (5e-3 sp),
+         *     which insertion legalizes into a shared vertex
+         *     (T-junctions).  */
+        const auto d2_point_seg = [](float px, float py, float pz,
+                                     const std::array<float, 6>& s) {
+            const float ax = s[0], ay = s[1], az = s[2];
+            const float bx = s[3] - ax, by = s[4] - ay,
+                        bz = s[5] - az;
+            const float qx = px - ax, qy = py - ay, qz = pz - az;
+            const float bb = bx*bx + by*by + bz*bz;
+            float t = bb > 0 ? (qx*bx + qy*by + qz*bz) / bb : 0;
+            t = t < 0 ? 0 : t > 1 ? 1 : t;
+            const float dx = qx - t*bx, dy = qy - t*by,
+                        dz = qz - t*bz;
+            return dx*dx + dy*dy + dz*dz;
+        };
         const auto crosses = [&](float ax, float ay, float az,
                                  float bx, float by, float bz,
                                  float r) {
+            const float weld = 1e-3f * soup.spacing;
+            const float weld2 = weld * weld;
+            const float tj = 5e-3f * soup.spacing;
+            const float tj2 = tj * tj;
             const float ux = bx - ax, uy = by - ay, uz = bz - az;
             const float uu = ux*ux + uy*uy + uz*uz;
+            const auto d2pp = [](float x1, float y1, float z1,
+                                 float x2, float y2, float z2) {
+                const float dx = x1-x2, dy = y1-y2, dz = z1-z2;
+                return dx*dx + dy*dy + dz*dz;
+            };
             for (const auto& s : cseg)
             {
+                const bool a0 = d2pp(ax, ay, az,
+                                     s[0], s[1], s[2]) < weld2;
+                const bool a1 = d2pp(ax, ay, az,
+                                     s[3], s[4], s[5]) < weld2;
+                const bool b0 = d2pp(bx, by, bz,
+                                     s[0], s[1], s[2]) < weld2;
+                const bool b1 = d2pp(bx, by, bz,
+                                     s[3], s[4], s[5]) < weld2;
+                if ((a0 || a1) && (b0 || b1))
+                    continue;      // same span: dup check's turf
+                if (a0 || a1 || b0 || b1)
+                {
+                    /*  One shared corner: judge the far parts  */
+                    const float mx = (ax + bx) * 0.5f,
+                                my = (ay + by) * 0.5f,
+                                mz = (az + bz) * 0.5f;
+                    const float fx = (a0 || a1) ? bx : ax,
+                                fy = (a0 || a1) ? by : ay,
+                                fz = (a0 || a1) ? bz : az;
+                    if (d2_point_seg(mx, my, mz, s) < r * r ||
+                        d2_point_seg(fx, fy, fz, s) < r * r)
+                        return true;
+                    continue;
+                }
+                /*  No sharing: full closest approach  */
                 const float cx = s[0], cy = s[1], cz = s[2];
                 const float vx = s[3] - cx, vy = s[4] - cy,
                             vz = s[5] - cz;
@@ -1770,21 +1837,25 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 }
                 else
                 {
-                    /*  Near-parallel: probe the candidate midpoint
-                     *  against the other segment.  */
                     t1 = 0.5f;
                     t2 = vv > 0 ? (vw + 0.5f*uv) / vv : 0;
                 }
                 t1 = t1 < 0 ? 0 : t1 > 1 ? 1 : t1;
                 t2 = t2 < 0 ? 0 : t2 > 1 ? 1 : t2;
-                if (t1 < 0.05f || t1 > 0.95f ||
-                    t2 < 0.05f || t2 > 0.95f)
-                    continue;   // touches near a corner: legal
                 const float px = ax + t1*ux - (cx + t2*vx);
                 const float py = ay + t1*uy - (cy + t2*vy);
                 const float pz = az + t1*uz - (cz + t2*vz);
-                if (px*px + py*py + pz*pz < r * r)
-                    return true;
+                const float d2m = px*px + py*py + pz*pz;
+                if (d2m >= r * r)
+                    continue;
+                /*  T-contact the pre-split legalizes: an ENDPOINT
+                 *  of either segment landing on the other's
+                 *  interior within its tolerance  */
+                if (d2m < tj2 &&
+                    (t1 <= 0.02f || t1 >= 0.98f ||
+                     t2 <= 0.02f || t2 >= 0.98f))
+                    continue;
+                return true;
             }
             return false;
         };
@@ -1851,6 +1922,39 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     ++cross_dropped;
                     continue;
                 }
+                /*  Quarantined cascade sites (see the dispatcher's
+                 *  retry loop): a conforming-cascade corner takes
+                 *  its local constraints out of play so the other
+                 *  99% survive.  */
+                if (quarantine)
+                {
+                    const float qr = soup.spacing;
+                    bool quar = false;
+                    for (const auto& Q : *quarantine)
+                    {
+                        const float bx = B.x - A.x, by = B.y - A.y,
+                                    bz = B.z - A.z;
+                        const float px = Q[0] - A.x,
+                                    py = Q[1] - A.y,
+                                    pz = Q[2] - A.z;
+                        const float bb = bx*bx + by*by + bz*bz;
+                        float t = bb > 0
+                                ? (px*bx + py*by + pz*bz) / bb : 0;
+                        t = t < 0 ? 0 : t > 1 ? 1 : t;
+                        const float dx = px - t*bx, dy = py - t*by,
+                                    dz = pz - t*bz;
+                        if (dx*dx + dy*dy + dz*dz < qr * qr)
+                        {
+                            quar = true;
+                            break;
+                        }
+                    }
+                    if (quar)
+                    {
+                        ++quar_dropped;
+                        continue;
+                    }
+                }
                 accepted.push_back(cand[i]);
                 cseg.push_back({ A.x, A.y, A.z, B.x, B.y, B.z });
             }
@@ -1893,19 +1997,21 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
          *  is constrained, just by its first copy - so they leave
          *  the gate arithmetic entirely.  */
         const size_t judged = cand.size() -
-                size_t(dup_dropped + cross_dropped);
+                size_t(dup_dropped + cross_dropped + quar_dropped);
         if (judged > 0 &&
             float(judged - accepted.size()) > 0.10f * float(judged))
         {
             accepted.clear();
             cseg.clear();
         }
-        if ((dup_dropped || cross_dropped) &&
+        if ((dup_dropped || cross_dropped || quar_dropped) &&
             getenv("STIBIUM_DMESH_SEG_DEBUG"))
             fprintf(stderr, "constraints: %llu duplicate-coverage, "
-                    "%llu crossing segments dropped\n",
+                    "%llu crossing, %llu quarantined segments "
+                    "dropped\n",
                     (unsigned long long)dup_dropped,
-                    (unsigned long long)cross_dropped);
+                    (unsigned long long)cross_dropped,
+                    (unsigned long long)quar_dropped);
         /*  Targeted forensics: STIBIUM_DMESH_PROBE="x,y,z" dumps
          *  every accepted segment within one cell of the point
          *  (chasing a recurring conforming-cascade corner).  */
@@ -2129,7 +2235,18 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             vgrid[cell_key(float(v->point().x()),
                            float(v->point().y()),
                            float(v->point().z()))].push_back(v);
-        const float eps = 1e-4f * soup.spacing;
+        /*  Radius sized for T-JUNCTIONS (the probe dump's verdict):
+         *  a chain terminating ON another chain's crease stops via
+         *  the tight corner bisection (5e-4 sp), so its endpoint
+         *  sits within ~1e-3 sp of the through-chain's segment
+         *  interior (measured 3.47e-4 sp at (-5, 3.75, 26)) - an
+         *  endpoint-to-interior contact CCDT_3 forbids, ground into
+         *  a femtometer Steiner cascade.  Splitting the through-
+         *  segment at that endpoint turns the T into a legal shared
+         *  vertex.  5e-3 sp covers the class with margin and stays
+         *  far below the drop-band floor (0.35 sp) that keeps
+         *  legitimate vertices off constraint interiors.  */
+        const float eps = 5e-3f * soup.spacing;
         const float eps2 = eps * eps;
         for (const auto& [a, b] : accepted)
         {
@@ -3701,19 +3818,86 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
     const bool use_ccdt = env ? atoi(env) != 0 : true;
     if (use_ccdt)
     {
-        /*  Degenerate constraint inputs (a vertex exactly on a
-         *  subconstraint, coincident Steiner points) make the
-         *  conforming machinery throw.  Degrade to the
-         *  unconstrained path rather than crash - the fallback is
-         *  the landed reference mesher.  */
-        try
+        /*  Self-healing constraint retries (zeiss run, 2026-07-15):
+         *  real models hand the conforming machinery pathologies
+         *  one corner at a time (T-junctions, tangential chain
+         *  meetings), and each cascade site used to cost EVERY
+         *  constraint on the model.  The CCDT code prints the
+         *  offending vertex to std::cerr before asserting: capture
+         *  it, quarantine the site's local constraints, rebuild.
+         *  Up to 8 sites; an unparseable failure degrades to the
+         *  unconstrained path exactly as before.  */
+        std::vector<std::array<float, 3>> quarantine;
+        for (int attempt = 0; attempt < 8; ++attempt)
         {
-            return mesh_impl<true, CCDT>(deck, soup, halt, out);
-        }
-        catch (const std::exception& e)
-        {
-            fprintf(stderr, "delaunay: constrained path failed "
-                    "(%s); falling back unconstrained\n", e.what());
+            std::stringstream capture;
+            std::streambuf* old_buf =
+                    std::cerr.rdbuf(capture.rdbuf());
+            bool ok = false, threw = false;
+            std::string what;
+            try
+            {
+                ok = mesh_impl<true, CCDT>(deck, soup, halt, out,
+                        quarantine.empty() ? nullptr : &quarantine);
+            }
+            catch (const std::exception& e)
+            {
+                threw = true;
+                what = e.what();
+            }
+            std::cerr.rdbuf(old_buf);
+            const std::string text = capture.str();
+            if (!text.empty())
+                fputs(text.c_str(), stderr);
+            if (!threw)
+                return ok;
+            double qx, qy, qz;
+            bool parsed = false;
+            const size_t vp = text.rfind("vertex #");
+            if (vp != std::string::npos)
+            {
+                const size_t eq = text.find('=', vp);
+                if (eq != std::string::npos &&
+                    sscanf(text.c_str() + eq + 1, "%lf %lf %lf",
+                           &qx, &qy, &qz) == 3)
+                    parsed = true;
+            }
+            if (!parsed)
+            {
+                /*  Second dialect: "insert_Steiner_point_on_
+                 *  subconstraint: Steiner point coincides with an
+                 *  existing vertex\n  -> Steiner point: x y z"
+                 *  (thrown via what(), which our capture also
+                 *  holds when the CCDT prints it).  */
+                for (const std::string& hay : { text, what })
+                {
+                    const size_t sp2 = hay.rfind("Steiner point:");
+                    if (sp2 != std::string::npos &&
+                        sscanf(hay.c_str() + sp2 + 14,
+                               "%lf %lf %lf", &qx, &qy, &qz) == 3)
+                    {
+                        parsed = true;
+                        break;
+                    }
+                }
+            }
+            if (!parsed)
+            {
+                fprintf(stderr, "delaunay: constrained path failed "
+                        "(%s), no cascade site parsed; falling "
+                        "back unconstrained\n", what.c_str());
+                break;
+            }
+            quarantine.push_back({ float(qx), float(qy),
+                                   float(qz) });
+            fprintf(stderr, "delaunay: conforming cascade at "
+                    "(%.4f, %.4f, %.4f); quarantining and "
+                    "retrying (%zu site%s)\n", qx, qy, qz,
+                    quarantine.size(),
+                    quarantine.size() == 1 ? "" : "s");
+            if (attempt == 7)
+                fprintf(stderr, "delaunay: quarantine retries "
+                        "exhausted; falling back unconstrained\n");
         }
     }
     return mesh_impl<false, DT>(deck, soup, halt, out);
