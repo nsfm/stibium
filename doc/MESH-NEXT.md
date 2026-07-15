@@ -120,6 +120,40 @@ data).
   bisection points must be pushed-tape-exact (they are, by
   construction, if we only ever evaluate on STANDARD-pushed tapes).
 
+## Status (2026-07-15, one session in)
+
+**Stages A-C: LANDED and green** (commit 343ae540 + follow-up;
+tests `[.dmesh]`, `[.dmeshBC]`, `[.dmeshVS]`):
+
+- Stage A surface points re-evaluate to |f| < 4e-7; interval culls
+  feed proven-sign far-field corners for free.
+- First extraction ever: **0 open edges, 0 non-manifold edges on
+  every model**; sphere volume 0.21% from analytic, cube 1.8% low
+  (rounded edges - feature points still pending).
+- The refinement mechanism is real: strip ALL surface points from
+  the soup and it rebuilds the sphere alone (3,170 insertions, one
+  round, closed, 0.35% volume error).
+- The thin-plate torture piece: **0 surface points (invisible to
+  point sampling - ours OR Manifold DC's) but 16 hidden-feature
+  candidate blocks flagged by the intervals.**  The stage-D
+  drill-down trigger works; no sampled-SDF pipeline can see this.
+- Head-to-head at 64^3 (STLs in build/dmesh_*.stl vs
+  build/dcref_*.stl): ~3x FEWER triangles than Manifold DC with
+  guarantees DC cannot make, at ~45x the runtime (sphere: 818 ms /
+  14,936 tris vs 17.7 ms / 44,784 tris).
+- The 45x is profiled, not guessed: CGAL exact-predicate fallbacks
+  (Mpzf) firing on our maximally-cospherical lattice samples, plus
+  full-triangulation edge iteration per refinement round.  Stage-D
+  leads, in order: deterministic sub-cell jitter on lattice samples
+  (breaks cosphericality; re-check signs after, batched), interior
+  sample thinning to a near-surface shell + sparse far field,
+  incremental edge scanning (only cells touched since last round),
+  and batched-oracle sign evaluation for all-surface cells.
+
+Stage D remains: feature points (QEF, reuse Kobbelt machinery),
+hidden-candidate drill-down, error-driven adaptive insertion,
+performance, MT, and the app-facing flag.
+
 ## Open questions for Nate
 
 - CGAL as a dependency (prototype: yes; shipping: revisit).

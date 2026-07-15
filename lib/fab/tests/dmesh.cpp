@@ -9,6 +9,7 @@
  *               count, signed volume vs the analytic value.
  */
 
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -16,6 +17,8 @@
 #include "catch/catch.hpp"
 
 #include "fab/tree/triangulate/delaunay.h"
+#include "fab/tree/triangulate.h"
+#include "fab/formats/stl.h"
 #include "fab/tree/tape.h"
 #include "fab/tree/tree.h"
 #include "fab/tree/parser.h"
@@ -204,4 +207,89 @@ TEST_CASE("Delaunay stages B+C: closed mesh, correct volume",
             CHECK(vol < hi);
         }
     }
+}
+
+TEST_CASE("Delaunay vs Manifold DC: head to head", "[.dmeshVS]")
+{
+    /*  Same models, same regions: runtime, triangle count, and the
+     *  structural properties each can promise.  STLs land in the
+     *  working directory for human eyeballs.  */
+    struct Case
+    {
+        const char* name;
+        const char* expr;
+    };
+    const Case CASES[] = {
+        { "sphere",   "-r++qXqYqZf1" },
+        { "cube",     "aa-f-0.6X-Xf0.6aa-f-0.6Y-Yf0.6a-f-0.6Z-Zf0.6" },
+        { "csg",      "ai-r++qXqYqZf1-r++q-Xf0.5qYqZf0.7n-Zf0.2" },
+        { "spheres",  "i-r++qXqYqZf1-r++q-Xf0.5q-Yf0.25q-Zf0.1f0.8" },
+    };
+    using clk = std::chrono::steady_clock;
+    for (const Case& tc : CASES)
+    {
+        CAPTURE(tc.name);
+        DeckRegion d(tc.expr, 64, 1.6f);
+        volatile int halt = 0;
+
+        auto t0 = clk::now();
+        DMesh m;
+        if (!delaunay_mesh(d.deck, d.r, &halt, &m))
+        {
+            WARN("delaunay unavailable");
+            return;
+        }
+        auto t1 = clk::now();
+
+        /*  The incumbent (plain Manifold DC, detect_features off),
+         *  through its own public entry.  */
+        MathTree* tree = parse(tc.expr);
+        REQUIRE(tree != nullptr);
+        float* dc_verts = nullptr;
+        unsigned dc_count = 0;
+        auto t2 = clk::now();
+        triangulate(tree, d.r, false, &halt, &dc_verts, &dc_count);
+        auto t3 = clk::now();
+        free_tree(tree);
+
+        const auto ms = [](clk::time_point a, clk::time_point b) {
+            return std::chrono::duration<double, std::milli>(b - a)
+                    .count();
+        };
+        WARN(tc.name << ": delaunay " << m.tris.size() / 3
+             << " tris in " << ms(t0, t1) << " ms ("
+             << m.open_edges << " open, " << m.nonmanifold_edges
+             << " non-manifold) | manifold-DC " << dc_count / 9
+             << " tris in " << ms(t2, t3) << " ms");
+
+        char fname[128];
+        snprintf(fname, sizeof(fname), "dmesh_%s.stl", tc.name);
+        save_stl_indexed(m.verts.data(), m.tris.data(),
+                         uint32_t(m.tris.size() / 3), fname);
+        snprintf(fname, sizeof(fname), "dcref_%s.stl", tc.name);
+        save_stl(dc_verts, dc_count / 9, fname);
+        free(dc_verts);
+    }
+}
+
+TEST_CASE("Thin feature below the lattice: the stage-D case",
+          "[.dmeshVS]")
+{
+    /*  A plate 0.01 thick in x - far below the 24^3 lattice pitch
+     *  (~0.13).  Point sampling CANNOT see it, for us or for
+     *  Manifold DC; the difference is that our interval oracle
+     *  KNOWS it might be there: the hidden-candidate counter is the
+     *  stage-D drill-down trigger, measured here from day one.  */
+    /*  (Centered off-lattice on purpose: a plate centered at 0 gets
+     *  sampled by the lattice plane at exactly x = 0.)  */
+    DeckRegion d("aa-f0.032X-Xf0.042aa-f-0.6Y-Yf0.6a-f-0.6Z-Zf0.6",
+                 24, 1.6f);
+    volatile int halt = 0;
+    const DSoup soup = delaunay_sample(d.deck, d.r, &halt);
+    WARN("thin plate at coarse lattice: " << soup.surface.size()
+         << " surface pts, " << soup.hidden_candidates
+         << " hidden-feature candidate blocks of "
+         << soup.leaf_blocks);
+    CHECK(soup.surface.empty());          // invisible to point sampling
+    CHECK(soup.hidden_candidates > 0);    // visible to the intervals
 }
