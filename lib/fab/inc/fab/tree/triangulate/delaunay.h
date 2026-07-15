@@ -53,6 +53,8 @@ struct DSoup
     uint64_t hidden_candidates = 0;
     /*  QEF-placed sharp-feature points appended to `surface`.  */
     uint64_t feature_points = 0;
+    /*  Crossings replaced by their cell's feature point.  */
+    uint64_t suppressed = 0;
 };
 
 /*  Stage A: collect the point soup for a region.  */
