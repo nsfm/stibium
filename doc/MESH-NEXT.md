@@ -222,11 +222,19 @@ never passes a relative tolerance; crease-seeking splits (seed at
 the |f| peak along the chord, the branch switch) reduce but do not
 eliminate the residue (60 -> 19 pinches at cap).  Both variants
 trade ~20 gentle warts for non-manifold pinches: reverted, closure
-outranks cosmetics.  THE cure is crease topology: extract the
-feature chain as an ordered polyline and make its segments
-CONSTRAINED edges of the triangulation (or retriangulate the
-crease band against the polyline), so no chord can cross.  That is
-next session's field-mapped design.
+outranks cosmetics.  THE PRACTICAL CURE
+(landed - Nate refused to let it die): crease-seek + a CROWDING
+GUARD - no repair insert within a quarter edge of an existing
+vertex (CGAL nearest_vertex).  The guard converts self-similar
+churn into bounded convergence: the union's warts press down in 5
+rounds, 28 repairs, ZERO topology damage; csg improves 244 to 187
+sharp folds with zero pinches (was 3,377 inserts and 60 pinches
+unguarded).  Gate-free crease-seek is now the DEFAULT
+(STIBIUM_DMESH_REPAIR=1 for the conservative fold-gated mode).
+The COMPLETE cure for csg's residue remains crease topology - and
+CGAL 6.2 ships Conforming_constrained_Delaunay_triangulation_3,
+so the feature polyline can be genuinely constrained edges.  Next
+design round, foundation confirmed present.
 
 Stage D remains: the crease-polyline constraint design (above),
 hidden-candidate drill-down, error-driven adaptive insertion,
