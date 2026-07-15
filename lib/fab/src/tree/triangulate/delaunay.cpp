@@ -548,14 +548,23 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
      *  such edge remains.  At convergence, inside and outside
      *  vertices are separated everywhere by surface vertices.  */
     std::vector<std::pair<DPoint3, int8_t>> pts;
-    pts.reserve(soup.samples.size() + soup.surface.size());
+    pts.reserve(soup.samples.size());
     for (const DSample& s : soup.samples)
         pts.push_back({ DPoint3(s.x, s.y, s.z),
                         int8_t(s.inside ? -1 : 1) });
-    for (const DSurfPoint& s : soup.surface)
-        pts.push_back({ DPoint3(s.x, s.y, s.z), int8_t(0) });
-
     DT dt(pts.begin(), pts.end());
+
+    /*  Surface points go in one by one with a coincidence guard: on
+     *  grid-aligned geometry a bisected point can converge exactly
+     *  onto a lattice sample, and overwriting that vertex's inside/
+     *  outside witness with 'surface' corrupts extraction.  */
+    for (const DSurfPoint& s : soup.surface)
+    {
+        const auto before = dt.number_of_vertices();
+        auto vh = dt.insert(DPoint3(s.x, s.y, s.z));
+        if (dt.number_of_vertices() > before)
+            vh->info() = 0;
+    }
 
     constexpr int MAX_ROUNDS = 48;
     uint64_t inserted = 0;
@@ -593,9 +602,17 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
         const auto fresh = bisect_pending(deck, ctx, pending, halt);
         for (const DSurfPoint& s : fresh)
         {
+            /*  A bisected point can converge onto an EXISTING vertex
+             *  (grid-aligned geometry: surfaces lying on lattice
+             *  planes).  Never overwrite a sign witness's info -
+             *  count vertices to detect coincidence.  */
+            const auto before = dt.number_of_vertices();
             auto vh = dt.insert(DPoint3(s.x, s.y, s.z));
-            vh->info() = 0;
-            ++inserted;
+            if (dt.number_of_vertices() > before)
+            {
+                vh->info() = 0;
+                ++inserted;
+            }
         }
     }
 

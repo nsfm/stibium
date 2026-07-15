@@ -355,7 +355,9 @@ TEST_CASE("Delaunay showcase STLs at higher resolution", "[.dmeshSTL]")
             n = uint32_t(atoi(env));
     const struct { const char* name; const char* expr; } CASES[] = {
         { "sphere",  "-r++qXqYqZf1" },
-        { "cube",    "aa-f-0.6X-Xf0.6aa-f-0.6Y-Yf0.6a-f-0.6Z-Zf0.6" },
+        { "cube",    "aa-f-0.6135X-Xf0.6135aa-f-0.6135Y-Yf0.6135a-f-0.6135Z-Zf0.6135" },
+        { "cube_aligned",
+                     "aa-f-0.6X-Xf0.6aa-f-0.6Y-Yf0.6a-f-0.6Z-Zf0.6" },
         { "csg",     "ai-r++qXqYqZf1-r++q-Xf0.5qYqZf0.7n-Zf0.2" },
         { "spheres", "i-r++qXqYqZf1-r++q-Xf0.5q-Yf0.25q-Zf0.1f0.8" },
     };
