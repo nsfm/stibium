@@ -251,11 +251,17 @@ disruption whatsoever."
 
 ## Open problems
 
-- **Concave chips** (Nate's observation, 2026-07-15): chords from
-  the sphere face to the flat cut face crossing the crease
-  *through material* - the concave twin of the solved
-  empty-space chords.  Fewer since the tracer, still present on
-  csg's cut edge.  The next round's referee.
+- **Concave chips - largely pressed** (round landed 2026-07-15,
+  commit 918f3c89): material-crossing chords are a distinct repair
+  species (f < 0 at the sagging midpoint).  The repair keep-out
+  was starving them (87 of 90 candidates blocked); they now take
+  midpoint-projection onto the nearest face with a 0.35-cell
+  keep-out (swept: 0.75 starves, 0.15 escalates).  csg presses
+  87 -> 17 residual shallow chips with zero topology damage.  The
+  residue: the shortest chords hugging the corner, whose projected
+  repairs land inside even the sliver radius - structural cure
+  would be extraction-level (facets forced to use crease edges,
+  DC-semantics at the wedge), not repair-level.
 - **Kink corners**: branch-switch points inside a traced loop get
   loose Newton convergence (gradient flip straddles the kink);
   the principled fix is a 3-field corner solve.

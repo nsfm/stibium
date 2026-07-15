@@ -455,18 +455,20 @@ smooth-min ops exist.
 sphere "transcendent" (1 MB, Blender-regular topology, vs 3.5 MB
 optimized / 144 MB raw marching-cubes); the two-sphere weld crease
 on spheres AND csg "perfect - no visual disruption whatsoever."
-**The open flaw - CONCAVE CHIPS**: chips along csg's flat cut
-edge, fewer than before, mechanism diagnosed by eyeball: chords
-from the sphere face to the flat face crossing the crease THROUGH
-MATERIAL (volume-reducing) - the concave twin of the solved
-empty-space chords.  Next round's referee.  Note the asymmetry
-worth chasing: why does the constraint kill convex chords but not
-concave ones?  Candidate mechanisms: extraction picks facets by
-cell sign, and on the concave side the crease wedge's tets differ;
-or repair keep-out (0.75 sp) blocks the presses that would fix
-the concave side; or the band drop thins the flat face's near-
-crease sampling.  STIBIUM_DMESH_NM_DEBUG-style provenance on chip
-triangles is the opening move.
+**CONCAVE CHIPS: round landed same day** (918f3c89).  Mechanism
+confirmed by count (STIBIUM_DMESH_CHIP_DEBUG): 87 of csg's 90
+repair candidates were material-crossing chords (f < 0 at
+midpoint) and the keep-out blocked ALL of them (candidate
+mechanism 2 - repair starvation).  Fix: chips are a distinct
+repair species - midpoint-projection onto the nearest face
+(crease-seek would target the corner the constraint owns) with a
+0.35-cell keep-out.  Sweep: 0.75 starves (0 fixed), 0.15
+escalates (near-crease inserts spawn new sliver chords, 17 -> 31,
+pinch splits appear), 0.35 presses 87 -> 17 monotonically, zero
+topology damage.  Residue = the shortest corner-hugging chords;
+the structural cure is extraction-level (facets forced to use
+crease edges at the wedge - DC semantics), a designed future
+round if eyeballs demand it.
 
 **The standalone technical record lives in doc/DELAUNAY-MESHER.md**
 (how it works, sources, uniqueness claim, everything tried and
