@@ -165,10 +165,35 @@ error drops 1.76% -> 0.62%; union creases get points to |f| <=
 1.3e-3.  Nate's eyeball findings (chamfered cube edges, blisters
 at edges, rough union seams) were all this one missing organ.
 
-Stage D remains: hidden-candidate drill-down, error-driven
-adaptive insertion, performance (CGAL predicate fallbacks - jitter
-tried and reverted, see above; next: shell-thinning + incremental
-edge scans), MT, and the app-facing flag.
+**The eyeball round** (Nate reviewing STLs drove four fixes):
+sawtooth cube edges -> feature vertices now REPLACE their cells'
+crossings (DC semantics; suppression gaps get rebuilt by the
+refinement loop, which thereby became load-bearing); half-sharp
+cube -> the test cube was grid-aligned and coincident inserts were
+clobbering sign-witness info (guards added; both aligned and
+de-aligned cubes ship in the showcase); remaining aligned sawtooth
+-> samples with f == 0 exactly now enter the triangulation AS
+surface vertices.  Verdict: both cubes 'PERFECT'.
+
+**The one open quality problem: curved creases.**  Symptoms, all
+one neighborhood: ~20 gentle warts on the spheres-union
+intersection (96^3), 'chipped' csg crease, csg 91 sharp folds
+(dot < -0.2) + 3 non-manifold edges at 48^3 - the csg crease is a
+sphere meeting a GRID-ALIGNED cut plane (z=0.2), both hard cases
+stacked.  A fold/wart detector now runs in [.dmeshVS], so the next
+round opens with numbers.  Design direction: feature points along
+a curved crease need to act as an ordered CHAIN (crease polyline),
+and refinement inserts near a chain should harmonize with it
+(snap-to-crease or keep-out) instead of fighting it.
+
+Stage D remains: the curved-crease chain design (above),
+hidden-candidate drill-down, error-driven adaptive insertion,
+performance (CGAL predicate fallbacks - jitter tried and reverted,
+see above; next: shell-thinning + incremental edge scans), MT, and
+the app-facing flag.  Also noted: the delaunay mesher already rides
+STANDARD-pushed tapes for descent/sampling; bisection batches still
+use the base tape (bit-identical values; switching to covering
+pushed tapes is a pure speed move when performance round opens).
 
 ## Open questions for Nate
 
