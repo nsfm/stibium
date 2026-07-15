@@ -550,3 +550,45 @@ plus a GLSL interpreter doesn't beat 8 Zen cores wielding the same
 algorithm.  Fidget's published wins come from desktop GPUs with
 5-20x this card's compute.  When Stibium meets one - or WebGPU -
 the pipeline is sitting here, referee'd and ready.
+
+## Round 9 (2026-07-15): affine arithmetic, measured
+
+The research survey (doc/research/2026-07-14-frep-sota.md) named
+affine arithmetic the cheap-to-prototype culling lever.  Prototyped
+and measured in one session (tests/aa.cpp, tags `[.aafuzz]` /
+`[.aa]`; real app decks reach the harness via
+`STIBIUM_GPU_BLOB_DUMP` - the bytecode export pays off again).
+
+Design measured: reduced AF1 (center + one noise symbol per axis +
+error term) carried ALONGSIDE the math_i interval, usable bounds =
+intersection (never worse than IA; the interval side absorbs
+inf/NaN).  Real affine forms for add/sub/neg/mul/square/
+div-by-constant/copy, winner-passthrough on decided min/max
+(correlation survives CSG joins), Chebyshev sqrt on positive hulls,
+hull fallback everywhere else.  Soundness held to the fuzzer's
+standard: pointwise containment + bit-identical pushed evaluation,
+86k assertions green.
+
+Merged Zeiss (594x1023 region, 16px tiles):
+
+| level | IA | AA |
+|---|---|---|
+| L1 tile tapes (avg) | 2784 | 2437 (-12%) |
+| L2 slab: empty / ambiguous | 1816 / 2237 | 2089 / 1960 |
+| L2 slab tapes (avg) | 439 | 398 (-9%) |
+
+The Chebyshev sqrt changed nothing beyond this - the residual
+ambiguity is geometric (the boxes genuinely contain surfaces), not
+arithmetic slack.
+
+**Verdict: real but modest - NOT productionized.**  ~12% shorter
+tapes and ~12% fewer ambiguous boxes would buy maybe 10-20%
+end-to-end, against: AA choice-recording lands in the most
+correctness-critical code in the kernel, the parity rule forces it
+into scalar AND batch AND both GPU passes at once, and 5x
+classification state breaks the batch evaluator's r-row layout.
+Bad trade today.  The harness stays in-tree: re-measure with one
+command (`SbFabTest "[.aa]"` on a dumped blob) if a model class
+with heavier transform correlation shows up - the Zeiss's
+transforms are mostly constant-affine, which plain IA already
+handles without correlation loss.

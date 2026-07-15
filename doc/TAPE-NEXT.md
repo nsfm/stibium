@@ -176,7 +176,26 @@ Port order from here:
    constraint solving over tape gradients - the Tier 3
    differentiable-CAD item.  Later, after stage B.
 
-## 5. Deferred / parked
+## 5. Research levers, measured (2026-07-15)
+
+- **Affine arithmetic: prototyped, measured, PARKED** (TAPE-DESIGN
+  Round 9; harness at tests/aa.cpp `[.aa]`/`[.aafuzz]`, feeds on
+  STIBIUM_GPU_BLOB_DUMP blobs).  ~12% shorter tapes / ~12% fewer
+  ambiguous boxes on the Zeiss - sound, real, and not worth the
+  parity-rule blast radius today.  Re-measure per model class with
+  one command before ever re-litigating.
+- **Lipschitz pruning** (Barbier 2025): partial fit only - our
+  trees carry non-Lipschitz ops (square/exp/div); would need
+  per-subtree Lipschitz tagging.  Behind AA in expected value, and
+  AA measured modest.  Parked.
+- **The Delaunay/power-diagram mesher** (Keeter's "please steal",
+  Wang 2025, TetWeave): THE open crown - watertight + adaptive +
+  thin-feature-safe meshing fused to a real interval kernel.
+  Multi-session campaign; our sound intervals are a better point
+  oracle than anything the papers used.  This is the next big
+  thing on this list.
+
+## 6. Deferred / parked
 
 - Affine collapse default: flip `STIBIUM_AFFINE` on only when a
   workload shows base-tape evals dominating (the tile renderer's
