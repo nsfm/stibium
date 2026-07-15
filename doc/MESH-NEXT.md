@@ -455,6 +455,30 @@ smooth-min ops exist.
 sphere "transcendent" (1 MB, Blender-regular topology, vs 3.5 MB
 optimized / 144 MB raw marching-cubes); the two-sphere weld crease
 on spheres AND csg "perfect - no visual disruption whatsoever."
+**CHIP ROUND 2 (a524e2f9): two structural cures measured DEAD -
+read before re-attempting.**  (1) Crease-edge exposure (flip the
+ring cell with the deepest wrong-side centroid where a crease
+edge's cell ring has zero sign transitions): only 3-12 flat rings
+exist vs 17 chip chords, and ALL are razor wedges with no
+legitimately-inside cell - zero flips ever fired.  The buried-edge
+theory is a minority mechanism.  (2) Opening the keep-out annulus
+(0.10 segment shield + 0.3 sp crease-vertex-only crowding floor;
+justified because blocked repairs all land 0.2-0.3 sp out and
+sliver pairs are a VERTEX-distance phenomenon): 36 more repairs
+land, detection plateaus at ~20 - fresh shallow chips replace
+pressed ones one-for-one.  Greedy repair is at its asymptote for
+concave corners.  THE REMAINING DESIGNED CURE, for a fresh round:
+extraction-level - the literature's answer is the local
+Topological-Ball-Property check (Dey-Levine DelIso): a facet
+whose dual Voronoi edge crosses the surface more than once is the
+divot; refine it by inserting its surface-Delaunay-ball CENTER (a
+point ON the surface, oracle-projected), which is a principled
+insert location unlike our chord-derived targets.  Alternatively
+DC-semantics facet substitution at the wedge.  Both need the
+divot FACETS identified first (sharp fold edges with f<0
+midpoints already locate them - reuse the wart machinery's
+classification, not its repair).
+
 **CONCAVE CHIPS: round landed same day** (918f3c89).  Mechanism
 confirmed by count (STIBIUM_DMESH_CHIP_DEBUG): 87 of csg's 90
 repair candidates were material-crossing chords (f < 0 at
@@ -513,6 +537,19 @@ on-surface points where it sags -> repeat.  Two nested loops share
 the oracle: topological (inside/outside separation) then geometric
 (surface fidelity).  Vertices are never moved, only added; the
 mesh converges by densification-where-needed.
+
+## Queued rounds
+
+- **Flat-face decimation** (Nate, 2026-07-15): a final output pass
+  that detects planar regions and re-triangulates them - massive
+  tri reduction on the cube and mechanical/prismatic parts with
+  zero shape change.  Sketch: group triangles by normal clustering
+  seeded from the oracle (a patch is flat iff every interior
+  vertex's |f| stays ~0 under the patch plane - the oracle can
+  CERTIFY flatness, unlike normal-only heuristics, which is how
+  gentle curves survive); patch boundary = crease chains + patch
+  rim; re-triangulate via 2D CDT in the plane.  Isolated,
+  approachable, high yield.  NOT YET STARTED.
 
 ## Open questions for Nate
 
