@@ -131,6 +131,33 @@ Tape* tape_base_for_region(Tape* tape,
 uint32_t tape_export_blob(const Deck* deck, const Tape* tape,
                           uint32_t* out, uint32_t cap);
 
+/*  Crease-tracer support (doc/MESH-NEXT.md).  A min/max clause is a
+ *  crease generator: the surface kinks where its operands are equal
+ *  (and zero, and the branch is active).  Because register
+ *  allocation reuses slots, operand values must be read via a
+ *  PREFIX evaluation: linear-scan keeps both operand slots live
+ *  until the clause executes, so evaluating [0, clause) leaves
+ *  their rows holding exactly f_A and f_B.  */
+typedef struct TapePair_ {
+    unsigned clause;          /* prefix length: evaluate [0, clause) */
+    unsigned slot_a, slot_b;  /* operand rows after the prefix eval */
+    uint8_t is_max;
+} TapePair;
+
+/** @brief Enumerates min/max clauses (crease generators) in tape
+    order.  Returns the total count; writes up to cap entries. */
+unsigned tape_pairs(const Tape* tape, TapePair* out, unsigned cap);
+
+/** @brief Point evaluation of the first nclauses clauses only
+    (clamped to the tape length).  Same semantics as tape_eval_r
+    otherwise; read results via tape_ctx_r_row. */
+void tape_eval_r_prefix(const Tape* tape, TapeCtx* ctx, Region r,
+                        unsigned nclauses);
+
+/** @brief The ctx's r-mode result row for a slot (MIN_VOLUME
+    floats), valid after tape_eval_r / tape_eval_r_prefix. */
+const float* tape_ctx_r_row(const TapeCtx* ctx, unsigned slot);
+
 /*  Introspection (tests / diagnostics) */
 unsigned tape_length(const Tape* tape);
 bool tape_is_terminal(const Tape* tape);

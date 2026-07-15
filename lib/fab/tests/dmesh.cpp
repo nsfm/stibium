@@ -438,6 +438,75 @@ TEST_CASE("Delaunay showcase STLs at higher resolution", "[.dmeshSTL]")
     }
 }
 
+TEST_CASE("Crease tracer: exact curves with junctions", "[.dtrace]")
+{
+    /*  The SSI predictor-corrector tracer judged against models
+     *  whose crease topology is known a priori, and against the
+     *  oracle: every traced point must BE on the surface.  */
+    struct Case
+    {
+        const char* name;
+        const char* expr;
+        int min_open;
+        int min_closed;
+    };
+    const Case CASES[] = {
+        /*  de-aligned cube: 4 pillar edges (one min/max pair) +
+         *  2 closed face loops (the outer pair) = all 12 edges  */
+        { "cube", "aa-f-0.6135X-Xf0.6135aa-f-0.6135Y-Yf0.6135a-f-0.6135Z-Zf0.6135",
+          4, 2 },
+        /*  union: one closed seam loop, no junctions  */
+        { "union", "i-r++qXqYqZf1-r++q-Xf0.5q-Yf0.25q-Zf0.1f0.8",
+          0, 1 },
+        /*  csg: trimmed seam arc + the closed cut-face boundary
+         *  (traced through its two branch-switch kinks)  */
+        { "csg", "ai-r++qXqYqZf1-r++q-Xf0.5qYqZf0.7n-Zf0.2",
+          1, 1 },
+    };
+    for (const Case& tc : CASES)
+    {
+        CAPTURE(tc.name);
+        DeckRegion d(tc.expr, 64, 1.6f);
+        volatile int halt = 0;
+        DSoup soup = delaunay_sample(d.deck, d.r, &halt);
+        REQUIRE(delaunay_trace(d.deck, d.r, &soup, &halt));
+
+        int open = 0, closed = 0;
+        size_t pts = 0;
+        for (size_t c = 0; c < soup.tchains.size(); ++c)
+        {
+            (soup.tclosed[c] ? closed : open)++;
+            pts += soup.tchains[c].size();
+        }
+        WARN(tc.name << ": " << soup.tchains.size()
+             << " traced curves (" << open << " open, " << closed
+             << " closed), " << pts << " points");
+        CHECK(open >= tc.min_open);
+        CHECK(closed >= tc.min_closed);
+
+        /*  Every traced point on the surface, per the oracle  */
+        TapeCtx* ctx = tape_ctx_new(d.deck);
+        float worst = 0;
+        for (const auto& chain : soup.tchains)
+            for (const uint32_t idx : chain)
+            {
+                const DSurfPoint& p = soup.surface[idx];
+                worst = std::max(worst, std::fabs(tape_eval_f(
+                        deck_base(d.deck), ctx, p.x, p.y, p.z)));
+            }
+        tape_ctx_free(ctx);
+        WARN(tc.name << ": worst traced |f| = " << worst);
+        /*  Smooth-crease points converge to float exactness (the
+         *  union measures 1e-7); the bound is set by points
+         *  STRADDLING a branch-switch kink (csg's cut loop crosses
+         *  the seam), where central differences mix the two
+         *  branches' gradients and Newton converges loosely -
+         *  measured 7.8e-4, still under the ~1.3e-3 QEF feature
+         *  noise the pipeline already tolerates.  */
+        CHECK(worst < 1.5e-3f);
+    }
+}
+
 TEST_CASE("Crease chains: known topology recovered", "[.dchain]")
 {
     /*  The chain extractor judged against models whose crease

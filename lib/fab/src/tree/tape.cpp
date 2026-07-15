@@ -1112,7 +1112,8 @@ extern "C" void tape_eval_i_batch(const Tape* tape, TapeCtx* ctx,
 #undef ROW
 }
 
-extern "C" const float* tape_eval_r(const Tape* tape, TapeCtx* ctx, Region r)
+static const float* eval_r_span(const Tape* tape, TapeCtx* ctx,
+                                Region r, size_t nclauses)
 {
     if (ctx->g_mode)
         fill_const_rows(ctx, false);
@@ -1125,8 +1126,9 @@ extern "C" const float* tape_eval_r(const Tape* tape, TapeCtx* ctx, Region r)
     for (uint32_t s : ctx->deck->ys)  Y_r(r.Y, ROW(s), c_);
     for (uint32_t s : ctx->deck->zs)  Z_r(r.Z, ROW(s), c_);
 
-    for (const auto& c : tape->clauses)
+    for (size_t k = 0; k < nclauses; ++k)
     {
+        const auto& c = tape->clauses[k];
         float *A = ROW(c.a), *B = ROW(c.b), *R = ROW(c.out);
         switch (c.op)
         {
@@ -1176,6 +1178,50 @@ extern "C" const float* tape_eval_r(const Tape* tape, TapeCtx* ctx, Region r)
     }
     return ROW(tape->root);
 #undef ROW
+}
+
+extern "C" const float* tape_eval_r(const Tape* tape, TapeCtx* ctx, Region r)
+{
+    return eval_r_span(tape, ctx, r, tape->clauses.size());
+}
+
+/*  Crease-tracer support (doc/MESH-NEXT.md, crease tracing round).
+ *
+ *  A min/max clause is a crease generator: the surface kinks where
+ *  its two operands are equal (and both zero, and the branch is
+ *  active up to the root).  Register allocation reuses slots, so
+ *  operand values cannot be read after a FULL evaluation - but
+ *  linear-scan keeps every slot live until its last reader, and the
+ *  clause itself reads both operands, so evaluating the PREFIX
+ *  [0, clause) leaves the operand rows holding exactly f_A and
+ *  f_B.  */
+extern "C" unsigned tape_pairs(const Tape* tape, TapePair* out,
+                               unsigned cap)
+{
+    unsigned n = 0;
+    for (uint32_t k = 0; k < tape->clauses.size(); ++k)
+    {
+        const Clause& c = tape->clauses[k];
+        if (c.op != OP_MIN && c.op != OP_MAX)
+            continue;
+        if (out && n < cap)
+            out[n] = { k, c.a, c.b, uint8_t(c.op == OP_MAX) };
+        ++n;
+    }
+    return n;
+}
+
+extern "C" void tape_eval_r_prefix(const Tape* tape, TapeCtx* ctx,
+                                   Region r, unsigned nclauses)
+{
+    const size_t n = nclauses < tape->clauses.size()
+            ? nclauses : tape->clauses.size();
+    eval_r_span(tape, ctx, r, n);
+}
+
+extern "C" const float* tape_ctx_r_row(const TapeCtx* ctx, unsigned slot)
+{
+    return ctx->r + size_t(slot) * MIN_VOLUME;
 }
 
 extern "C" const derivative* tape_eval_g(const Tape* tape, TapeCtx* ctx,
