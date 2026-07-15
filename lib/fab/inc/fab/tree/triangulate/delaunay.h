@@ -62,10 +62,29 @@ struct DSoup
     uint64_t mediated = 0;
     /*  Finest lattice pitch (for downstream keep-out radii).  */
     float spacing = 0;
+
+    /*  Crease-tracer output (delaunay_trace): exactly-on-crease
+     *  points appended to `surface`, chained in traced order.  When
+     *  non-empty the mesher constrains these and skips the QEF
+     *  chain extractor.  */
+    std::vector<std::vector<uint32_t>> tchains;
+    std::vector<uint8_t> tclosed;    // parallel to tchains
+    uint64_t traced = 0;
 };
 
 /*  Stage A: collect the point soup for a region.  */
 DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt);
+
+/*  The crease tracer: marches every min/max clause's crease
+ *  {f_A = 0, f_B = 0} with an SSI predictor-corrector on the tape's
+ *  prefix evaluation, trimmed to the boundary by the full oracle,
+ *  junction endpoints bisected onto their corners and shared.
+ *  Seeds come from the soup's QEF feature points; traced polylines
+ *  land in soup->tchains.  Returns false when nothing was traced
+ *  (no min/max clauses, no seeds, or nothing converged) - the
+ *  caller falls back to delaunay_chains.  */
+bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
+                    volatile int* halt);
 
 /*  Crease chains: feature points ordered into polylines by a
  *  radius graph (1.6 cells).  Degree-2 runs are chains; degree>=3

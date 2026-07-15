@@ -899,6 +899,551 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt)
 }
 
 ////////////////////////////////////////////////////////////////////////////
+//  The crease tracer: CSG-driven surface-surface intersection marching
+//  (doc/MESH-NEXT.md crease-tracing round; research in
+//  doc/research/2026-07-15-junction-extraction.md).
+//
+//  Every min/max clause in the tape is a crease generator: the
+//  surface kinks exactly where its two operands are equal (and both
+//  zero, and the branch is active up to the root).  The tape's
+//  prefix evaluation hands us f_A and f_B - with every upstream
+//  coordinate transform already applied - so the crease is the
+//  solution set {f_A = 0, f_B = 0}, marched with the classical SSI
+//  predictor-corrector: tangent = grad A x grad B, corrector = 2-eq
+//  Newton onto both zero sets.  The full oracle trims the curve to
+//  the actual boundary (past a junction the crease continues but a
+//  third branch owns the surface, so |f| lifts off zero - the trim
+//  boundary IS the junction, and we bisect onto it so incident
+//  edges share their corner).
+
+namespace {
+
+struct CreaseTracer
+{
+    const Deck* deck;
+    TapeCtx* ctx;
+    Tape* base;
+    TapePair tp;
+    float sp;                        // lattice spacing
+    float bmin[3], bmax[3];          // region bounds + margin
+
+    /*  7-tap probe at p: pair values/gradients (prefix eval) and
+     *  full-surface distance |f|/|grad f| (full eval).  */
+    struct Probe
+    {
+        float fa, fb;
+        float ga[3], gb[3];
+        float fdist;                 // estimated distance to surface
+        bool finite;
+    };
+
+    Probe probe(const float p[3]) const
+    {
+        const float h = 0.01f * sp;
+        float xs[7], ys[7], zs[7];
+        for (int q = 0; q < 7; ++q)
+        {
+            xs[q] = p[0];
+            ys[q] = p[1];
+            zs[q] = p[2];
+        }
+        xs[1] += h;  xs[2] -= h;
+        ys[3] += h;  ys[4] -= h;
+        zs[5] += h;  zs[6] -= h;
+
+        Region dummy = {};
+        dummy.voxels = 7;
+        dummy.X = xs;
+        dummy.Y = ys;
+        dummy.Z = zs;
+
+        Probe out;
+        tape_eval_r_prefix(base, ctx, dummy, tp.clause);
+        const float* ra = tape_ctx_r_row(ctx, tp.slot_a);
+        const float* rb = tape_ctx_r_row(ctx, tp.slot_b);
+        out.fa = ra[0];
+        out.fb = rb[0];
+        const float h2 = 2 * h;
+        out.ga[0] = (ra[1] - ra[2]) / h2;
+        out.ga[1] = (ra[3] - ra[4]) / h2;
+        out.ga[2] = (ra[5] - ra[6]) / h2;
+        out.gb[0] = (rb[1] - rb[2]) / h2;
+        out.gb[1] = (rb[3] - rb[4]) / h2;
+        out.gb[2] = (rb[5] - rb[6]) / h2;
+        float fa7[7], fb7[7];
+        memcpy(fa7, ra, sizeof(fa7));
+        memcpy(fb7, rb, sizeof(fb7));
+
+        const float* rf = tape_eval_r(base, ctx, dummy);
+        const float f = rf[0];
+        const float gfx = (rf[1] - rf[2]) / h2;
+        const float gfy = (rf[3] - rf[4]) / h2;
+        const float gfz = (rf[5] - rf[6]) / h2;
+        const float gfl = sqrtf(gfx*gfx + gfy*gfy + gfz*gfz);
+        out.fdist = gfl > 0 ? fabsf(f) / gfl : 1e30f;
+        out.finite = std::isfinite(out.fa) && std::isfinite(out.fb) &&
+                std::isfinite(f);
+        for (int q = 0; q < 7 && out.finite; ++q)
+            if (!std::isfinite(fa7[q]) || !std::isfinite(fb7[q]))
+                out.finite = false;
+        return out;
+    }
+
+    /*  Newton onto {f_A = 0, f_B = 0}: minimal-norm step
+     *  dx = J^T (J J^T)^-1 (-F).  False on a singular J (the
+     *  gradients are parallel: tangency) or non-convergence.  */
+    bool correct(float p[3], Probe* last = nullptr) const
+    {
+        for (int it = 0; it < 6; ++it)
+        {
+            const Probe pr = probe(p);
+            if (!pr.finite)
+                return false;
+            const float a = pr.ga[0]*pr.ga[0] + pr.ga[1]*pr.ga[1] +
+                            pr.ga[2]*pr.ga[2];
+            const float b = pr.gb[0]*pr.gb[0] + pr.gb[1]*pr.gb[1] +
+                            pr.gb[2]*pr.gb[2];
+            const float c = pr.ga[0]*pr.gb[0] + pr.ga[1]*pr.gb[1] +
+                            pr.ga[2]*pr.gb[2];
+            const float det = a*b - c*c;
+            if (!(det > 1e-6f * a * b) || !(a > 0) || !(b > 0))
+                return false;                    // tangency
+            const float u = (-pr.fa * b + pr.fb * c) / det;
+            const float v = (-pr.fb * a + pr.fa * c) / det;
+            float dx = pr.ga[0]*u + pr.gb[0]*v;
+            float dy = pr.ga[1]*u + pr.gb[1]*v;
+            float dz = pr.ga[2]*u + pr.gb[2]*v;
+            const float dl = sqrtf(dx*dx + dy*dy + dz*dz);
+            const float cap = 0.5f * sp;
+            if (dl > cap)
+            {
+                dx *= cap / dl;
+                dy *= cap / dl;
+                dz *= cap / dl;
+            }
+            p[0] += dx;
+            p[1] += dy;
+            p[2] += dz;
+            if (dl < 1e-4f * sp)
+            {
+                if (last)
+                    *last = pr;
+                return true;
+            }
+        }
+        const Probe pr = probe(p);
+        if (last)
+            *last = pr;
+        const float gal = sqrtf(pr.ga[0]*pr.ga[0] +
+                pr.ga[1]*pr.ga[1] + pr.ga[2]*pr.ga[2]);
+        const float gbl = sqrtf(pr.gb[0]*pr.gb[0] +
+                pr.gb[1]*pr.gb[1] + pr.gb[2]*pr.gb[2]);
+        return pr.finite && gal > 0 && gbl > 0 &&
+               fabsf(pr.fa) / gal < 0.02f * sp &&
+               fabsf(pr.fb) / gbl < 0.02f * sp;
+    }
+
+    bool in_bounds(const float p[3]) const
+    {
+        for (int q = 0; q < 3; ++q)
+            if (p[q] < bmin[q] || p[q] > bmax[q])
+                return false;
+        return true;
+    }
+
+    static void tangent(const Probe& pr, float t[3])
+    {
+        t[0] = pr.ga[1]*pr.gb[2] - pr.ga[2]*pr.gb[1];
+        t[1] = pr.ga[2]*pr.gb[0] - pr.ga[0]*pr.gb[2];
+        t[2] = pr.ga[0]*pr.gb[1] - pr.ga[1]*pr.gb[0];
+        const float l = sqrtf(t[0]*t[0] + t[1]*t[1] + t[2]*t[2]);
+        if (l > 0)
+        {
+            t[0] /= l;
+            t[1] /= l;
+            t[2] /= l;
+        }
+    }
+
+    /*  March one direction from p0; appends corrected points.
+     *  Returns true when the walk closed back onto p0.  */
+    bool march(const float p0[3], const float t0[3], int dir,
+               std::vector<DSurfPoint>& out_pts,
+               volatile int* halt) const
+    {
+        const float step = 0.5f * sp;
+        const float trim = 0.05f * sp;
+        float p[3] = { p0[0], p0[1], p0[2] };
+        float tprev[3] = { dir * t0[0], dir * t0[1], dir * t0[2] };
+        for (int steps = 0; steps < 4096 && !*halt; ++steps)
+        {
+            float pt[3] = { p[0] + step * tprev[0],
+                            p[1] + step * tprev[1],
+                            p[2] + step * tprev[2] };
+            Probe pr;
+            if (!correct(pt, &pr) || !in_bounds(pt))
+                break;
+            /*  Minimum progress: near a tangency the corrector
+             *  pulls every predictor step back to the same point -
+             *  emitting float-noise micro-segments (measured: three
+             *  "points" 1e-15 apart on csg's seam).  No progress =
+             *  the curve ends here.  */
+            {
+                const float px2 = pt[0] - p[0], py2 = pt[1] - p[1],
+                            pz2 = pt[2] - p[2];
+                if (px2*px2 + py2*py2 + pz2*pz2 <
+                    0.01f * step * step)
+                    break;
+            }
+            if (pr.fdist > trim)
+            {
+                /*  Left the boundary: a third branch owns the
+                 *  surface past here - the junction.  Bisect [p,
+                 *  pt] for the corner so every incident crease
+                 *  shares it.  On the boundary side fdist is the
+                 *  Newton residual (~0); past the corner it grows
+                 *  smoothly - so the bisection target must be far
+                 *  TIGHTER than the marching trim, or endpoints
+                 *  stop trim-short of the corner (measured: worst
+                 *  |f| exactly 0.05*sp).  */
+                const float ctol = 5e-4f * sp;
+                float lo = 0, hi = 1;
+                for (int r2 = 0; r2 < 16; ++r2)
+                {
+                    const float mid = (lo + hi) * 0.5f;
+                    float pm[3] = { p[0] + mid * (pt[0] - p[0]),
+                                    p[1] + mid * (pt[1] - p[1]),
+                                    p[2] + mid * (pt[2] - p[2]) };
+                    Probe pm2;
+                    if (correct(pm, &pm2) && pm2.fdist <= ctol)
+                        lo = mid;
+                    else
+                        hi = mid;
+                }
+                if (lo > 0.05f)
+                {
+                    float pe[3] = { p[0] + lo * (pt[0] - p[0]),
+                                    p[1] + lo * (pt[1] - p[1]),
+                                    p[2] + lo * (pt[2] - p[2]) };
+                    if (correct(pe))
+                        out_pts.push_back({ pe[0], pe[1], pe[2] });
+                }
+                break;
+            }
+            float t[3];
+            tangent(pr, t);
+            if (t[0]*tprev[0] + t[1]*tprev[1] + t[2]*tprev[2] < 0)
+            {
+                t[0] = -t[0];
+                t[1] = -t[1];
+                t[2] = -t[2];
+            }
+            if (t[0]*tprev[0] + t[1]*tprev[1] + t[2]*tprev[2] < 0.5f)
+                break;                            // hard turn: corner
+            const float cx = pt[0] - p0[0], cy = pt[1] - p0[1],
+                        cz = pt[2] - p0[2];
+            if (steps > 3 &&
+                cx*cx + cy*cy + cz*cz < 0.5f * step * step)
+                return true;                      // closed the loop
+            out_pts.push_back({ pt[0], pt[1], pt[2] });
+            p[0] = pt[0];
+            p[1] = pt[1];
+            p[2] = pt[2];
+            tprev[0] = t[0];
+            tprev[1] = t[1];
+            tprev[2] = t[2];
+        }
+        return false;
+    }
+};
+
+}  // namespace
+
+bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
+                    volatile int* halt)
+{
+    Tape* base = deck_base(deck);
+    const unsigned npairs = tape_pairs(base, nullptr, 0);
+    if (!npairs || soup->feature_points == 0)
+        return false;
+    std::vector<TapePair> pairs(npairs);
+    tape_pairs(base, pairs.data(), npairs);
+
+    TapeCtx* ctx = tape_ctx_new(deck);
+    const float sp = soup->spacing;
+    const size_t f0 = soup->surface.size() -
+            size_t(soup->feature_points);
+
+    CreaseTracer tr;
+    tr.deck = deck;
+    tr.ctx = ctx;
+    tr.base = base;
+    tr.sp = sp;
+    tr.bmin[0] = r.X[0] - sp;
+    tr.bmax[0] = r.X[r.ni] + sp;
+    tr.bmin[1] = r.Y[0] - sp;
+    tr.bmax[1] = r.Y[r.nj] + sp;
+    tr.bmin[2] = r.Z[0] - sp;
+    tr.bmax[2] = r.Z[r.nk] + sp;
+
+    std::vector<std::vector<DSurfPoint>> polys;
+    std::vector<uint8_t> closed;
+    std::vector<uint32_t> poly_pair;
+
+    std::vector<uint8_t> consumed(soup->feature_points, 0);
+    for (const TapePair& tp : pairs)
+    {
+        if (*halt)
+            break;
+        tr.tp = tp;
+        for (size_t s = 0; s < consumed.size(); ++s)
+        {
+            if (consumed[s] || *halt)
+                continue;
+            const DSurfPoint& seed = soup->surface[f0 + s];
+            float p0[3] = { seed.x, seed.y, seed.z };
+            CreaseTracer::Probe pr;
+            if (!tr.correct(p0, &pr))
+                continue;
+            const float mx = p0[0] - seed.x, my = p0[1] - seed.y,
+                        mz = p0[2] - seed.z;
+            if (mx*mx + my*my + mz*mz > 2.25f * sp * sp)
+                continue;                // converged elsewhere
+            if (pr.fdist > 0.05f * sp)
+                continue;                // crease not on the surface
+            /*  Duplicate-trace guard: a seed can converge onto a
+             *  curve this pair already traced from further away
+             *  than the consumption radius (Newton moves seeds up
+             *  to 1.5 cells).  Near-coincident duplicate curves
+             *  are poison as constraints - drop the seed.  */
+            {
+                bool dup = false;
+                const float dr2 = 0.25f * sp * sp;
+                for (size_t c = 0; c < polys.size() && !dup; ++c)
+                {
+                    if (poly_pair[c] != tp.clause)
+                        continue;
+                    for (const DSurfPoint& q : polys[c])
+                    {
+                        const float dx = q.x - p0[0],
+                                    dy = q.y - p0[1],
+                                    dz = q.z - p0[2];
+                        if (dx*dx + dy*dy + dz*dz < dr2)
+                        {
+                            dup = true;
+                            break;
+                        }
+                    }
+                }
+                if (dup)
+                {
+                    consumed[s] = 1;
+                    continue;
+                }
+            }
+            float t0[3];
+            CreaseTracer::tangent(pr, t0);
+            if (!(t0[0] || t0[1] || t0[2]))
+                continue;                // tangency at the seed
+
+            std::vector<DSurfPoint> fwd, bwd;
+            const bool loop = tr.march(p0, t0, +1, fwd, halt);
+            if (!loop)
+                tr.march(p0, t0, -1, bwd, halt);
+            std::vector<DSurfPoint> poly;
+            poly.reserve(bwd.size() + 1 + fwd.size());
+            for (auto it = bwd.rbegin(); it != bwd.rend(); ++it)
+                poly.push_back(*it);
+            poly.push_back({ p0[0], p0[1], p0[2] });
+            for (const DSurfPoint& q : fwd)
+                poly.push_back(q);
+
+            /*  Consume every feature near the traced curve so the
+             *  next unconsumed seed is a NEW component.  */
+            const float cr2 = sp * sp;
+            for (size_t s2 = 0; s2 < consumed.size(); ++s2)
+            {
+                if (consumed[s2])
+                    continue;
+                const DSurfPoint& F = soup->surface[f0 + s2];
+                for (const DSurfPoint& q : poly)
+                {
+                    const float dx = q.x - F.x, dy = q.y - F.y,
+                                dz = q.z - F.z;
+                    if (dx*dx + dy*dy + dz*dz < cr2)
+                    {
+                        consumed[s2] = 1;
+                        break;
+                    }
+                }
+            }
+            consumed[s] = 1;
+            if (poly.size() >= 3)
+            {
+                polys.push_back(std::move(poly));
+                closed.push_back(loop ? 1 : 0);
+                poly_pair.push_back(tp.clause);
+            }
+        }
+    }
+    if (polys.empty())
+    {
+        tape_ctx_free(ctx);
+        return false;
+    }
+
+    if (getenv("STIBIUM_DMESH_TRACE_DEBUG"))
+        for (size_t c = 0; c < polys.size(); ++c)
+        {
+            float mind = 1e30f;
+            for (size_t q = 1; q < polys[c].size(); ++q)
+            {
+                const float dx = polys[c][q].x - polys[c][q-1].x;
+                const float dy = polys[c][q].y - polys[c][q-1].y;
+                const float dz = polys[c][q].z - polys[c][q-1].z;
+                mind = std::min(mind,
+                        sqrtf(dx*dx + dy*dy + dz*dz));
+            }
+            float minx = 1e30f;
+            for (size_t c2 = 0; c2 < polys.size(); ++c2)
+            {
+                if (c2 == c)
+                    continue;
+                for (const DSurfPoint& A : polys[c])
+                    for (const DSurfPoint& B : polys[c2])
+                    {
+                        const float dx = A.x - B.x,
+                                    dy = A.y - B.y,
+                                    dz = A.z - B.z;
+                        minx = std::min(minx, sqrtf(
+                                dx*dx + dy*dy + dz*dz));
+                    }
+            }
+            fprintf(stderr, "TRACE poly %zu (pair@%u): %zu pts, "
+                    "closed %d, min-consec %.2e, min-cross %.2e, "
+                    "start (%.4f,%.4f,%.4f)\n", c, poly_pair[c],
+                    polys[c].size(), int(closed[c]), mind, minx,
+                    polys[c][0].x, polys[c][0].y, polys[c][0].z);
+        }
+
+    /*  Junction sharing: open-chain endpoints within reach cluster
+     *  to their mean, so incident creases carry the IDENTICAL
+     *  corner coordinates and the triangulation's coincidence
+     *  guard makes them one shared constrained vertex.  */
+    {
+        struct End { uint32_t poly; int end; };
+        std::vector<End> ends;
+        for (uint32_t c = 0; c < polys.size(); ++c)
+            if (!closed[c])
+            {
+                ends.push_back({ c, 0 });
+                ends.push_back({ c, 1 });
+            }
+        const auto pt_of = [&](const End& e) -> DSurfPoint& {
+            return e.end ? polys[e.poly].back()
+                         : polys[e.poly].front();
+        };
+        std::vector<uint8_t> used(ends.size(), 0);
+        const float jr2 = 0.75f * 0.75f * sp * sp;
+        for (size_t i = 0; i < ends.size(); ++i)
+        {
+            if (used[i])
+                continue;
+            std::vector<size_t> cl{ i };
+            const DSurfPoint& A = pt_of(ends[i]);
+            for (size_t j = i + 1; j < ends.size(); ++j)
+            {
+                if (used[j])
+                    continue;
+                const DSurfPoint& B = pt_of(ends[j]);
+                const float dx = B.x - A.x, dy = B.y - A.y,
+                            dz = B.z - A.z;
+                if (dx*dx + dy*dy + dz*dz < jr2)
+                    cl.push_back(j);
+            }
+            if (cl.size() < 2)
+                continue;
+            float mx = 0, my = 0, mz = 0;
+            for (const size_t q : cl)
+            {
+                mx += pt_of(ends[q]).x;
+                my += pt_of(ends[q]).y;
+                mz += pt_of(ends[q]).z;
+            }
+            mx /= cl.size();
+            my /= cl.size();
+            mz /= cl.size();
+            /*  The mean of near-corner endpoints sits off the
+             *  surface by their spread (~2.5e-3 measured on cube
+             *  corners); Newton it back down before it becomes a
+             *  shared constrained vertex.  */
+            for (int it = 0; it < 3; ++it)
+            {
+                const float h = 0.01f * sp;
+                float xs[7], ys[7], zs[7];
+                for (int q = 0; q < 7; ++q)
+                {
+                    xs[q] = mx;
+                    ys[q] = my;
+                    zs[q] = mz;
+                }
+                xs[1] += h;  xs[2] -= h;
+                ys[3] += h;  ys[4] -= h;
+                zs[5] += h;  zs[6] -= h;
+                Region dummy = {};
+                dummy.voxels = 7;
+                dummy.X = xs;
+                dummy.Y = ys;
+                dummy.Z = zs;
+                const float* rf = tape_eval_r(base, ctx, dummy);
+                const float f = rf[0];
+                const float h2 = 2 * h;
+                const float gx = (rf[1] - rf[2]) / h2;
+                const float gy = (rf[3] - rf[4]) / h2;
+                const float gz = (rf[5] - rf[6]) / h2;
+                const float g2 = gx*gx + gy*gy + gz*gz;
+                if (!(g2 > 0) || !std::isfinite(f))
+                    break;
+                float step = -f / g2;
+                const float cap = 0.5f * sp / sqrtf(g2);
+                if (step > cap)
+                    step = cap;
+                if (step < -cap)
+                    step = -cap;
+                mx += gx * step;
+                my += gy * step;
+                mz += gz * step;
+            }
+            for (const size_t q : cl)
+            {
+                pt_of(ends[q]) = { mx, my, mz };
+                used[q] = 1;
+            }
+        }
+    }
+    tape_ctx_free(ctx);
+
+    /*  Append traced points as the constrained vertex set; the
+     *  chains reference them by absolute surface index.  QEF
+     *  features stay in the soup as plain surface points (the
+     *  crease band drop retires the redundant ones).  */
+    for (auto& poly : polys)
+    {
+        std::vector<uint32_t> chain;
+        chain.reserve(poly.size());
+        for (const DSurfPoint& q : poly)
+        {
+            chain.push_back(uint32_t(soup->surface.size()));
+            soup->surface.push_back(q);
+            ++soup->traced;
+        }
+        soup->tchains.push_back(std::move(chain));
+    }
+    soup->tclosed = closed;
+    return true;
+}
+
+////////////////////////////////////////////////////////////////////////////
 //  Stages B + C: Delaunay, refinement, extraction (CGAL)
 
 #ifdef STIBIUM_HAS_CGAL
@@ -1033,7 +1578,17 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     std::vector<std::array<float, 6>> cseg;
     if constexpr (CCDT_MODE)
     {
-        const DChains chains = delaunay_chains(soup);
+        /*  Traced chains (exact, ordered, junction-sharing) when
+         *  the tracer ran; the QEF chain extractor otherwise.  */
+        DChains chains;
+        if (!soup.tchains.empty())
+        {
+            chains.chains = soup.tchains;
+            chains.closed.assign(soup.tclosed.begin(),
+                                 soup.tclosed.end());
+        }
+        else
+            chains = delaunay_chains(soup);
         std::vector<std::pair<uint32_t, uint32_t>> cand;
         for (size_t c = 0; c < chains.chains.size(); ++c)
         {
@@ -2122,6 +2677,11 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
     DSoup soup = delaunay_sample(deck, r, halt);
     if (*halt)
         return false;
+    static const char* tr_env = getenv("STIBIUM_DMESH_TRACE");
+    if (!tr_env || atoi(tr_env) != 0)
+        delaunay_trace(deck, r, &soup, halt);
+    if (*halt)
+        return false;
     return delaunay_mesh_soup(deck, soup, halt, out);
 }
 
@@ -2131,7 +2691,22 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
     static const char* env = getenv("STIBIUM_DMESH_CCDT");
     const bool use_ccdt = env ? atoi(env) != 0 : true;
     if (use_ccdt)
-        return mesh_impl<true, CCDT>(deck, soup, halt, out);
+    {
+        /*  Degenerate constraint inputs (a vertex exactly on a
+         *  subconstraint, coincident Steiner points) make the
+         *  conforming machinery throw.  Degrade to the
+         *  unconstrained path rather than crash - the fallback is
+         *  the landed reference mesher.  */
+        try
+        {
+            return mesh_impl<true, CCDT>(deck, soup, halt, out);
+        }
+        catch (const std::exception& e)
+        {
+            fprintf(stderr, "delaunay: constrained path failed "
+                    "(%s); falling back unconstrained\n", e.what());
+        }
+    }
     return mesh_impl<false, DT>(deck, soup, halt, out);
 }
 
