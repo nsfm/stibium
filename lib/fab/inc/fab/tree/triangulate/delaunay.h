@@ -30,7 +30,10 @@
 struct DSample
 {
     float x, y, z;
-    bool inside;
+    bool inside;      // f < 0, strictly (matches the renderer)
+    bool on_surface;  // f == 0 exactly: grid-aligned geometry lands
+                      // lattice samples ON the surface; they enter
+                      // the triangulation as surface vertices
 };
 
 /*  A surface point from bisecting a sign-change lattice edge.  */

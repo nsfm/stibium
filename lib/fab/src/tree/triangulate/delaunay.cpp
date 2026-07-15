@@ -73,10 +73,11 @@ struct Collector
     std::vector<FeatCell> cells;
     float spacing = 0;   // finest lattice pitch (uniform grid)
 
-    void add_sample(float x, float y, float z, bool inside)
+    void add_sample(float x, float y, float z, bool inside,
+                    bool on_surface = false)
     {
         if (seen_samples.insert(coord_hash(x, y, z)).second)
-            soup.samples.push_back({ x, y, z, inside });
+            soup.samples.push_back({ x, y, z, inside, on_surface });
     }
 
     static uint64_t edge_hash(float ax, float ay, float az,
@@ -179,7 +180,8 @@ void sample_block(Collector& c, const Region& r, Tape* tape)
             for (uint32_t i = 0; i < cx; ++i)
             {
                 const size_t p = idx(i, j, k);
-                c.add_sample(xs[p], ys[p], zs[p], inside(p));
+                c.add_sample(xs[p], ys[p], zs[p], inside(p),
+                             vals[p] == 0);
                 const size_t nb[3] = {
                     i + 1 < cx ? idx(i + 1, j, k) : p,
                     j + 1 < cy ? idx(i, j + 1, k) : p,
@@ -551,7 +553,8 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
     pts.reserve(soup.samples.size());
     for (const DSample& s : soup.samples)
         pts.push_back({ DPoint3(s.x, s.y, s.z),
-                        int8_t(s.inside ? -1 : 1) });
+                        int8_t(s.on_surface ? 0
+                               : s.inside ? -1 : 1) });
     DT dt(pts.begin(), pts.end());
 
     /*  Surface points go in one by one with a coincidence guard: on
