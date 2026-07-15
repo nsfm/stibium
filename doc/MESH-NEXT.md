@@ -451,6 +451,27 @@ lattice pitch), OP_ABS as a crease generator (|x| kinks at x=0;
 enumerate ABS clauses the same way), and blend-aware skipping once
 smooth-min ops exist.
 
+**Nate's eyeball verdict on the traced build** (2026-07-15):
+sphere "transcendent" (1 MB, Blender-regular topology, vs 3.5 MB
+optimized / 144 MB raw marching-cubes); the two-sphere weld crease
+on spheres AND csg "perfect - no visual disruption whatsoever."
+**The open flaw - CONCAVE CHIPS**: chips along csg's flat cut
+edge, fewer than before, mechanism diagnosed by eyeball: chords
+from the sphere face to the flat face crossing the crease THROUGH
+MATERIAL (volume-reducing) - the concave twin of the solved
+empty-space chords.  Next round's referee.  Note the asymmetry
+worth chasing: why does the constraint kill convex chords but not
+concave ones?  Candidate mechanisms: extraction picks facets by
+cell sign, and on the concave side the crease wedge's tets differ;
+or repair keep-out (0.75 sp) blocks the presses that would fix
+the concave side; or the band drop thins the flat face's near-
+crease sampling.  STIBIUM_DMESH_NM_DEBUG-style provenance on chip
+triangles is the opening move.
+
+**The standalone technical record lives in doc/DELAUNAY-MESHER.md**
+(how it works, sources, uniqueness claim, everything tried and
+rejected, measured state).  Keep it current when rounds land.
+
 ## The original round map (2026-07-15, kept for the record)
 
 **Primitive confirmed**: CGAL 6.2's
