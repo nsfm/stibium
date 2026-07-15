@@ -10,6 +10,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -1792,6 +1793,254 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     }
     }   // repair loop
 
+    /*  Manifold pass (Manifold-DC after Schaefer/Ju/Warren 2007;
+     *  see doc/research/2026-07-15-pinch-manifoldness.md): our
+     *  extraction is restricted-Delaunay class, so a separator or
+     *  tangency can pinch the surface into a 4-triangle edge.  The
+     *  tet complex knows the truth: circulating the cells around a
+     *  pinch edge, the two facets bounding the same INSIDE run are
+     *  one wedge of the solid - one sheet.  Pair them, then split
+     *  every vertex whose facet fan is disconnected into one output
+     *  vertex per sheet (coincident copies, zero geometric change).
+     *  The result is 2-manifold at every vertex by construction.
+     *  STIBIUM_DMESH_MANIFOLD=0 disables.  */
+    {
+        static const char* man_env = getenv("STIBIUM_DMESH_MANIFOLD");
+        const bool manifold_on = man_env ? atoi(man_env) != 0 : true;
+        const size_t ntri = out->tris.size() / 3;
+        if (manifold_on && ntri)
+        {
+            /*  Edge -> incident triangle list  */
+            std::unordered_map<uint64_t, std::vector<uint32_t>> etris;
+            for (uint32_t t = 0; t < ntri; ++t)
+                for (int e = 0; e < 3; ++e)
+                {
+                    uint64_t a = out->tris[3*t + e];
+                    uint64_t b = out->tris[3*t + (e + 1) % 3];
+                    if (a > b)
+                        std::swap(a, b);
+                    etris[(a << 32) | b].push_back(t);
+                }
+
+            /*  Triangle lookup by sorted vertex triple  */
+            std::unordered_map<uint64_t, uint32_t> trikey;
+            const auto tri_key = [&](uint32_t x, uint32_t y,
+                                     uint32_t z) -> uint64_t {
+                if (x > y) std::swap(x, y);
+                if (y > z) std::swap(y, z);
+                if (x > y) std::swap(x, y);
+                return (uint64_t(x) << 42) | (uint64_t(y) << 21) |
+                       uint64_t(z);
+            };
+            for (uint32_t t = 0; t < ntri; ++t)
+                trikey[tri_key(out->tris[3*t], out->tris[3*t + 1],
+                               out->tris[3*t + 2])] = t;
+
+            /*  Reverse map: vertex handle -> output index  */
+            std::unordered_map<const void*, uint32_t> vrev;
+            for (uint32_t i = 0; i < xvh.size(); ++i)
+                vrev[&*xvh[i]] = i;
+
+            /*  Sheet pairing at pinch edges: edge key ->
+             *  (tri -> sheet id).  Unrecoverable rings leave the
+             *  edge unpaired = conservative split.  */
+            std::unordered_map<uint64_t,
+                    std::unordered_map<uint32_t, int>> sheet;
+            for (const auto& [k, ts] : etris)
+            {
+                if (ts.size() <= 2)
+                    continue;
+                const uint32_t ia = uint32_t(k >> 32);
+                const uint32_t ib = uint32_t(k);
+                const VH vp = xvh[ia], vq = xvh[ib];
+                typename Tri::Cell_handle ec;
+                int ei, ej;
+                if (!dt.is_edge(vp, vq, ec, ei, ej))
+                    continue;
+                /*  Ring of cells around the edge, with signs  */
+                auto circ = dt.incident_cells(ec, ei, ej);
+                const auto done = circ;
+                std::vector<CH> ring;
+                do
+                    ring.push_back(CH(circ));
+                while (++circ != done);
+                const auto cell_sign = [&](CH c) -> int {
+                    return dt.is_infinite(c) ? 1 : int(c->info());
+                };
+                /*  Transitions between consecutive ring cells;
+                 *  each is an extracted facet {vp, vq, w}.  */
+                struct Trans { uint32_t tri; int before; };
+                std::vector<Trans> trans;
+                bool ok = true;
+                for (size_t r = 0; r < ring.size() && ok; ++r)
+                {
+                    const CH c1 = ring[r];
+                    const CH c2 = ring[(r + 1) % ring.size()];
+                    const int s1 = cell_sign(c1);
+                    const int s2 = cell_sign(c2);
+                    if (s1 == s2 || s1 == 0 || s2 == 0)
+                        continue;
+                    /*  Shared facet's third vertex  */
+                    int ni = -1;
+                    for (int q = 0; q < 4; ++q)
+                        if (c1->neighbor(q) == c2)
+                            ni = q;
+                    if (ni < 0) { ok = false; break; }
+                    VH w = VH();
+                    for (int q = 0; q < 4; ++q)
+                    {
+                        if (q == ni)
+                            continue;
+                        VH v = c1->vertex(q);
+                        if (v != vp && v != vq)
+                            w = v;
+                    }
+                    const auto wf = w == VH() ? vrev.end()
+                                              : vrev.find(&*w);
+                    if (wf == vrev.end()) { ok = false; break; }
+                    const auto tf = trikey.find(
+                            tri_key(ia, ib, wf->second));
+                    if (tf == trikey.end()) { ok = false; break; }
+                    trans.push_back({ tf->second, s1 });
+                }
+                if (!ok || trans.size() != ts.size())
+                    continue;
+                /*  Pair each out->in transition with the next
+                 *  transition (the inside run between them is one
+                 *  wedge of the solid).  */
+                auto& sh = sheet[k];
+                int sid = 0;
+                for (size_t r = 0; r < trans.size(); ++r)
+                    if (trans[r].before > 0)
+                    {
+                        sh[trans[r].tri] = sid;
+                        sh[trans[(r + 1) % trans.size()].tri] = sid;
+                        ++sid;
+                    }
+            }
+
+            /*  Fan split: per vertex, union incident triangles
+             *  across manifold edges (and across paired pinch
+             *  edges); each extra component gets a coincident
+             *  duplicate vertex.  Adjacency is read from a
+             *  SNAPSHOT - rewrites must not perturb later
+             *  vertices' edge keys.  */
+            const std::vector<uint32_t> tris0 = out->tris;
+            std::vector<std::vector<uint32_t>> vtris(
+                    out->verts.size() / 3);
+            for (uint32_t t = 0; t < ntri; ++t)
+                for (int e = 0; e < 3; ++e)
+                    vtris[tris0[3*t + e]].push_back(t);
+
+            uint64_t split = 0;
+            for (uint32_t v = 0; v < vtris.size(); ++v)
+            {
+                const auto& ts = vtris[v];
+                if (ts.size() < 2)
+                    continue;
+                /*  Local union-find  */
+                std::unordered_map<uint32_t, uint32_t> id;
+                std::vector<uint32_t> parent(ts.size());
+                for (uint32_t q = 0; q < ts.size(); ++q)
+                {
+                    id[ts[q]] = q;
+                    parent[q] = q;
+                }
+                std::function<uint32_t(uint32_t)> find =
+                        [&](uint32_t x) -> uint32_t {
+                    while (parent[x] != x)
+                        x = parent[x] = parent[parent[x]];
+                    return x;
+                };
+                for (const uint32_t t : ts)
+                    for (int e = 0; e < 3; ++e)
+                    {
+                        uint64_t a = tris0[3*t + e];
+                        uint64_t b = tris0[3*t + (e + 1) % 3];
+                        if (a != v && b != v)
+                            continue;
+                        if (a > b)
+                            std::swap(a, b);
+                        const uint64_t ek = (a << 32) | b;
+                        const auto& ets = etris[ek];
+                        if (ets.size() == 2)
+                        {
+                            parent[find(id[ets[0]])] =
+                                    find(id[ets[1]]);
+                        }
+                        else if (ets.size() > 2)
+                        {
+                            const auto sf = sheet.find(ek);
+                            if (sf == sheet.end())
+                            {
+                                /*  Pairing unrecoverable: keep the
+                                 *  pinch (union everything) - an
+                                 *  honest non-manifold edge beats a
+                                 *  torn hole.  */
+                                for (size_t q = 1; q < ets.size();
+                                     ++q)
+                                    parent[find(id[ets[q]])] =
+                                            find(id[ets[0]]);
+                                continue;
+                            }
+                            /*  Union same-sheet pairs; any tri the
+                             *  pairing missed joins sheet 0.  */
+                            std::unordered_map<int, uint32_t> first;
+                            for (const uint32_t et : ets)
+                            {
+                                const auto pf = sf->second.find(et);
+                                const int sid =
+                                        pf == sf->second.end()
+                                        ? 0 : pf->second;
+                                const auto ff = first.find(sid);
+                                if (ff == first.end())
+                                    first[sid] = et;
+                                else
+                                    parent[find(id[et])] =
+                                            find(id[ff->second]);
+                            }
+                        }
+                    }
+                /*  Components -> duplicates  */
+                std::unordered_map<uint32_t, uint32_t> comp_vert;
+                bool any = false;
+                for (uint32_t q = 0; q < ts.size(); ++q)
+                {
+                    const uint32_t root = find(q);
+                    auto cf = comp_vert.find(root);
+                    if (cf == comp_vert.end())
+                    {
+                        const uint32_t nv = comp_vert.empty()
+                                ? v
+                                : uint32_t(out->verts.size() / 3);
+                        if (nv != v)
+                        {
+                            out->verts.push_back(
+                                    out->verts[3*v]);
+                            out->verts.push_back(
+                                    out->verts[3*v + 1]);
+                            out->verts.push_back(
+                                    out->verts[3*v + 2]);
+                            ++split;
+                            any = true;
+                        }
+                        comp_vert[root] = nv;
+                        cf = comp_vert.find(root);
+                    }
+                    if (cf->second != v)
+                    {
+                        const uint32_t t = ts[q];
+                        for (int e = 0; e < 3; ++e)
+                            if (out->tris[3*t + e] == v)
+                                out->tris[3*t + e] = cf->second;
+                    }
+                }
+                (void)any;
+            }
+            out->split_verts = split;
+        }
+    }
+
     /*  Quality accounting: closed 2-manifold means every edge is
      *  shared by exactly two triangles.  */
     std::unordered_map<uint64_t, uint32_t> edge_count;
@@ -1822,6 +2071,15 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             for (const uint32_t vi : { uint32_t(k >> 32),
                                        uint32_t(k) })
             {
+                if (vi >= xvh.size())
+                {
+                    fprintf(stderr, "NM edge (count %u): "
+                            "(%.4f, %.4f, %.4f) split duplicate\n",
+                            unsigned(n2), out->verts[3*vi],
+                            out->verts[3*vi + 1],
+                            out->verts[3*vi + 2]);
+                    continue;
+                }
                 const VH v = xvh[vi];
                 const auto it = prov.find(&*v);
                 int steiner = -1, ncstr = -1;

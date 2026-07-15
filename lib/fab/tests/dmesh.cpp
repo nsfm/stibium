@@ -433,7 +433,8 @@ TEST_CASE("Delaunay showcase STLs at higher resolution", "[.dmeshSTL]")
              << "; repaired " << m.repaired << " in "
              << m.repair_rounds << " rounds; constrained "
              << m.constrained << " edges, " << m.steiner
-             << " steiner -> " << fname);
+             << " steiner, " << m.split_verts
+             << " split -> " << fname);
     }
 }
 
