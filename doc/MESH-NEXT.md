@@ -320,20 +320,69 @@ pinches (2-6) plus 19 sharp folds from skinny projected triangles;
 Mixed-sign cells now ask the centroid oracle (kept: strictly more
 correct at halt/cap exits than first-witness-wins).
 
-**The junction round (next design work, csg is the referee)**: the
-chain extractor treats crease CROSSINGS (union seam meets plane
-circle at csg's sharp point) as ordinary degree-2 walking and
-mislinks ~35% of segments.  Needed: junction detection (degree>=3
-or crossing-aware merge), chains split at junctions, junction
-vertices shared between chains as polyline endpoints.  Then csg's
-gate opens and its sharp point gets the structural cure the union
-already enjoys.  Diagnostics live: `STIBIUM_DMESH_NM_DEBUG=1`
-prints every non-manifold edge with vertex provenance
-(sample/bisect/feature/refine/repair + steiner + n-constraints);
-`constrained`/`steiner` counts are in DMesh and the [.dmeshSTL]
-output.  CCDT timing note: sphere 953 -> 1612 ms at 64^3 in
-[.dmeshVS] - the machinery (time stamps, hierarchy) costs ~70%;
-part of the performance round.
+**Same-night follow-ups (both landed, suite green)**:
+- **The noise floor** (1edb78f4): csg's 96 "rejected" segments were
+  never shortcuts - all on the plane circle, failing a purely
+  relative 3% bar because their QEF ENDPOINTS carry ~1e-3 placement
+  noise and the densest segments are only 0.5-0.9 cells long.
+  Tolerance is now max(3% len, 5% spacing); csg accepts all its
+  segments, passes the gate, meshes fully constrained with ZERO
+  off-surface warts and 7 sub-visual pinches (Nate accepts pinches
+  when visual quality holds).  `STIBIUM_DMESH_SEG_DEBUG=1` dumps
+  rejected segments - USE IT before believing a rejection theory.
+- **The junction-split walk** (4889d596): covariance classification
+  (eigenvalue ratio > 0.2 over the 2-cell neighborhood) cuts
+  junction reps out before linking and reattaches them as SHARED
+  chain endpoints.  Cube: exactly 8 corners classify, 12 edge
+  chains share them (previously two of three edges per corner
+  stopped one rep short).  LIMIT: csg's seam-meets-circle crossings
+  are TANGENTIAL - locally parallel curves look like a line to
+  covariance, so no junction fires; its walk still passes through.
+  Coverage 97.5% regardless.
+
+**Diagnostics live**: `STIBIUM_DMESH_NM_DEBUG=1` prints every
+non-manifold edge with vertex provenance (sample/bisect/feature/
+refine/repair + steiner + n-constraints) - it convicted every pinch
+mechanism tonight; `constrained`/`steiner` counts are in DMesh and
+[.dmeshSTL] output.  CCDT timing note: sphere 953 -> 1612 ms at
+64^3 in [.dmeshVS] - the machinery (time stamps, hierarchy) costs
+~70%; part of the performance round.
+
+**Research round (2026-07-15, two opus agents; full reports in
+doc/research/2026-07-15-*.md)**, the load-bearing findings:
+1. **Our extraction rule is restricted-Delaunay class and NOT
+   manifold-by-construction.**  Manifoldness is conditional on the
+   Topological Ball Property (Edelsbrunner-Shah 1997); a pinch IS a
+   TBP violation (a Voronoi edge stabbing the surface twice).
+   TetWeave/Wang never pinch because they use MARCHING-TET
+   interpolation (manifold by construction) - which cannot pass
+   through feature vertices, i.e. cannot do sharp creases.  Our
+   rule is the price of sharpness.
+2. **The principled pinch cure for our exact case is Manifold-DC
+   style vertex duplication** (Schaefer/Ju/Warren TVCG 2007): when
+   one vertex is forced to serve two surface sheets, emit one
+   vertex per sheet and rewire - near-coincident but topologically
+   distinct.  Literature explicitly warns AGAINST snapping/welding
+   in the triangulation (we measured that too: every snap variant
+   made sliver pairs).  Post-extraction weld is the accepted lossy
+   backstop for artifact pinches.
+3. **Feature protection has two schools**: weighted protecting
+   balls (Cheng-Dey-Ramos; CGAL Mesh_3) need a REGULAR
+   triangulation - does not compose with constrained CDT; the
+   constrained school is Shewchuk diametral-sphere reject-and-split
+   - our crowding guard/keep-out/band-drop are ad-hoc versions of
+   its insertion-radius bound.
+4. **The CSG tree is the unclaimed lever** (next campaign,
+   'crease tracing'): creases are pairwise primitive intersections
+   f_A = f_B = 0; trace with predictor t = grad_A x grad_B +
+   2-eq Newton corrector; junctions detected ANALYTICALLY (third
+   field crossing zero, or |grad_A x grad_B| -> 0 = TANGENCY -
+   exactly csg's sharp point, terminate and share the node).
+   Trimming = evaluate the full CSG f.  Gotchas mapped: smooth-min
+   blends (skip - no crease), nested subtrees (recurse; new seams
+   only leaf-vs-leaf), coincident faces (exclude).  This replaces
+   normal-spread QEF heuristics with exact geometry and makes
+   junction topology bookkeeping instead of inference.
 
 ## The original round map (2026-07-15, kept for the record)
 
