@@ -1,5 +1,44 @@
 # The meshing campaign: adaptive Delaunay on sound intervals
 
+## >>> NEXT SESSION OPENS HERE (note to self, 2026-07-15) <<<
+
+Nate wants BOTH remaining tracks explored ("a few small nits from
+perfection - we can't stop now"), speed explicitly a non-concern
+for final meshes.  The chip plateau (0.196 sp worst depth, three
+repair strategies, one wall) is guard x density - so:
+
+1. **Crease-band density round** (my pick, start here).  Goal:
+   worst-chip-depth < 0.1 sp on csg at 96^3 (metric prints via
+   STIBIUM_DMESH_CHIP_DEBUG; count is a LYING metric, use depth).
+   Two designs, cheapest first:
+   (a) elegant: during octree descent, a box whose pushed tape
+       kept an AMBIGUOUS min/max choice is crease-suspect -
+       descend it ONE extra level.  Uses existing push machinery
+       (ClauseIv choices); zero new oracles.  Look at descend()/
+       LEAF_VOXELS in delaunay.cpp + tape_push choice records.
+   (b) brute: two-pass - sample, trace creases, re-sample boxes
+       within 1 sp of traced polylines at double density.
+   Watch: CGAL cospherical slowdowns with denser lattices (known,
+   accepted); the drop-band will thin the new points near
+   constraints (good - they exist to feed refinement/repair).
+   Re-test SDB (STIBIUM_DMESH_SDB=1) at the new density - its
+   plateau may separate from midpoint's there.
+2. **DC-semantics extraction** (reserve, only if density fails):
+   facets at concave-crease wedges forced to use crease edges.
+3. **Flat-face decimation** (Nate's ask, sketch under "Queued
+   rounds"): oracle-certified planar patch re-triangulation.
+   Isolated output pass - good palate cleanser between rounds.
+4. Someday: kink-corner 3-field solve, OP_ABS creases, zeiss-scale
+   run, upstream letter (doc/DELAUNAY-MESHER.md is written for it).
+
+House rules that saved this campaign, do not forget: measure
+before productionize; negative results get numbers and ledger
+entries; depth not count; Nate's eyeballs are a formal referee
+and they out-diagnose your instruments.  Suite must stay green:
+627,666 assertions as of b0769526/4e5df4e1.
+
+---
+
 *Field map written 2026-07-15, before the first line of code, per
 house discipline.  Companions: doc/research/2026-07-14-frep-sota.md
 (the survey), doc/TAPE-DESIGN.md (the tape kernel this feeds on),
