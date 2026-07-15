@@ -988,8 +988,16 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 const float gy = (sv[o+3] - sv[o+4]) / h2;
                 const float gz = (sv[o+5] - sv[o+6]) / h2;
                 const float gl = sqrtf(gx*gx + gy*gy + gz*gz);
+                /*  Relative tolerance with an absolute floor: QEF
+                 *  endpoints carry ~1e-3 placement noise (measured
+                 *  |f| <= 1.3e-3), so a purely relative bar starves
+                 *  SHORT segments - csg's plane circle lost all 96
+                 *  of its densest (0.5-0.9 cell) segments at
+                 *  3.0-4.1% while true shortcuts sit far beyond
+                 *  either bound.  */
                 if (!std::isfinite(f) || !(gl > 0) ||
-                    fabsf(f) / gl > slen[i] * 0.03f)
+                    fabsf(f) / gl > std::max(slen[i] * 0.03f,
+                            soup.spacing * 0.05f))
                     good = false;
             }
             if (good)
@@ -998,6 +1006,31 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 const DSurfPoint& A = soup.surface[cand[i].first];
                 const DSurfPoint& B = soup.surface[cand[i].second];
                 cseg.push_back({ A.x, A.y, A.z, B.x, B.y, B.z });
+            }
+            else if (getenv("STIBIUM_DMESH_SEG_DEBUG"))
+            {
+                const DSurfPoint& A = soup.surface[cand[i].first];
+                const DSurfPoint& B = soup.surface[cand[i].second];
+                float worst = 0;
+                for (int u = 0; u < NS; ++u)
+                {
+                    const size_t o = (i * NS + u) * 7;
+                    const float h2 = 2 * shs[i];
+                    const float gx = (sv[o+1] - sv[o+2]) / h2;
+                    const float gy = (sv[o+3] - sv[o+4]) / h2;
+                    const float gz = (sv[o+5] - sv[o+6]) / h2;
+                    const float gl =
+                            sqrtf(gx*gx + gy*gy + gz*gz);
+                    if (gl > 0 && std::isfinite(sv[o]))
+                        worst = std::max(worst,
+                                fabsf(sv[o]) / gl);
+                }
+                fprintf(stderr, "SEG reject (%.4f,%.4f,%.4f)-"
+                        "(%.4f,%.4f,%.4f) len %.4f (%.2f sp) "
+                        "worst %.5f (%.1f%% len)\n",
+                        A.x, A.y, A.z, B.x, B.y, B.z, slen[i],
+                        slen[i] / soup.spacing, worst,
+                        100.f * worst / slen[i]);
             }
         }
         /*  The gate: constraints become law only when the chains
