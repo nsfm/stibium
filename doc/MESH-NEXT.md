@@ -209,7 +209,26 @@ near a crease need to exist AND cooperate with the chain
 (candidate: snap the rebuild onto the crease direction rather than
 the segment's f-zero, keeping separation while joining the chain).
 
-Stage D remains: the curved-crease cooperation design (above),
+**The chord theorem** (Nate's diagnosis, proven by two failed
+cures): the union warts are triangles with one vertex on the seam
+and one on EACH sphere - the sphere-to-sphere edge is a chord
+crossing the crease, every vertex perfectly on-surface, the chord
+itself sagging off it.  Gate-free error-driven repair (check ALL
+edge midpoints, press down the deviant) fixed the CUBE to
+exactly-analytic volume (1.728) but CANNOT converge on shallow
+creases: a crease-crossing chord is SELF-SIMILAR - deviation and
+length shrink together under midpoint splitting, so the ratio
+never passes a relative tolerance; crease-seeking splits (seed at
+the |f| peak along the chord, the branch switch) reduce but do not
+eliminate the residue (60 -> 19 pinches at cap).  Both variants
+trade ~20 gentle warts for non-manifold pinches: reverted, closure
+outranks cosmetics.  THE cure is crease topology: extract the
+feature chain as an ordered polyline and make its segments
+CONSTRAINED edges of the triangulation (or retriangulate the
+crease band against the polyline), so no chord can cross.  That is
+next session's field-mapped design.
+
+Stage D remains: the crease-polyline constraint design (above),
 hidden-candidate drill-down, error-driven adaptive insertion,
 performance (CGAL predicate fallbacks - jitter tried and reverted,
 see above; next: shell-thinning + incremental edge scans), MT, and
