@@ -2359,13 +2359,27 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
              *  (near-crease inserts spawn new sliver chords faster
              *  than they fix - 17 -> 31 over rounds, pinch splits
              *  appear); 0.35 presses monotonically 87 -> 17 with
-             *  zero topology damage.  */
+             *  zero topology damage.  A 0.10 shield + 0.3 sp
+             *  crease-vertex-only crowding floor was also tried:
+             *  36 more repairs land but detection PLATEAUS at ~20
+             *  (fresh shallow chips replace pressed ones - the
+             *  relative tolerance is self-similar and the guards
+             *  rightly stop the descent) - reverted, 0.35 ends
+             *  better.  The residue is the greedy-repair
+             *  asymptote; the structural cure is extraction-level
+             *  (MESH-NEXT).  */
             const float ko = (kspec[i] ? 0.35f : 0.75f) *
                     soup.spacing;
             if (!cseg.empty() &&
                 near_crease(kx[i], ky[i], kz[i], ko))
             {
                 ++blk_keepout;
+                if (chip_env && repair_round >= 3)
+                    fprintf(stderr, "BLOCKED %s target "
+                            "(%.4f, %.4f, %.4f) edge %.3f sp\n",
+                            kspec[i] ? "chip" : "wart",
+                            kx[i], ky[i], kz[i],
+                            kc[i] / soup.spacing);
                 continue;
             }
             const TPoint pt(kx[i], ky[i], kz[i]);
