@@ -67,6 +67,7 @@ add_library(SbFab STATIC
     src/tree/tape.cpp
     src/tree/tree.c
     src/tree/v2parser.cpp
+    src/tree/triangulate/delaunay.cpp
     src/tree/triangulate/mesher.cpp
     src/tree/triangulate.cpp
     src/types/bounds.cpp
@@ -100,6 +101,20 @@ if (OpenGL_EGL_FOUND)
     target_link_libraries(SbFab ${CMAKE_DL_LIBS})
 endif()
 
+# Adaptive-Delaunay mesher (src/tree/triangulate/delaunay.cpp):
+# stages B+C need CGAL's robust incremental Delaunay (header-only,
+# exact predicates).  Without it, stage A still builds and
+# delaunay_mesh reports unavailable.
+# (CGAL's config runs its own find_package(Boost), which clobbers
+# the parent's component results - save and restore.)
+set(_stibium_boost_libs ${Boost_LIBRARIES})
+find_package(CGAL QUIET)
+set(Boost_LIBRARIES ${_stibium_boost_libs})
+if (CGAL_FOUND)
+    target_compile_definitions(SbFab PRIVATE STIBIUM_HAS_CGAL)
+    target_link_libraries(SbFab CGAL::CGAL)
+endif()
+
 # Add the binary dir to include generated files
 target_include_directories(SbFab PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}
@@ -127,6 +142,7 @@ add_executable(SbFabTest
     tests/mesher.cpp
     tests/parser.cpp
     tests/aa.cpp
+    tests/dmesh.cpp
     tests/shape.cpp
     tests/tape.cpp
 )
