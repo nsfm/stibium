@@ -88,6 +88,55 @@ uint32_t mesh_components(const DMesh& m)
     return uint32_t(roots.size());
 }
 
+/*  Wart detector: sharp folds between adjacent triangles.  A crease
+ *  is a fold on purpose; a WART is a fold where two faces nearly
+ *  double back (dihedral far past any real crease).  Count pairs
+ *  whose normals oppose (dot < -0.2 ~ fold sharper than 100
+ *  degrees) - Nate counts ~20 by eye on the spheres model.  */
+uint32_t mesh_warts(const DMesh& m)
+{
+    std::unordered_map<uint64_t, std::pair<uint32_t, uint32_t>> em;
+    const auto tri_normal = [&](uint32_t t, double n[3]) {
+        const float* a = &m.verts[3 * m.tris[3*t]];
+        const float* b = &m.verts[3 * m.tris[3*t + 1]];
+        const float* c = &m.verts[3 * m.tris[3*t + 2]];
+        const double ux = b[0]-a[0], uy = b[1]-a[1], uz = b[2]-a[2];
+        const double wx = c[0]-a[0], wy = c[1]-a[1], wz = c[2]-a[2];
+        n[0] = uy*wz - uz*wy;
+        n[1] = uz*wx - ux*wz;
+        n[2] = ux*wy - uy*wx;
+        const double l = sqrt(n[0]*n[0] + n[1]*n[1] + n[2]*n[2]);
+        if (l > 0) { n[0] /= l; n[1] /= l; n[2] /= l; }
+    };
+    for (uint32_t t = 0; t < m.tris.size() / 3; ++t)
+        for (int e = 0; e < 3; ++e)
+        {
+            uint64_t a = m.tris[3*t + e];
+            uint64_t b = m.tris[3*t + (e + 1) % 3];
+            if (a > b) std::swap(a, b);
+            const uint64_t k = (a << 32) | b;
+            auto it = em.find(k);
+            if (it == em.end())
+                em[k] = { t, UINT32_MAX };
+            else if (it->second.second == UINT32_MAX)
+                it->second.second = t;
+        }
+    uint32_t warts = 0;
+    for (const auto& [k, pr] : em)
+    {
+        (void)k;
+        if (pr.second == UINT32_MAX)
+            continue;
+        double n1[3], n2[3];
+        tri_normal(pr.first, n1);
+        tri_normal(pr.second, n2);
+        const double d = n1[0]*n2[0] + n1[1]*n2[1] + n1[2]*n2[2];
+        if (d < -0.2)
+            ++warts;
+    }
+    return warts;
+}
+
 double mesh_volume(const DMesh& m)
 {
     /*  Divergence theorem over the closed surface: V = sum of
@@ -306,6 +355,7 @@ TEST_CASE("Delaunay vs Manifold DC: head to head", "[.dmeshVS]")
                     .count();
         };
         const uint32_t comps = mesh_components(m);
+        WARN("folds(dot<-0.2): " << mesh_warts(m));
         WARN(tc.name << ": delaunay " << m.tris.size() / 3
              << " tris in " << ms(t0, t1) << " ms ("
              << m.open_edges << " open, " << m.nonmanifold_edges
