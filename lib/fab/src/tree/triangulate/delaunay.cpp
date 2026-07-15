@@ -199,9 +199,6 @@ void sample_block(Collector& c, const Region& r, Tape* tape)
     if (!(any_in && any_out))
         ++c.soup.hidden_candidates;   // interval said maybe; samples say no
 
-    if (c.spacing == 0)
-        c.spacing = r.X[1] - r.X[0];
-
     /*  Candidate feature cells: any voxel with >= 3 crossing edges.
      *  Judged later, once bisected positions and normals exist.  */
     for (uint32_t k = 0; k < nk; ++k)
@@ -235,6 +232,49 @@ void sample_block(Collector& c, const Region& r, Tape* tape)
             }
 }
 
+/*  Crease-band density (MESH-NEXT density round, measured
+ *  2026-07-15): extra midpoint-refinement levels applied to
+ *  crease-suspect leaves, and the factor by which the crease-local
+ *  length scales (redundant-vertex corridor, chip repair keep-out)
+ *  shrink with them.  A quality KNOB, default off: raw chip depth
+ *  tracks the band pitch (0.500/0.375/0.192/0.098 sp at 1-8x), but
+ *  the crease-snap pass zeroes the metric at EVERY density, and
+ *  the band costs 2.2x triangles on crease-heavy models (csg 47K
+ *  vs 22K at 96^3) for sub-threshold smoothness only.  Insert-
+ *  repair can NOT substitute for the snap pass at any density: the
+ *  blocked-repair residue is self-similar (keep-out and chip
+ *  target both scale with local pitch - plateau 0.196/0.198/0.192
+ *  sp at 1/2/4x, both repair strategies).  */
+int dense_levels()
+{
+    /*  Read per call (cheap: once per leaf block) so tests can pin
+     *  a density with setenv.  */
+    const char* env = getenv("STIBIUM_DMESH_DENSE");
+    const int lv = env ? atoi(env) : 0;
+    return lv > 0 ? lv : 0;
+}
+
+float dense_factor()
+{
+    return float(1 << dense_levels());
+}
+
+/*  Midpoint-refine one lattice axis: n cells -> 2n, original corner
+ *  coordinates preserved bit-exact (shared faces of mixed-density
+ *  neighbours must dedup in add_sample).  */
+void refine_axis(std::vector<float>& a)
+{
+    const size_t n = a.size() - 1;
+    std::vector<float> b(2 * n + 1);
+    for (size_t i = 0; i < n; ++i)
+    {
+        b[2 * i] = a[i];
+        b[2 * i + 1] = 0.5f * (a[i] + a[i + 1]);
+    }
+    b[2 * n] = a[n];
+    a = std::move(b);
+}
+
 /*  Octree descent, mirroring the production mesher's structure:
  *  scalar interval eval + STANDARD push per level, cull on decided
  *  sign, leaf blocks small enough that their corner lattice fits a
@@ -265,7 +305,42 @@ void descend(Collector& c, const Region& r, Tape* tape)
 
     Tape* sub = tape_push(tape, c.ctx, X, Y, Z, TAPE_PUSH_STANDARD);
     if (r.voxels <= LEAF_VOXELS)
-        sample_block(c, r, sub);
+    {
+        if (c.spacing == 0)
+            c.spacing = r.X[1] - r.X[0];
+
+        /*  Crease-band density (STIBIUM_DMESH_DENSE = extra levels,
+         *  default 1): the push rewrites every DECIDED min/max
+         *  clause to a copy, so a min/max clause surviving in the
+         *  leaf's pushed tape means this box straddles an unresolved
+         *  crease choice.  Those leaves sample a midpoint-refined
+         *  lattice - the chip plateau is guard x density, and the
+         *  lattice is the lever (MESH-NEXT density round).  */
+        if (dense_levels() > 0 && tape_pairs(sub, nullptr, 0) > 0)
+        {
+            ++c.soup.dense_blocks;
+            std::vector<float> RX(r.X, r.X + r.ni + 1),
+                               RY(r.Y, r.Y + r.nj + 1),
+                               RZ(r.Z, r.Z + r.nk + 1);
+            for (int lv = 0; lv < dense_levels(); ++lv)
+            {
+                refine_axis(RX);
+                refine_axis(RY);
+                refine_axis(RZ);
+            }
+            Region rd = r;
+            rd.ni = uint32_t(RX.size() - 1);
+            rd.nj = uint32_t(RY.size() - 1);
+            rd.nk = uint32_t(RZ.size() - 1);
+            rd.voxels = uint64_t(rd.ni) * rd.nj * rd.nk;
+            rd.X = RX.data();
+            rd.Y = RY.data();
+            rd.Z = RZ.data();
+            sample_block(c, rd, sub);
+        }
+        else
+            sample_block(c, r, sub);
+    }
     else
     {
         Region octants[8];
@@ -925,6 +1000,7 @@ struct CreaseTracer
     Tape* base;
     TapePair tp;
     float sp;                        // lattice spacing
+    float step;                      // march step (0.5 sp / dense)
     float bmin[3], bmax[3];          // region bounds + margin
 
     /*  7-tap probe at p: pair values/gradients (prefix eval) and
@@ -1071,7 +1147,7 @@ struct CreaseTracer
                std::vector<DSurfPoint>& out_pts,
                volatile int* halt) const
     {
-        const float step = 0.5f * sp;
+        const float step = this->step;
         const float trim = 0.05f * sp;
         float p[3] = { p0[0], p0[1], p0[2] };
         float tprev[3] = { dir * t0[0], dir * t0[1], dir * t0[2] };
@@ -1179,6 +1255,14 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
     tr.ctx = ctx;
     tr.base = base;
     tr.sp = sp;
+    /*  NOT scaled by the dense round (measured 2026-07-15): halving
+     *  the march step left the chip chord distribution byte-
+     *  identical (chords track the LATTICE pitch, not the polyline
+     *  pitch), doubled the constraint count, and pushed the kink-
+     *  straddle noise past the [.dtrace] bound (1.9e-3 vs 1.5e-3).
+     *  The snap pass needs only the polyline GEOMETRY, whose chord
+     *  sagitta at 0.5 sp is already ~1e-3 sp.  */
+    tr.step = 0.5f * sp;
     tr.bmin[0] = r.X[0] - sp;
     tr.bmax[0] = r.X[r.ni] + sp;
     tr.bmin[1] = r.Y[0] - sp;
@@ -1731,7 +1815,10 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
      *  cells apart, all on the crease.  The crease polyline IS the
      *  surface there; the vertex adds nothing.  Sign witnesses
      *  (inside/outside samples) are never dropped.  */
-    const float drop_r = 0.35f * soup.spacing;
+    /*  Scaled by the dense round: the corridor exists along the
+     *  constrained creases, which is exactly where the dense lattice
+     *  fired - sliver pairing distance tracks the local pitch.  */
+    const float drop_r = 0.35f * soup.spacing / dense_factor();
     /*  Feature points referenced by an accepted segment are the
      *  chain itself and always enter; the rest of the QEF clump
      *  (curved creases run 26-51% duplicates, merged out of the
@@ -2012,16 +2099,40 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     int repair_round = 0;
     std::vector<VH> xvh;   // extraction order -> vertex handle
     std::vector<std::pair<CH, CH>> tri_cells;  // per emitted tri
+    /*  Residual chip edges of the FINAL extraction, stashed for the
+     *  crease-snap pass (refilled every detection round; the
+     *  vertex/triangle indices go stale the moment a re-extraction
+     *  happens, so the MAX_REPAIR exit clears them).  */
+    std::vector<uint32_t> snap_va, snap_vb, snap_t1, snap_t2;
     for (;; ++repair_round)
     {
     /*  Stage C: cell signs.  After convergence a finite cell cannot
      *  contain both signs (except in the crease band, where i/o
      *  edges are deliberately shadowed), so a non-surface vertex
-     *  decides it; all-surface AND mixed cells ask the oracle at
-     *  their centroid (batched).  Infinite cells are outside by
-     *  definition.  */
+     *  decides it; all-surface AND mixed cells ask the oracle
+     *  (batched).  Infinite cells are outside by definition.
+     *
+     *  All-surface cells get DC semantics (STIBIUM_DMESH_DC=0
+     *  reverts to centroid-only): at a concave crease the wedge
+     *  corner lives inside a tet whose four vertices are all on
+     *  the surface and whose CENTROID is in air - centroid-only
+     *  classification clips the corner, and the clipped facet is
+     *  exactly the measured chip (worst-depth plateau ~0.196 sp,
+     *  invariant under 1x/2x/4x band density and both repair
+     *  strategies: the repair keep-out and the chip target scale
+     *  together, so insert-repair can never reach it).  Probe the
+     *  four face barycenters too, and call the cell INSIDE when
+     *  any probe reads materially negative: the chip facet's own
+     *  barycenter is the deep-material witness.  Bias is one-
+     *  sided by design - at a convex crease the mirror case fills
+     *  an air notch (volume-adding, the visually-benign species,
+     *  and the wart machinery already handles it).  */
+    static const char* dc_env = getenv("STIBIUM_DMESH_DC");
+    const bool dc_cells = !dc_env || atoi(dc_env) != 0;
     std::vector<CH> oracle_cells;
+    std::vector<uint8_t> oracle_allsurf;
     std::vector<float> cxs, cys, czs, cvals;
+    std::vector<float> ctol;   // per-cell material threshold
     for (auto c = dt.finite_cells_begin();
          c != dt.finite_cells_end(); ++c)
     {
@@ -2041,17 +2152,50 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         }
         if (!sign || mixed)
         {
-            double x = 0, y = 0, z = 0;
+            double p[4][3];
             for (int i = 0; i < 4; ++i)
             {
-                x += c->vertex(i)->point().x();
-                y += c->vertex(i)->point().y();
-                z += c->vertex(i)->point().z();
+                p[i][0] = c->vertex(i)->point().x();
+                p[i][1] = c->vertex(i)->point().y();
+                p[i][2] = c->vertex(i)->point().z();
             }
+            const double x = p[0][0]+p[1][0]+p[2][0]+p[3][0],
+                         y = p[0][1]+p[1][1]+p[2][1]+p[3][1],
+                         z = p[0][2]+p[1][2]+p[2][2]+p[3][2];
             oracle_cells.push_back(c);
+            const bool allsurf = dc_cells && !mixed && !sign;
+            oracle_allsurf.push_back(allsurf ? 1 : 0);
             cxs.push_back(float(x / 4));
             cys.push_back(float(y / 4));
             czs.push_back(float(z / 4));
+            if (allsurf)
+            {
+                /*  Four face barycenters (face i omits vertex i)  */
+                for (int i = 0; i < 4; ++i)
+                {
+                    cxs.push_back(float((x - p[i][0]) / 3));
+                    cys.push_back(float((y - p[i][1]) / 3));
+                    czs.push_back(float((z - p[i][2]) / 3));
+                }
+                /*  Material bar: same 3%-of-edge species test the
+                 *  chip detector uses, on the cell's longest edge
+                 *  (near-tangent faces of legitimate air cells
+                 *  read |f| ~ sagitta, far below it).  */
+                double emax2 = 0;
+                for (int i = 0; i < 4; ++i)
+                    for (int j = i + 1; j < 4; ++j)
+                    {
+                        const double dx = p[i][0]-p[j][0],
+                                     dy = p[i][1]-p[j][1],
+                                     dz = p[i][2]-p[j][2];
+                        const double e2 = dx*dx + dy*dy + dz*dz;
+                        if (e2 > emax2)
+                            emax2 = e2;
+                    }
+                ctol.push_back(0.03f * float(sqrt(emax2)));
+            }
+            else
+                ctol.push_back(0);
             c->info() = 0;
         }
         else
@@ -2060,8 +2204,25 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     if (!oracle_cells.empty())
     {
         eval_points(deck_base(deck), ctx, cxs, cys, czs, cvals);
+        size_t at = 0;
         for (size_t i = 0; i < oracle_cells.size(); ++i)
-            oracle_cells[i]->info() = cvals[i] < 0 ? -1 : 1;
+        {
+            if (oracle_allsurf[i])
+            {
+                float fmin = cvals[at];
+                for (int q = 1; q < 5; ++q)
+                    fmin = std::min(fmin, cvals[at + q]);
+                oracle_cells[i]->info() =
+                        fmin < -ctol[i] ? -1
+                        : cvals[at] < 0 ? -1 : 1;
+                at += 5;
+            }
+            else
+            {
+                oracle_cells[i]->info() = cvals[at] < 0 ? -1 : 1;
+                ++at;
+            }
+        }
     }
 
     /*  Extraction: facets whose three corners are surface vertices,
@@ -2133,6 +2294,10 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         tri_cells.push_back({ c, n });
     }
 
+    snap_va.clear();   // stale after this re-extraction
+    snap_vb.clear();
+    snap_t1.clear();
+    snap_t2.clear();
     if (repair_round >= MAX_REPAIR || *halt)
         break;
 
@@ -2181,7 +2346,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     };
     std::vector<float> wx2, wy2, wz2, whs, wclamp;
     std::vector<float> eax, eay, eaz, ebx, eby, ebz;
-    std::vector<uint32_t> wt1, wt2;
+    std::vector<uint32_t> wt1, wt2, wva, wvb;
     for (const auto& [k, pr] : em)
     {
         if (repair_mode < 2)
@@ -2213,6 +2378,8 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         ebz.push_back(B2[2]);
         wt1.push_back(pr.first);
         wt2.push_back(pr.second);
+        wva.push_back(va);
+        wvb.push_back(vb);
     }
     if (wx2.empty())
         break;
@@ -2240,6 +2407,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         std::vector<uint8_t> cspec;   // 1 = chip (f < 0)
         uint64_t n_chip = 0, n_wart = 0;
         float worst_chip = 0;
+        size_t worst_i = SIZE_MAX;
         for (size_t i = 0; i < wx2.size(); ++i)
         {
             const float f = gv[i*7];
@@ -2261,7 +2429,10 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 cspec.push_back(f < 0 ? 1 : 0);
                 (f < 0 ? n_chip : n_wart)++;
                 if (f < 0 && dist > worst_chip)
+                {
                     worst_chip = dist;
+                    worst_i = i;
+                }
             }
         }
         static const char* chip_env =
@@ -2273,6 +2444,23 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     (unsigned long long)n_chip,
                     (unsigned long long)n_wart,
                     worst_chip / soup.spacing);
+        if (chip_env && worst_i != SIZE_MAX)
+            fprintf(stderr, "  worst chip at (%.4f, %.4f, %.4f) "
+                    "edge %.3f sp  A(%.4f, %.4f, %.4f) "
+                    "B(%.4f, %.4f, %.4f)\n",
+                    wx2[worst_i], wy2[worst_i], wz2[worst_i],
+                    wclamp[worst_i] / soup.spacing,
+                    eax[worst_i], eay[worst_i], eaz[worst_i],
+                    ebx[worst_i], eby[worst_i], ebz[worst_i]);
+        for (size_t q = 0; q < cand.size(); ++q)
+            if (cspec[q])
+            {
+                const size_t i = cand[q];
+                snap_va.push_back(wva[i]);
+                snap_vb.push_back(wvb[i]);
+                snap_t1.push_back(wt1[i]);
+                snap_t2.push_back(wt2[i]);
+            }
         if (cand.empty())
             break;
 
@@ -2519,8 +2707,20 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             /*  Species 2 (SDB centers) skip the segment keep-out:
              *  they are principled insert locations, gated by the
              *  crowding guard and refereed by the counters.  */
-            const float ko = (kspec[i] == 2 ? 0.0f
-                    : kspec[i] ? 0.35f : 0.75f) * soup.spacing;
+            /*  Density round 2026-07-15: the sliver radius the
+             *  keep-out protects scales with the LOCAL pitch, not
+             *  the base pitch - chips live in the crease band,
+             *  where the dense lattice divides it.  Keeping the
+             *  RATIO at the measured-good 0.35 x pitch preserves
+             *  the sweep's verdict at the band's scale (fixed
+             *  0.35 sp starves the band entirely: 281/281 blocked,
+             *  depth stuck at 0.375 sp; 0.6 x chord-length proxy
+             *  ditto - chords ARE one local pitch, so it resolved
+             *  to 0.30 sp and still blocked everything).  */
+            const float ko = kspec[i] == 2 ? 0.0f
+                    : kspec[i]
+                        ? 0.35f * soup.spacing / dense_factor()
+                        : 0.75f * soup.spacing;
             if (ko > 0 && !cseg.empty() &&
                 near_crease(kx[i], ky[i], kz[i], ko))
             {
@@ -2821,6 +3021,302 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             }
             out->split_verts = split;
         }
+    }
+
+    /*  Crease-snap pass (STIBIUM_DMESH_SNAP=0 disables): the
+     *  residual chips are chords of MOSTLY-AIR tets whose bottom
+     *  facet dips under a concave crease - a facet-level defect no
+     *  cell classification or insert-repair can reach (the chip
+     *  target and the repair keep-out both scale with local pitch,
+     *  so the blocked residue is density-invariant: plateau
+     *  0.196/0.198/0.192 sp at 1x/2x/4x band density, both repair
+     *  strategies).  But the traced polylines know EXACTLY where
+     *  the surface corner is: split each residual chip edge's two
+     *  triangles at the nearest traced-crease point, tenting the
+     *  chord up onto the crease.  Pure output surgery - no CGAL
+     *  insert, no Steiner, no keep-out, manifoldness preserved by
+     *  construction (the tent's new edges each get exactly two
+     *  triangles, the apex fan is closed).  */
+    {
+        static const char* snap_env = getenv("STIBIUM_DMESH_SNAP");
+        const bool snap_on = !snap_env || atoi(snap_env) != 0;
+        uint64_t snapped = 0, snap_skipped = 0;
+        uint64_t skip_far = 0, skip_hits = 0;
+        if (snap_on && !snap_va.empty() && !soup.tchains.empty())
+        {
+            struct Seg { float ax, ay, az, bx, by, bz; };
+            std::vector<Seg> segs;
+            for (size_t c = 0; c < soup.tchains.size(); ++c)
+            {
+                const auto& ch = soup.tchains[c];
+                for (size_t i = 0; i + 1 < ch.size(); ++i)
+                {
+                    const DSurfPoint& a = soup.surface[ch[i]];
+                    const DSurfPoint& b = soup.surface[ch[i + 1]];
+                    segs.push_back({ a.x, a.y, a.z, b.x, b.y, b.z });
+                }
+                if (soup.tclosed[c] && ch.size() >= 3)
+                {
+                    const DSurfPoint& a = soup.surface[ch.back()];
+                    const DSurfPoint& b = soup.surface[ch.front()];
+                    segs.push_back({ a.x, a.y, a.z, b.x, b.y, b.z });
+                }
+            }
+            const auto pos_eq = [&](uint32_t v, const float* p) {
+                return out->verts[3*v] == p[0] &&
+                       out->verts[3*v + 1] == p[1] &&
+                       out->verts[3*v + 2] == p[2];
+            };
+            const auto vpos_hash = [&](uint32_t v) {
+                return coord_hash(out->verts[3*v],
+                                  out->verts[3*v + 1],
+                                  out->verts[3*v + 2]);
+            };
+            /*  Consecutive chips along a crease share triangles, so
+             *  the stashed triangle indices go stale as soon as a
+             *  neighbour is snapped.  Snap in WAVES: each wave
+             *  re-finds every pending edge by POSITION (stable
+             *  under both the manifold pass's coincident-duplicate
+             *  rewrites and earlier snaps), and skips triangles
+             *  already touched this wave.  */
+            std::vector<uint8_t> done(snap_va.size(), 0);
+            bool progress = true;
+            while (progress)
+            {
+                progress = false;
+                std::unordered_map<uint64_t,
+                        std::vector<std::pair<uint32_t, int>>> pem;
+                for (uint32_t t = 0;
+                     t < uint32_t(out->tris.size() / 3); ++t)
+                    for (int e = 0; e < 3; ++e)
+                    {
+                        const uint64_t h =
+                                vpos_hash(out->tris[3*t + e]) ^
+                                vpos_hash(out->tris[3*t + (e+1)%3]);
+                        pem[h].push_back({ t, e });
+                    }
+                std::unordered_set<uint32_t> touched;
+                for (size_t s = 0; s < snap_va.size(); ++s)
+                {
+                    if (done[s])
+                        continue;
+                    const float A2[3] = {
+                            out->verts[3*snap_va[s]],
+                            out->verts[3*snap_va[s] + 1],
+                            out->verts[3*snap_va[s] + 2] };
+                    const float B2[3] = {
+                            out->verts[3*snap_vb[s]],
+                            out->verts[3*snap_vb[s] + 1],
+                            out->verts[3*snap_vb[s] + 2] };
+                    const float mx = (A2[0] + B2[0]) * 0.5f,
+                                my = (A2[1] + B2[1]) * 0.5f,
+                                mz = (A2[2] + B2[2]) * 0.5f;
+                    /*  Nearest point on the traced polylines  */
+                    float best = 1e30f, px = 0, py = 0, pz = 0;
+                    for (const Seg& sg : segs)
+                    {
+                        const float bx2 = sg.bx - sg.ax,
+                                    by2 = sg.by - sg.ay,
+                                    bz2 = sg.bz - sg.az;
+                        const float qx = mx - sg.ax,
+                                    qy = my - sg.ay,
+                                    qz = mz - sg.az;
+                        const float bb = bx2*bx2 + by2*by2 + bz2*bz2;
+                        float t2 = bb > 0
+                                ? (qx*bx2 + qy*by2 + qz*bz2) / bb
+                                : 0;
+                        t2 = t2 < 0 ? 0 : t2 > 1 ? 1 : t2;
+                        const float cx2 = sg.ax + t2*bx2,
+                                    cy2 = sg.ay + t2*by2,
+                                    cz2 = sg.az + t2*bz2;
+                        const float dx = mx - cx2, dy = my - cy2,
+                                    dz = mz - cz2;
+                        const float d2 = dx*dx + dy*dy + dz*dz;
+                        if (d2 < best)
+                        {
+                            best = d2;
+                            px = cx2; py = cy2; pz = cz2;
+                        }
+                    }
+                    /*  Only crease-local chips: a chord further
+                     *  than a cell from every polyline is not a
+                     *  wedge shortcut and the tent would stab
+                     *  somewhere it doesn't belong.  */
+                    if (best > soup.spacing * soup.spacing)
+                    {
+                        done[s] = 1;
+                        ++snap_skipped;
+                        ++skip_far;
+                        continue;
+                    }
+                    /*  Locate the edge's two triangles by position.
+                     *  Coincident sheet duplicates (pinch splits)
+                     *  alias the position key - demand EXACTLY two
+                     *  real matches or leave the edge alone.  */
+                    const uint64_t h = coord_hash(A2[0], A2[1],
+                                                  A2[2]) ^
+                                       coord_hash(B2[0], B2[1],
+                                                  B2[2]);
+                    const auto pf = pem.find(h);
+                    std::pair<uint32_t, int> hit[2];
+                    int nhit = 0;
+                    bool stale = false;
+                    if (pf != pem.end())
+                        for (const auto& [t, e] : pf->second)
+                        {
+                            /*  An entry whose triangle a snap
+                             *  already rewrote this wave no longer
+                             *  matches by position - the edge moved
+                             *  into a tent triangle pem can't see
+                             *  until the next wave.  Defer, don't
+                             *  conclude.  */
+                            if (touched.count(t))
+                            {
+                                stale = true;
+                                continue;
+                            }
+                            const uint32_t i0 = out->tris[3*t + e];
+                            const uint32_t i1 =
+                                    out->tris[3*t + (e+1) % 3];
+                            const bool fwd = pos_eq(i0, A2) &&
+                                             pos_eq(i1, B2);
+                            const bool rev = pos_eq(i0, B2) &&
+                                             pos_eq(i1, A2);
+                            if (!fwd && !rev)
+                                continue;
+                            if (nhit < 2)
+                                hit[nhit] = { t, e };
+                            ++nhit;
+                        }
+                    if (nhit != 2)
+                    {
+                        if (stale)
+                            continue;     // retry next wave
+                        done[s] = 1;
+                        ++snap_skipped;
+                        ++skip_hits;
+                        if (getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+                            fprintf(stderr, "  SNAP skip nhit=%d "
+                                    "at (%.4f, %.4f, %.4f)\n",
+                                    nhit, mx, my, mz);
+                        continue;
+                    }
+                    if (touched.count(hit[0].first) ||
+                        touched.count(hit[1].first))
+                        continue;         // next wave
+                    const uint32_t pi =
+                            uint32_t(out->verts.size() / 3);
+                    out->verts.push_back(px);
+                    out->verts.push_back(py);
+                    out->verts.push_back(pz);
+                    for (int q = 0; q < 2; ++q)
+                    {
+                        const uint32_t t = hit[q].first;
+                        const int e = hit[q].second;
+                        const uint32_t v0 = out->tris[3*t + e];
+                        const uint32_t v1 =
+                                out->tris[3*t + (e+1) % 3];
+                        const uint32_t v2 =
+                                out->tris[3*t + (e+2) % 3];
+                        out->tris[3*t] = v0;
+                        out->tris[3*t + 1] = pi;
+                        out->tris[3*t + 2] = v2;
+                        out->tris.push_back(pi);
+                        out->tris.push_back(v1);
+                        out->tris.push_back(v2);
+                        touched.insert(t);
+                    }
+                    done[s] = 1;
+                    ++snapped;
+                    progress = true;
+                }
+            }
+            if (getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+                fprintf(stderr, "SNAP: %llu chip edges tented onto "
+                        "the crease, %llu skipped (%llu far, "
+                        "%llu hits)\n",
+                        (unsigned long long)snapped,
+                        (unsigned long long)snap_skipped,
+                        (unsigned long long)skip_far,
+                        (unsigned long long)skip_hits);
+        }
+        out->snapped = snapped;
+    }
+
+    /*  End-of-pipeline chip referee (diagnostic): the repair-loop
+     *  metric measures the raw extraction, so the snap pass needs
+     *  its own honest number - a full sweep of the FINAL mesh.  */
+    if (getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+    {
+        std::unordered_set<uint64_t> eseen;
+        std::vector<float> fxs, fys, fzs, fhs, flen, fv;
+        for (size_t t = 0; t < out->tris.size(); t += 3)
+            for (int e = 0; e < 3; ++e)
+            {
+                uint64_t a = out->tris[t + e];
+                uint64_t b = out->tris[t + (e + 1) % 3];
+                if (a > b)
+                    std::swap(a, b);
+                if (!eseen.insert((a << 32) | b).second)
+                    continue;
+                const float* A2 = &out->verts[3*a];
+                const float* B2 = &out->verts[3*b];
+                const float ex = B2[0]-A2[0], ey = B2[1]-A2[1],
+                            ez = B2[2]-A2[2];
+                const float len =
+                        sqrtf(ex*ex + ey*ey + ez*ez);
+                if (!(len > 0))
+                    continue;
+                fxs.push_back((A2[0]+B2[0]) * 0.5f);
+                fys.push_back((A2[1]+B2[1]) * 0.5f);
+                fzs.push_back((A2[2]+B2[2]) * 0.5f);
+                fhs.push_back(len * 0.01f);
+                flen.push_back(len);
+            }
+        std::vector<float> gxs(fxs.size()*7), gys(fxs.size()*7),
+                gzs(fxs.size()*7);
+        for (size_t i = 0; i < fxs.size(); ++i)
+        {
+            for (int q = 0; q < 7; ++q)
+            {
+                gxs[i*7+q] = fxs[i];
+                gys[i*7+q] = fys[i];
+                gzs[i*7+q] = fzs[i];
+            }
+            gxs[i*7+1] += fhs[i];  gxs[i*7+2] -= fhs[i];
+            gys[i*7+3] += fhs[i];  gys[i*7+4] -= fhs[i];
+            gzs[i*7+5] += fhs[i];  gzs[i*7+6] -= fhs[i];
+        }
+        eval_points(deck_base(deck), ctx, gxs, gys, gzs, fv);
+        float worst = 0;
+        float wpos[3] = { 0, 0, 0 };
+        uint64_t nfinal = 0;
+        for (size_t i = 0; i < fxs.size(); ++i)
+        {
+            const float f = fv[i*7];
+            const float h2 = 2 * fhs[i];
+            const float gx = (fv[i*7+1]-fv[i*7+2]) / h2;
+            const float gy = (fv[i*7+3]-fv[i*7+4]) / h2;
+            const float gz = (fv[i*7+5]-fv[i*7+6]) / h2;
+            const float gl = sqrtf(gx*gx + gy*gy + gz*gz);
+            if (!(gl > 0) || !std::isfinite(f) || f >= 0)
+                continue;
+            const float dist = fabsf(f) / gl;
+            if (dist <= flen[i] * 0.03f)
+                continue;
+            ++nfinal;
+            if (dist > worst)
+            {
+                worst = dist;
+                wpos[0] = fxs[i];
+                wpos[1] = fys[i];
+                wpos[2] = fzs[i];
+            }
+        }
+        fprintf(stderr, "FINAL mesh: %llu chip edges, worst depth "
+                "%.3f sp at (%.4f, %.4f, %.4f)\n",
+                (unsigned long long)nfinal, worst / soup.spacing,
+                wpos[0], wpos[1], wpos[2]);
     }
 
     /*  Quality accounting: closed 2-manifold means every edge is

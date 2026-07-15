@@ -54,6 +54,10 @@ struct DSoup
      *  the block agrees on sign: a candidate hidden thin feature.
      *  Stage-D drill-down hook; counted from day one.  */
     uint64_t hidden_candidates = 0;
+    /*  Leaves whose pushed tape kept a live min/max clause (an
+     *  unresolved crease choice) - sampled one lattice level denser
+     *  (STIBIUM_DMESH_DENSE; the crease-band density round).  */
+    uint64_t dense_blocks = 0;
     /*  QEF-placed sharp-feature points appended to `surface`.  */
     uint64_t feature_points = 0;
     /*  Crossings replaced by their cell's feature point.  */
@@ -123,6 +127,12 @@ struct DMesh
     /*  Manifold pass (STIBIUM_DMESH_MANIFOLD, default on): pinched
      *  fans split into one coincident vertex per surface sheet.  */
     uint64_t split_verts = 0;
+    /*  Crease-snap pass (STIBIUM_DMESH_SNAP, default on): residual
+     *  chip edges split at the nearest traced-crease point - the
+     *  output-mesh cure for the corner-clipping tets that insert-
+     *  repair can never reach (keep-out and chip target scale
+     *  together at every band density; measured 2026-07-15).  */
+    uint64_t snapped = 0;
 };
 
 /*  Stages B+C: point soup -> Delaunay -> refine -> extract.
