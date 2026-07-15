@@ -530,6 +530,67 @@ std::vector<DSurfPoint> bisect_pending(const Deck* deck, TapeCtx* ctx,
 
 }  // namespace
 
+namespace {
+
+/*  Batched Newton projection onto the surface: p -= f * grad /
+ *  |grad|^2, two rounds, gradients by 6-tap central differences.
+ *  Steps are clamped to `clamp` (callers pass the local edge
+ *  length) so a bad gradient can't launch a point.  */
+void project_points(const Deck* deck, TapeCtx* ctx,
+                    std::vector<float>& px, std::vector<float>& py,
+                    std::vector<float>& pz, const std::vector<float>& hs,
+                    const std::vector<float>& clamp)
+{
+    const size_t n = px.size();
+    Tape* base = deck_base(deck);
+    std::vector<float> xs, ys, zs, vals;
+    for (int round = 0; round < 2; ++round)
+    {
+        xs.resize(n * 7);
+        ys.resize(n * 7);
+        zs.resize(n * 7);
+        for (size_t i = 0; i < n; ++i)
+        {
+            const float h = hs[i];
+            for (int q = 0; q < 7; ++q)
+            {
+                xs[i*7 + q] = px[i];
+                ys[i*7 + q] = py[i];
+                zs[i*7 + q] = pz[i];
+            }
+            xs[i*7 + 1] += h;   xs[i*7 + 2] -= h;
+            ys[i*7 + 3] += h;   ys[i*7 + 4] -= h;
+            zs[i*7 + 5] += h;   zs[i*7 + 6] -= h;
+        }
+        eval_points(base, ctx, xs, ys, zs, vals);
+        for (size_t i = 0; i < n; ++i)
+        {
+            const float f = vals[i*7];
+            const float gx = vals[i*7 + 1] - vals[i*7 + 2];
+            const float gy = vals[i*7 + 3] - vals[i*7 + 4];
+            const float gz = vals[i*7 + 5] - vals[i*7 + 6];
+            const float h2 = 2 * hs[i];
+            const float g2 = (gx*gx + gy*gy + gz*gz) / (h2 * h2);
+            if (!(g2 > 0) || !std::isfinite(g2) || !std::isfinite(f))
+                continue;
+            float sx = -f * (gx / h2) / g2;
+            float sy = -f * (gy / h2) / g2;
+            float sz = -f * (gz / h2) / g2;
+            const float sl = sqrtf(sx*sx + sy*sy + sz*sz);
+            if (sl > clamp[i])
+            {
+                const float k = clamp[i] / sl;
+                sx *= k;  sy *= k;  sz *= k;
+            }
+            px[i] += sx;
+            py[i] += sy;
+            pz[i] += sz;
+        }
+    }
+}
+
+}  // namespace
+
 bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                    DMesh* out)
 {
@@ -619,6 +680,18 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
         }
     }
 
+    /*  Stage C runs inside the repair loop: extract, then hunt WARTS
+     *  - fold edges (adjacent-triangle normals disagreeing) whose
+     *  midpoint is OFF the surface.  A fold on a true crease has its
+     *  edge ON the surface and is left alone.  Wart midpoints are
+     *  Newton-projected onto the surface and inserted, and the mesh
+     *  re-extracted, until clean or capped (error-driven insertion,
+     *  after Wang et al. 2025).  */
+    constexpr int MAX_REPAIR = 8;
+    uint64_t repaired_total = 0;
+    int repair_round = 0;
+    for (;; ++repair_round)
+    {
     /*  Stage C: cell signs.  After convergence a finite cell cannot
      *  contain both signs, so any non-surface vertex decides it;
      *  all-surface cells ask the oracle at their centroid (batched).
@@ -721,6 +794,124 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
         out->tris.push_back(cc);
     }
 
+    if (repair_round >= MAX_REPAIR || *halt)
+        break;
+
+    /*  Wart hunt on the freshly extracted mesh.  */
+    std::unordered_map<uint64_t, std::pair<uint32_t, uint32_t>> em;
+    for (uint32_t t = 0; t < out->tris.size() / 3; ++t)
+        for (int e = 0; e < 3; ++e)
+        {
+            uint64_t a = out->tris[3*t + e];
+            uint64_t b = out->tris[3*t + (e + 1) % 3];
+            if (a > b)
+                std::swap(a, b);
+            const uint64_t k = (a << 32) | b;
+            auto it = em.find(k);
+            if (it == em.end())
+                em[k] = { t, UINT32_MAX };
+            else if (it->second.second == UINT32_MAX)
+                it->second.second = t;
+        }
+    const auto tri_normal = [&](uint32_t t, double n[3]) {
+        const float* a = &out->verts[3 * out->tris[3*t]];
+        const float* b = &out->verts[3 * out->tris[3*t + 1]];
+        const float* c2 = &out->verts[3 * out->tris[3*t + 2]];
+        const double ux = b[0]-a[0], uy = b[1]-a[1], uz = b[2]-a[2];
+        const double wx = c2[0]-a[0], wy = c2[1]-a[1], wz = c2[2]-a[2];
+        n[0] = uy*wz - uz*wy;
+        n[1] = uz*wx - ux*wz;
+        n[2] = ux*wy - uy*wx;
+        const double l = sqrt(n[0]*n[0] + n[1]*n[1] + n[2]*n[2]);
+        if (l > 0) { n[0] /= l; n[1] /= l; n[2] /= l; }
+    };
+    std::vector<float> wx2, wy2, wz2, whs, wclamp, wf;
+    for (const auto& [k, pr] : em)
+    {
+        if (pr.second == UINT32_MAX)
+            continue;
+        double n1[3], n2[3];
+        tri_normal(pr.first, n1);
+        tri_normal(pr.second, n2);
+        if (n1[0]*n2[0] + n1[1]*n2[1] + n1[2]*n2[2] >= 0.2)
+            continue;   // no fold here
+        const uint32_t va = uint32_t(k >> 32), vb = uint32_t(k);
+        const float* A2 = &out->verts[3*va];
+        const float* B2 = &out->verts[3*vb];
+        const float ex = B2[0]-A2[0], ey = B2[1]-A2[1],
+                    ez = B2[2]-A2[2];
+        const float len = sqrtf(ex*ex + ey*ey + ez*ez);
+        if (!(len > 0))
+            continue;
+        wx2.push_back((A2[0]+B2[0]) * 0.5f);
+        wy2.push_back((A2[1]+B2[1]) * 0.5f);
+        wz2.push_back((A2[2]+B2[2]) * 0.5f);
+        whs.push_back(len * 0.01f);
+        wclamp.push_back(len);
+    }
+    if (wx2.empty())
+        break;
+
+    /*  Off-surface test: |f| / |grad| estimates distance; only
+     *  midpoints beyond 5% of their edge length are warts.  */
+    {
+        Tape* base2 = deck_base(deck);
+        std::vector<float> gxs(wx2.size()*7), gys(wx2.size()*7),
+                gzs(wx2.size()*7), gv;
+        for (size_t i = 0; i < wx2.size(); ++i)
+        {
+            for (int q = 0; q < 7; ++q)
+            {
+                gxs[i*7+q] = wx2[i];
+                gys[i*7+q] = wy2[i];
+                gzs[i*7+q] = wz2[i];
+            }
+            gxs[i*7+1] += whs[i];  gxs[i*7+2] -= whs[i];
+            gys[i*7+3] += whs[i];  gys[i*7+4] -= whs[i];
+            gzs[i*7+5] += whs[i];  gzs[i*7+6] -= whs[i];
+        }
+        eval_points(base2, ctx, gxs, gys, gzs, gv);
+        std::vector<float> kx, ky, kz, kh, kc;
+        for (size_t i = 0; i < wx2.size(); ++i)
+        {
+            const float f = gv[i*7];
+            const float h2 = 2 * whs[i];
+            const float gx = (gv[i*7+1]-gv[i*7+2]) / h2;
+            const float gy = (gv[i*7+3]-gv[i*7+4]) / h2;
+            const float gz = (gv[i*7+5]-gv[i*7+6]) / h2;
+            const float gl = sqrtf(gx*gx + gy*gy + gz*gz);
+            if (!(gl > 0) || !std::isfinite(f))
+                continue;
+            const float dist = fabsf(f) / gl;
+            if (dist > wclamp[i] * 0.05f)
+            {
+                kx.push_back(wx2[i]);
+                ky.push_back(wy2[i]);
+                kz.push_back(wz2[i]);
+                kh.push_back(whs[i]);
+                kc.push_back(wclamp[i]);
+            }
+        }
+        if (kx.empty())
+            break;
+        project_points(deck, ctx, kx, ky, kz, kh, kc);
+        uint64_t added = 0;
+        for (size_t i = 0; i < kx.size(); ++i)
+        {
+            const auto before = dt.number_of_vertices();
+            auto vh = dt.insert(DPoint3(kx[i], ky[i], kz[i]));
+            if (dt.number_of_vertices() > before)
+            {
+                vh->info() = 0;
+                ++added;
+            }
+        }
+        if (!added)
+            break;
+        repaired_total += added;
+    }
+    }   // repair loop
+
     /*  Quality accounting: closed 2-manifold means every edge is
      *  shared by exactly two triangles.  */
     std::unordered_map<uint64_t, uint32_t> edge_count;
@@ -745,6 +936,8 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
     }
     out->iterations = uint64_t(round);
     out->inserted = inserted;
+    out->repaired = repaired_total;
+    out->repair_rounds = uint64_t(repair_round);
 
     tape_ctx_free(ctx);
     return !*halt;

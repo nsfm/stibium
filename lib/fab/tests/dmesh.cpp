@@ -355,7 +355,9 @@ TEST_CASE("Delaunay vs Manifold DC: head to head", "[.dmeshVS]")
                     .count();
         };
         const uint32_t comps = mesh_components(m);
-        WARN("folds(dot<-0.2): " << mesh_warts(m));
+        WARN("folds(dot<-0.2): " << mesh_warts(m)
+             << "; repaired " << m.repaired << " in "
+             << m.repair_rounds << " rounds");
         WARN(tc.name << ": delaunay " << m.tris.size() / 3
              << " tris in " << ms(t0, t1) << " ms ("
              << m.open_edges << " open, " << m.nonmanifold_edges
@@ -428,6 +430,7 @@ TEST_CASE("Delaunay showcase STLs at higher resolution", "[.dmeshSTL]")
              << mesh_components(m) << " components; folds sharp/"
              << "medium/gentle: " << mesh_warts(m, -0.2f) << "/"
              << mesh_warts(m, 0.2f) << "/" << mesh_warts(m, 0.5f)
-             << " -> " << fname);
+             << "; repaired " << m.repaired << " in "
+             << m.repair_rounds << " rounds -> " << fname);
     }
 }
