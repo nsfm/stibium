@@ -154,9 +154,21 @@ tests `[.dmesh]`, `[.dmeshBC]`, `[.dmeshVS]`):
   surface points).  Any future jitter needs a minimum-distance-to-
   surface guard (the interval oracle can provide one).
 
-Stage D remains: feature points (QEF, reuse Kobbelt machinery),
-hidden-candidate drill-down, error-driven adaptive insertion,
-performance, MT, and the app-facing flag.
+**Feature points: LANDED** (Keeter step 3).  Candidate cells
+(>= 3 crossing edges) probe normals at their crossings (batched
+central differences); a normal spread past ~25 degrees marks a
+crease and a singular-value-clamped SVD QEF places the feature
+point, rejected if it escapes its cell.  Verified: the sphere
+grows ZERO feature points (no false creases on smooth surfaces);
+the cube grows 320 sitting on the surface to 2e-7 and its volume
+error drops 1.76% -> 0.62%; union creases get points to |f| <=
+1.3e-3.  Nate's eyeball findings (chamfered cube edges, blisters
+at edges, rough union seams) were all this one missing organ.
+
+Stage D remains: hidden-candidate drill-down, error-driven
+adaptive insertion, performance (CGAL predicate fallbacks - jitter
+tried and reverted, see above; next: shell-thinning + incremental
+edge scans), MT, and the app-facing flag.
 
 ## Open questions for Nate
 
