@@ -2231,6 +2231,8 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         }
         eval_points(base2, ctx, gxs, gys, gzs, gv);
         std::vector<size_t> cand;
+        std::vector<uint8_t> cspec;   // 1 = chip (f < 0)
+        uint64_t n_chip = 0, n_wart = 0;
         for (size_t i = 0; i < wx2.size(); ++i)
         {
             const float f = gv[i*7];
@@ -2243,18 +2245,42 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 continue;
             const float dist = fabsf(f) / gl;
             if (dist > wclamp[i] * 0.03f)
+            {
                 cand.push_back(i);
+                /*  Sign of f at the sagging midpoint: f > 0 =
+                 *  chord through EMPTY space (a wart), f < 0 =
+                 *  chord through MATERIAL (a chip - the concave
+                 *  species, diagnosed by eyeball 2026-07-15).  */
+                cspec.push_back(f < 0 ? 1 : 0);
+                (f < 0 ? n_chip : n_wart)++;
+            }
         }
+        static const char* chip_env =
+                getenv("STIBIUM_DMESH_CHIP_DEBUG");
+        if (chip_env && (n_chip || n_wart))
+            fprintf(stderr, "REPAIR round %d: %llu chips (f<0), "
+                    "%llu warts (f>0)\n", repair_round,
+                    (unsigned long long)n_chip,
+                    (unsigned long long)n_wart);
         if (cand.empty())
             break;
 
         std::vector<float> kx, ky, kz, kh, kc;
+        std::vector<uint8_t> kspec;
         if (repair_mode >= 2)
         {
-            /*  Crease-seek: a midpoint split of a crease-crossing
-             *  chord is self-similar and never converges; split at
-             *  the |f| peak along the chord instead - the branch
-             *  switch, i.e. the crease.  */
+            /*  Warts (chords through EMPTY space) crease-seek: a
+             *  midpoint split of a crease-crossing chord is
+             *  self-similar and never converges; split at the |f|
+             *  peak along the chord instead - the branch switch,
+             *  i.e. the crease.  Chips (chords through MATERIAL)
+             *  do NOT seek the crease: their |f| peak IS the
+             *  corner, which the constraint already owns - a
+             *  crease-seek target there is exactly what the
+             *  keep-out must block (measured: 87 of csg's 90
+             *  candidates blocked, chips shipped).  Chips take
+             *  their midpoint, which Newton-projects OUTWARD onto
+             *  the nearest face, safely off the polyline.  */
             constexpr int NSAMP = 15;
             std::vector<float> sx(cand.size() * NSAMP),
                     sy(cand.size() * NSAMP),
@@ -2274,48 +2300,74 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             for (size_t q = 0; q < cand.size(); ++q)
             {
                 const size_t i = cand[q];
-                int best = 0;
-                float bf = -1;
-                for (int u = 0; u < NSAMP; ++u)
+                if (cspec[q])
                 {
-                    const float av = fabsf(sv[q*NSAMP + u]);
-                    if (std::isfinite(av) && av > bf)
-                    {
-                        bf = av;
-                        best = u;
-                    }
+                    kx.push_back(wx2[i]);
+                    ky.push_back(wy2[i]);
+                    kz.push_back(wz2[i]);
                 }
-                kx.push_back(sx[q*NSAMP + best]);
-                ky.push_back(sy[q*NSAMP + best]);
-                kz.push_back(sz[q*NSAMP + best]);
+                else
+                {
+                    int best = 0;
+                    float bf = -1;
+                    for (int u = 0; u < NSAMP; ++u)
+                    {
+                        const float av = fabsf(sv[q*NSAMP + u]);
+                        if (std::isfinite(av) && av > bf)
+                        {
+                            bf = av;
+                            best = u;
+                        }
+                    }
+                    kx.push_back(sx[q*NSAMP + best]);
+                    ky.push_back(sy[q*NSAMP + best]);
+                    kz.push_back(sz[q*NSAMP + best]);
+                }
                 kh.push_back(whs[i]);
                 kc.push_back(wclamp[i]);
+                kspec.push_back(cspec[q]);
             }
         }
         else
         {
-            for (const size_t i : cand)
+            for (size_t q = 0; q < cand.size(); ++q)
             {
+                const size_t i = cand[q];
                 kx.push_back(wx2[i]);
                 ky.push_back(wy2[i]);
                 kz.push_back(wz2[i]);
                 kh.push_back(whs[i]);
                 kc.push_back(wclamp[i]);
+                kspec.push_back(cspec[q]);
             }
         }
         project_points_impl(deck, ctx, kx, ky, kz, kh, kc);
         uint64_t added = 0;
+        uint64_t blk_keepout = 0, blk_crowd = 0;
         for (size_t i = 0; i < kx.size(); ++i)
         {
             /*  Repair keep-out: the constrained crease repairs
              *  itself; only the smooth field is ours to press (an
              *  insert on a constrained edge destroys it and the
              *  re-conforming Steiner point lands a sliver away -
-             *  the pinch factory, measured 2026-07-15).  */
+             *  the pinch factory, measured 2026-07-15).  Chip
+             *  repairs land ON a face, not the crease, so they
+             *  only need the sliver radius - 0.75 would starve
+             *  them entirely (measured).  */
+            /*  Chip keep-out swept 2026-07-15: 0.75 starves chips
+             *  entirely (87 blocked, 0 fixed); 0.15 escalates
+             *  (near-crease inserts spawn new sliver chords faster
+             *  than they fix - 17 -> 31 over rounds, pinch splits
+             *  appear); 0.35 presses monotonically 87 -> 17 with
+             *  zero topology damage.  */
+            const float ko = (kspec[i] ? 0.35f : 0.75f) *
+                    soup.spacing;
             if (!cseg.empty() &&
-                near_crease(kx[i], ky[i], kz[i],
-                            0.75f * soup.spacing))
+                near_crease(kx[i], ky[i], kz[i], ko))
+            {
+                ++blk_keepout;
                 continue;
+            }
             const TPoint pt(kx[i], ky[i], kz[i]);
             if (repair_mode >= 2)
             {
@@ -2329,7 +2381,10 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                             nv->point(), pt);
                     const double r = 0.25 * kc[i];
                     if (d2 < r * r)
+                    {
+                        ++blk_crowd;
                         continue;
+                    }
                 }
             }
             const auto before = dt.number_of_vertices();
@@ -2341,6 +2396,13 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 ++added;
             }
         }
+        if (chip_env)
+            fprintf(stderr, "REPAIR round %d: inserted %llu, "
+                    "keep-out blocked %llu, crowding blocked "
+                    "%llu\n", repair_round,
+                    (unsigned long long)added,
+                    (unsigned long long)blk_keepout,
+                    (unsigned long long)blk_crowd);
         if (!added)
             break;
         repaired_total += added;
