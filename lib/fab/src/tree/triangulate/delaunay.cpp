@@ -805,6 +805,11 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt)
 #include <CGAL/Delaunay_triangulation_3.h>
 #include <CGAL/Triangulation_vertex_base_with_info_3.h>
 #include <CGAL/Triangulation_cell_base_with_info_3.h>
+#include <CGAL/Triangulation_3.h>
+#include <CGAL/Conforming_constrained_Delaunay_triangulation_3.h>
+#include <CGAL/spatial_sort.h>
+#include <CGAL/Spatial_sort_traits_adapter_3.h>
+#include <CGAL/property_map.h>
 
 namespace {
 
@@ -814,6 +819,26 @@ using Cb  = CGAL::Triangulation_cell_base_with_info_3<int8_t, K>;
 using Tds = CGAL::Triangulation_data_structure_3<Vb, Cb>;
 using DT  = CGAL::Delaunay_triangulation_3<K, Tds>;
 using DPoint3 = DT::Point;
+
+/*  The constrained path (MESH-NEXT, constrained-crease round):
+ *  CGAL 6.2's conforming constrained Delaunay triangulation, with
+ *  our info bases STACKED under its bases (both take their base
+ *  class as the second template parameter and derive from it).
+ *  The documented wrapper class only builds from a finished PLC;
+ *  incremental insert() and insert_constrained_edge() live on the
+ *  _impl class, which IS the triangulation (derives from
+ *  Conforming_Delaunay_triangulation_3<T_3> deriving from T_3), so
+ *  the whole DT code path ports onto it.  Header-declared public,
+ *  version-pinned by the system CGAL; GPL like the rest of us.  */
+using CVb  = CGAL::Conforming_constrained_Delaunay_triangulation_vertex_base_3<K, Vb>;
+using CCb  = CGAL::Conforming_constrained_Delaunay_triangulation_cell_base_3<K, Cb>;
+using CTds = CGAL::Triangulation_data_structure_3<CVb, CCb>;
+/*  The impl's T_3 must be a Delaunay_triangulation_3 (it uses the
+ *  conflict-region machinery), exactly as the wrapper builds its
+ *  own: Delaunay over the CCDT-based Tds.  Delaunay under the hood
+ *  also keeps nearest_vertex() available for the crowding guard.  */
+using CTr  = CGAL::Delaunay_triangulation_3<K, CTds>;
+using CCDT = CGAL::Conforming_constrained_Delaunay_triangulation_3_impl<CTr>;
 
 /*  Vertex info: -1 inside, +1 outside, 0 surface.  */
 
@@ -855,45 +880,288 @@ std::vector<DSurfPoint> bisect_pending(const Deck* deck, TapeCtx* ctx,
     return out;
 }
 
-}  // namespace
-
-bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
-                   DMesh* out)
+/*  Stages B+C+repair, templated over the triangulation.  The plain
+ *  DT path is the landed reference; CCDT_MODE additionally inserts
+ *  the crease chains as constrained edges BEFORE refinement, making
+ *  crease-crossing chords structurally impossible (the complete
+ *  cure for sharp-point pinches; MESH-NEXT constrained-crease
+ *  round).  The conforming machinery adds Steiner vertices ON the
+ *  constrained segments whenever a constraint would otherwise be
+ *  missing from the Delaunay structure; their info is indeterminate
+ *  (with_info does not initialize), and their correct value is 0 -
+ *  they sit on the crease, which IS the surface - so every insert
+ *  batch is followed by a sweep marking them.  */
+template <bool CCDT_MODE, class Tri>
+bool mesh_impl(const Deck* deck, const DSoup& soup,
+               volatile int* halt, DMesh* out)
 {
-    DSoup soup = delaunay_sample(deck, r, halt);
-    if (*halt)
-        return false;
-    return delaunay_mesh_soup(deck, soup, halt, out);
-}
+    using TPoint = typename Tri::Point;
+    using VH     = typename Tri::Vertex_handle;
+    using CH     = typename Tri::Cell_handle;
 
-bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
-                        volatile int* halt, DMesh* out)
-{
     TapeCtx* ctx = tape_ctx_new(deck);
+    Tri dt;
+
+    /*  Vertex provenance, for the non-manifold debug dump
+     *  (STIBIUM_DMESH_NM_DEBUG): 1 sample, 2 bisected surface,
+     *  3 feature, 4 refinement insert, 5 repair insert.  Vertices
+     *  the conforming machinery created carry no tag and identify
+     *  themselves via ccdt_3_data().  */
+    std::unordered_map<const void*, uint8_t> prov;
+
+    const auto sweep_steiner = [&dt]() {
+        if constexpr (CCDT_MODE)
+            for (auto v = dt.finite_vertices_begin();
+                 v != dt.finite_vertices_end(); ++v)
+                if (v->ccdt_3_data().is_Steiner_vertex_on_edge())
+                    v->info() = 0;
+    };
+
+    /*  Constrained-crease round, step 0 (before ANY insertion):
+     *  extract the chains and let the oracle referee each segment -
+     *  a chain segment is only constrained if it actually lies on
+     *  the crease (|f|/|grad| at 1/4, 1/2, 3/4 within the wart
+     *  tolerance).  The linker can shortcut where two creases cross
+     *  (csg's sharp point: union seam meets the plane circle), and
+     *  a wrong constraint is worse than any wart - it is FORCED
+     *  into the triangulation.  Accepted segments also define the
+     *  crease band used to drop redundant surface vertices and to
+     *  keep repair out.  */
+    std::vector<std::pair<uint32_t, uint32_t>> accepted;
+    std::vector<std::array<float, 6>> cseg;
+    if constexpr (CCDT_MODE)
+    {
+        const DChains chains = delaunay_chains(soup);
+        std::vector<std::pair<uint32_t, uint32_t>> cand;
+        for (size_t c = 0; c < chains.chains.size(); ++c)
+        {
+            const auto& chain = chains.chains[c];
+            for (size_t j = 0; j + 1 < chain.size(); ++j)
+                cand.push_back({ chain[j], chain[j + 1] });
+            if (chains.closed[c] && chain.size() > 2)
+                cand.push_back({ chain.back(), chain.front() });
+        }
+        Tape* base = deck_base(deck);
+        constexpr int NS = 3;
+        std::vector<float> sx, sy, sz, sv, slen, shs;
+        sx.reserve(cand.size() * NS * 7);
+        for (const auto& [a, b] : cand)
+        {
+            const DSurfPoint& A = soup.surface[a];
+            const DSurfPoint& B = soup.surface[b];
+            const float ex = B.x - A.x, ey = B.y - A.y,
+                        ez = B.z - A.z;
+            const float len = sqrtf(ex*ex + ey*ey + ez*ez);
+            slen.push_back(len);
+            const float h = len > 0 ? len * 0.01f : 1e-5f;
+            shs.push_back(h);
+            for (int u = 0; u < NS; ++u)
+            {
+                const float t = float(u + 1) / (NS + 1);
+                const float mx = A.x + t * ex;
+                const float my = A.y + t * ey;
+                const float mz = A.z + t * ez;
+                /*  7-tap: value + central differences  */
+                for (int q = 0; q < 7; ++q)
+                {
+                    sx.push_back(mx);
+                    sy.push_back(my);
+                    sz.push_back(mz);
+                }
+                const size_t o = sx.size() - 7;
+                sx[o+1] += h;  sx[o+2] -= h;
+                sy[o+3] += h;  sy[o+4] -= h;
+                sz[o+5] += h;  sz[o+6] -= h;
+            }
+        }
+        if (!sx.empty())
+            eval_points(base, ctx, sx, sy, sz, sv);
+        for (size_t i = 0; i < cand.size(); ++i)
+        {
+            bool good = slen[i] > 0;
+            for (int u = 0; good && u < NS; ++u)
+            {
+                const size_t o = (i * NS + u) * 7;
+                const float f = sv[o];
+                const float h2 = 2 * shs[i];
+                const float gx = (sv[o+1] - sv[o+2]) / h2;
+                const float gy = (sv[o+3] - sv[o+4]) / h2;
+                const float gz = (sv[o+5] - sv[o+6]) / h2;
+                const float gl = sqrtf(gx*gx + gy*gy + gz*gz);
+                if (!std::isfinite(f) || !(gl > 0) ||
+                    fabsf(f) / gl > slen[i] * 0.03f)
+                    good = false;
+            }
+            if (good)
+            {
+                accepted.push_back(cand[i]);
+                const DSurfPoint& A = soup.surface[cand[i].first];
+                const DSurfPoint& B = soup.surface[cand[i].second];
+                cseg.push_back({ A.x, A.y, A.z, B.x, B.y, B.z });
+            }
+        }
+        /*  The gate: constraints become law only when the chains
+         *  earn it.  A high rejection rate means the extractor
+         *  mislinked (csg: two creases crossing at the sharp point
+         *  - 35% of its segments are shortcuts), and a half-trusted
+         *  polyline plus the band drop built around it does more
+         *  damage than no polyline (measured: 7 pinches vs 3).
+         *  Fall back to unconstrained behavior for the model;
+         *  junction-aware chain extraction is the designed next
+         *  round.  */
+        if (!cand.empty() &&
+            float(cand.size() - accepted.size()) >
+                    0.10f * float(cand.size()))
+        {
+            accepted.clear();
+            cseg.clear();
+        }
+    }
+    const auto near_crease = [&](float x, float y, float z,
+                                 float r) {
+        for (const auto& s : cseg)
+        {
+            const float ax = s[0], ay = s[1], az = s[2];
+            const float bx = s[3] - ax, by = s[4] - ay,
+                        bz = s[5] - az;
+            const float px = x - ax, py = y - ay, pz = z - az;
+            const float bb = bx*bx + by*by + bz*bz;
+            float t = bb > 0 ? (px*bx + py*by + pz*bz) / bb : 0;
+            t = t < 0 ? 0 : t > 1 ? 1 : t;
+            const float dx = px - t*bx, dy = py - t*by,
+                        dz = pz - t*bz;
+            if (dx*dx + dy*dy + dz*dz < r * r)
+                return true;
+        }
+        return false;
+    };
+    /*  Redundant-vertex drop radius: a surface vertex this close to
+     *  the constrained crease pairs with a chain/Steiner vertex
+     *  into sliver tets - the measured pinch pairs sat 0.15-0.25
+     *  cells apart, all on the crease.  The crease polyline IS the
+     *  surface there; the vertex adds nothing.  Sign witnesses
+     *  (inside/outside samples) are never dropped.  */
+    const float drop_r = 0.35f * soup.spacing;
+    /*  Feature points referenced by an accepted segment are the
+     *  chain itself and always enter; the rest of the QEF clump
+     *  (curved creases run 26-51% duplicates, merged out of the
+     *  chains) is redundant by the merge's own judgment, and every
+     *  duplicate near a constrained segment ENCROACHES on it,
+     *  forcing the machinery to place a Steiner at its projection
+     *  - a guaranteed near-coincidence (the measured spheres
+     *  pinch: feature vs Steiner, 0.15 cells).  */
+    std::unordered_set<uint32_t> chain_used;
+    for (const auto& [a, b] : accepted)
+    {
+        chain_used.insert(a);
+        chain_used.insert(b);
+    }
 
     /*  Stage B: triangulate everything (spatial-sort batch insert),
      *  then refine: any tet edge joining an inside vertex directly
      *  to an outside vertex gets a bisected surface point, until no
      *  such edge remains.  At convergence, inside and outside
      *  vertices are separated everywhere by surface vertices.  */
-    std::vector<std::pair<DPoint3, int8_t>> pts;
+    std::vector<std::pair<TPoint, int8_t>> pts;
     pts.reserve(soup.samples.size());
     for (const DSample& s : soup.samples)
-        pts.push_back({ DPoint3(s.x, s.y, s.z),
+    {
+        if (s.on_surface && !cseg.empty() &&
+            near_crease(s.x, s.y, s.z, drop_r))
+            continue;
+        pts.push_back({ TPoint(s.x, s.y, s.z),
                         int8_t(s.on_surface ? 0
                                : s.inside ? -1 : 1) });
-    DT dt(pts.begin(), pts.end());
+    }
+    if constexpr (CCDT_MODE)
+    {
+        /*  No bulk constructor here: spatial-sort ourselves and
+         *  insert with the previous cell as hint, mirroring the
+         *  class's own insert_vertices_range (including the CORNER
+         *  tag, which marks input vertices for the constraint
+         *  bookkeeping).  */
+        using PMap = CGAL::First_of_pair_property_map<
+                std::pair<TPoint, int8_t>>;
+        CGAL::spatial_sort(pts.begin(), pts.end(),
+                CGAL::Spatial_sort_traits_adapter_3<K, PMap>());
+        CH hint{};
+        for (const auto& pr : pts)
+        {
+            const auto before = dt.number_of_vertices();
+            VH vh = dt.insert(pr.first, hint, false);
+            hint = vh->cell();
+            vh->ccdt_3_data().set_vertex_type(
+                    CGAL::CDT_3_vertex_type::CORNER);
+            if (dt.number_of_vertices() > before)
+            {
+                vh->info() = pr.second;
+                prov.emplace(&*vh, 1);
+            }
+        }
+    }
+    else
+        dt.insert(pts.begin(), pts.end());
 
     /*  Surface points go in one by one with a coincidence guard: on
      *  grid-aligned geometry a bisected point can converge exactly
      *  onto a lattice sample, and overwriting that vertex's inside/
-     *  outside witness with 'surface' corrupts extraction.  */
-    for (const DSurfPoint& s : soup.surface)
+     *  outside witness with 'surface' corrupts extraction.  Handles
+     *  are recorded because chain entries (indices into
+     *  soup.surface) become constrained-edge endpoints.  */
+    std::vector<VH> surf_vh;
+    surf_vh.reserve(soup.surface.size());
+    const size_t feat_base =
+            soup.surface.size() - size_t(soup.feature_points);
+    for (size_t si = 0; si < soup.surface.size(); ++si)
     {
+        const DSurfPoint& s = soup.surface[si];
+        /*  Surface points inside the crease band are redundant
+         *  with the constrained polyline and pair into pinch
+         *  slivers - drop them, EXCEPT the chain members
+         *  themselves.  */
+        if (!cseg.empty() && !chain_used.count(uint32_t(si)) &&
+            near_crease(s.x, s.y, s.z, drop_r))
+        {
+            surf_vh.push_back(VH());
+            continue;
+        }
         const auto before = dt.number_of_vertices();
-        auto vh = dt.insert(DPoint3(s.x, s.y, s.z));
+        VH vh;
+        if constexpr (CCDT_MODE)
+        {
+            vh = dt.insert(TPoint(s.x, s.y, s.z), CH{}, false);
+            vh->ccdt_3_data().set_vertex_type(
+                    CGAL::CDT_3_vertex_type::CORNER);
+        }
+        else
+            vh = dt.insert(TPoint(s.x, s.y, s.z));
         if (dt.number_of_vertices() > before)
+        {
             vh->info() = 0;
+            prov.emplace(&*vh, si < feat_base ? 2 : 3);
+        }
+        surf_vh.push_back(vh);
+    }
+
+    /*  The constrained-crease round: chain segments become
+     *  constrained edges, batched with one Delaunay restoration at
+     *  the end (each insert_constrained_edge(…, true) would restore
+     *  individually).  */
+    /*  Insert the refereed chain segments as constrained edges,
+     *  batched with one Delaunay restoration at the end.  */
+    uint64_t constrained = 0;
+    if constexpr (CCDT_MODE)
+    {
+        for (const auto& [a, b] : accepted)
+        {
+            VH va = surf_vh[a], vb = surf_vh[b];
+            if (va == VH() || vb == VH() || va == vb)
+                continue;
+            dt.insert_constrained_edge(va, vb, false);
+            ++constrained;
+        }
+        dt.restore_Delaunay();
+        sweep_steiner();
     }
 
     constexpr int MAX_ROUNDS = 48;
@@ -929,7 +1197,98 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
         }
         if (pending.empty())
             break;
-        const auto fresh = bisect_pending(deck, ctx, pending, halt);
+        auto fresh = bisect_pending(deck, ctx, pending, halt);
+
+        /*  Slide-away pass (the pinch preventer at the source): a
+         *  separator landing within a fraction of a cell of an
+         *  existing surface vertex makes a sliver tet pair whose
+         *  extraction is a 4-triangle edge - the measured mechanism
+         *  behind every pinch, DT and CCDT alike (provenance dump
+         *  2026-07-15: refine-insert vs chain/Steiner vertex,
+         *  0.15-0.25 cells).  The separator itself is needed - so
+         *  slide it along the chord away from the crowding vertex
+         *  and Newton-project it back onto the surface.  It still
+         *  breaks its inside/outside edge (stays in the conflict
+         *  zone); the near-coincidence is gone.  */
+        {
+            /*  0 disables: measured 2026-07-15, sliding stalls on
+             *  short band edges (slid point exits the conflict
+             *  zone, the i/o edge survives, holes at cap).  Kept
+             *  for the next design round.  */
+            static const char* slide_env =
+                    getenv("STIBIUM_DMESH_SLIDE");
+            const float pinch_r = (slide_env ? atof(slide_env)
+                    : 0.0f) * soup.spacing;
+            std::vector<float> mx, my, mz, mh2, mc2;
+            std::vector<size_t> midx;
+            for (size_t fi = 0; fi < fresh.size(); ++fi)
+            {
+                const DSurfPoint& s = fresh[fi];
+                const auto nv = dt.nearest_vertex(
+                        TPoint(s.x, s.y, s.z));
+                if (nv == VH())
+                    continue;
+                /*  Nearest SURFACE vertex - the nearest vertex
+                 *  outright may be a sign witness masking a
+                 *  surface vertex a hair further out.  */
+                VH q = VH();
+                float d = 0;
+                std::vector<VH> ring{ nv };
+                dt.finite_adjacent_vertices(
+                        nv, std::back_inserter(ring));
+                for (const VH& v : ring)
+                {
+                    if (v->info() != 0)
+                        continue;
+                    const float ddx =
+                            s.x - float(v->point().x());
+                    const float ddy =
+                            s.y - float(v->point().y());
+                    const float ddz =
+                            s.z - float(v->point().z());
+                    const float dd = sqrtf(ddx*ddx + ddy*ddy +
+                                           ddz*ddz);
+                    if (q == VH() || dd < d)
+                    {
+                        q = v;
+                        d = dd;
+                    }
+                }
+                if (q == VH() || d >= pinch_r)
+                    continue;
+                const float dx = s.x - float(q->point().x());
+                const float dy = s.y - float(q->point().y());
+                const float dz = s.z - float(q->point().z());
+                /*  Away from the crowding vertex; if coincident,
+                 *  along the bisected edge instead.  */
+                float ux = dx, uy = dy, uz = dz, ul = d;
+                if (!(ul > 1e-12f))
+                {
+                    ux = pending[fi].bx - pending[fi].ax;
+                    uy = pending[fi].by - pending[fi].ay;
+                    uz = pending[fi].bz - pending[fi].az;
+                    ul = sqrtf(ux*ux + uy*uy + uz*uz);
+                    if (!(ul > 0))
+                        continue;
+                }
+                const float slide = 1.5f * pinch_r - d;
+                mx.push_back(s.x + ux / ul * slide);
+                my.push_back(s.y + uy / ul * slide);
+                mz.push_back(s.z + uz / ul * slide);
+                mh2.push_back(soup.spacing * 0.01f);
+                mc2.push_back(soup.spacing);
+                midx.push_back(fi);
+            }
+            if (!mx.empty())
+            {
+                project_points_impl(deck, ctx, mx, my, mz,
+                                    mh2, mc2);
+                for (size_t q = 0; q < midx.size(); ++q)
+                    fresh[midx[q]] = { mx[q], my[q], mz[q] };
+            }
+        }
+
+        uint64_t round_added = 0;
         for (const DSurfPoint& s : fresh)
         {
             /*  A bisected point can converge onto an EXISTING vertex
@@ -937,13 +1296,18 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
              *  planes).  Never overwrite a sign witness's info -
              *  count vertices to detect coincidence.  */
             const auto before = dt.number_of_vertices();
-            auto vh = dt.insert(DPoint3(s.x, s.y, s.z));
+            auto vh = dt.insert(TPoint(s.x, s.y, s.z));
             if (dt.number_of_vertices() > before)
             {
                 vh->info() = 0;
+                prov.emplace(&*vh, 4);
                 ++inserted;
+                ++round_added;
             }
         }
+        sweep_steiner();
+        if (!round_added)
+            break;   // every insert coincided: no progress possible
     }
 
     /*  Stage C runs inside the repair loop: extract, then hunt WARTS
@@ -956,21 +1320,35 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
     constexpr int MAX_REPAIR = 16;
     uint64_t repaired_total = 0;
     int repair_round = 0;
+    std::vector<VH> xvh;   // extraction order -> vertex handle
     for (;; ++repair_round)
     {
     /*  Stage C: cell signs.  After convergence a finite cell cannot
-     *  contain both signs, so any non-surface vertex decides it;
-     *  all-surface cells ask the oracle at their centroid (batched).
-     *  Infinite cells are outside by definition.  */
-    std::vector<DT::Cell_handle> oracle_cells;
+     *  contain both signs (except in the crease band, where i/o
+     *  edges are deliberately shadowed), so a non-surface vertex
+     *  decides it; all-surface AND mixed cells ask the oracle at
+     *  their centroid (batched).  Infinite cells are outside by
+     *  definition.  */
+    std::vector<CH> oracle_cells;
     std::vector<float> cxs, cys, czs, cvals;
     for (auto c = dt.finite_cells_begin();
          c != dt.finite_cells_end(); ++c)
     {
         int8_t sign = 0;
-        for (int i = 0; i < 4 && !sign; ++i)
-            sign = c->vertex(i)->info();
-        if (!sign)
+        bool mixed = false;
+        for (int i = 0; i < 4; ++i)
+        {
+            const int8_t s = c->vertex(i)->info();
+            if (!s)
+                continue;
+            if (sign && s != sign)
+            {
+                mixed = true;
+                break;
+            }
+            sign = s;
+        }
+        if (!sign || mixed)
         {
             double x = 0, y = 0, z = 0;
             for (int i = 0; i < 4; ++i)
@@ -1002,12 +1380,14 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
     std::unordered_map<const void*, uint32_t> vidx;
     out->verts.clear();
     out->tris.clear();
-    const auto vertex_index = [&](DT::Vertex_handle v) -> uint32_t {
+    xvh.clear();
+    const auto vertex_index = [&](VH v) -> uint32_t {
         const auto found = vidx.find(&*v);
         if (found != vidx.end())
             return found->second;
         const uint32_t id = uint32_t(out->verts.size() / 3);
         vidx.emplace(&*v, id);
+        xvh.push_back(v);
         out->verts.push_back(float(v->point().x()));
         out->verts.push_back(float(v->point().y()));
         out->verts.push_back(float(v->point().z()));
@@ -1017,14 +1397,14 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
     for (auto f = dt.finite_facets_begin();
          f != dt.finite_facets_end(); ++f)
     {
-        const DT::Cell_handle c = f->first;
+        const CH c = f->first;
         const int i = f->second;
-        const DT::Cell_handle n = c->neighbor(i);
+        const CH n = c->neighbor(i);
         const int8_t cs = dt.is_infinite(c) ? 1 : c->info();
         const int8_t ns = dt.is_infinite(n) ? 1 : n->info();
         if (cs == ns || cs == 0 || ns == 0)
             continue;
-        DT::Vertex_handle vs[3];
+        VH vs[3];
         for (int q = 0, w = 0; q < 4; ++q)
             if (q != i)
                 vs[w++] = c->vertex(q);
@@ -1237,14 +1617,23 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
         uint64_t added = 0;
         for (size_t i = 0; i < kx.size(); ++i)
         {
-            const DPoint3 pt(kx[i], ky[i], kz[i]);
+            /*  Repair keep-out: the constrained crease repairs
+             *  itself; only the smooth field is ours to press (an
+             *  insert on a constrained edge destroys it and the
+             *  re-conforming Steiner point lands a sliver away -
+             *  the pinch factory, measured 2026-07-15).  */
+            if (!cseg.empty() &&
+                near_crease(kx[i], ky[i], kz[i],
+                            0.75f * soup.spacing))
+                continue;
+            const TPoint pt(kx[i], ky[i], kz[i]);
             if (repair_mode >= 2)
             {
                 /*  Crowding guard: an insert within a quarter of
                  *  its edge of an existing vertex makes the sliver
                  *  pinches - skip it (the pinch preventer).  */
                 const auto nv = dt.nearest_vertex(pt);
-                if (nv != DT::Vertex_handle())
+                if (nv != VH())
                 {
                     const double d2 = CGAL::squared_distance(
                             nv->point(), pt);
@@ -1258,12 +1647,14 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
             if (dt.number_of_vertices() > before)
             {
                 vh->info() = 0;
+                prov.emplace(&*vh, 5);
                 ++added;
             }
         }
         if (!added)
             break;
         repaired_total += added;
+        sweep_steiner();
     }
     }   // repair loop
 
@@ -1289,13 +1680,67 @@ bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
         else if (n2 > 2)
             ++out->nonmanifold_edges;
     }
+    if (getenv("STIBIUM_DMESH_NM_DEBUG"))
+        for (const auto& [k, n2] : edge_count)
+        {
+            if (n2 == 2)
+                continue;
+            for (const uint32_t vi : { uint32_t(k >> 32),
+                                       uint32_t(k) })
+            {
+                const VH v = xvh[vi];
+                const auto it = prov.find(&*v);
+                int steiner = -1, ncstr = -1;
+                if constexpr (CCDT_MODE)
+                {
+                    steiner = v->ccdt_3_data()
+                            .is_Steiner_vertex_on_edge();
+                    ncstr = int(v->ccdt_3_data()
+                            .number_of_incident_constraints());
+                }
+                fprintf(stderr, "NM edge (count %u): "
+                        "(%.4f, %.4f, %.4f) prov %d steiner %d "
+                        "ncstr %d\n", unsigned(n2),
+                        out->verts[3*vi], out->verts[3*vi + 1],
+                        out->verts[3*vi + 2],
+                        it == prov.end() ? 0 : int(it->second),
+                        steiner, ncstr);
+            }
+        }
     out->iterations = uint64_t(round);
     out->inserted = inserted;
     out->repaired = repaired_total;
     out->repair_rounds = uint64_t(repair_round);
+    out->constrained = constrained;
+    if constexpr (CCDT_MODE)
+        for (auto v = dt.finite_vertices_begin();
+             v != dt.finite_vertices_end(); ++v)
+            if (v->ccdt_3_data().is_Steiner_vertex_on_edge())
+                ++out->steiner;
 
     tape_ctx_free(ctx);
     return !*halt;
+}
+
+}  // namespace
+
+bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
+                   DMesh* out)
+{
+    DSoup soup = delaunay_sample(deck, r, halt);
+    if (*halt)
+        return false;
+    return delaunay_mesh_soup(deck, soup, halt, out);
+}
+
+bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
+                        volatile int* halt, DMesh* out)
+{
+    static const char* env = getenv("STIBIUM_DMESH_CCDT");
+    const bool use_ccdt = env ? atoi(env) != 0 : true;
+    if (use_ccdt)
+        return mesh_impl<true, CCDT>(deck, soup, halt, out);
+    return mesh_impl<false, DT>(deck, soup, halt, out);
 }
 
 #else  // !STIBIUM_HAS_CGAL

@@ -253,7 +253,89 @@ STANDARD-pushed tapes for descent/sampling; bisection batches still
 use the base tape (bit-identical values; switching to covering
 pushed tapes is a pure speed move when performance round opens).
 
-## The constrained-crease round (mapped 2026-07-15, API recon done)
+## The constrained-crease round: LANDED (2026-07-15, same night)
+
+**Status: default-on** (`STIBIUM_DMESH_CCDT=0` reverts to the plain
+DT path).  Every showcase model now meets or beats the DT baseline:
+sphere/cube identical (cube carries 428 constrained edges at zero
+cost), cube_aligned medium folds 840 -> 432, spheres CLEAN WITH
+ZERO REPAIRS (DT needed 36 - the union crease is now separated by
+construction, the chord theorem case closed structurally), csg
+gated back to DT semantics (2 pinches) pending the junction round.
+Full suite green, 627,666 assertions.
+
+**Construction facts** (hard-won, do not rediscover):
+- The documented CCDT_3 wrapper only builds from a finished PLC;
+  incremental `insert()` / `insert_constrained_edge()` /
+  `restore_Delaunay()` live on
+  `Conforming_constrained_Delaunay_triangulation_3_impl<T_3>`,
+  which IS the triangulation.  T_3 must be a
+  `Delaunay_triangulation_3` (the impl uses its conflict-region
+  machinery; plain `Triangulation_3` lacks `Conflict_tester_3` -
+  the docs' claim is about the accessor type).  Delaunay under the
+  hood also keeps `nearest_vertex()` for the crowding guard.
+- Info bases STACK: both CCDT bases take their base class as the
+  second template parameter.  `with_info` does NOT initialize the
+  info, and the machinery's Steiner vertices arrive without one:
+  sweep `is_Steiner_vertex_on_edge()` -> info 0 (they sit on the
+  crease = on the surface) after EVERY insert batch.
+- Steiner-coincides-with-vertex THROWS (no reuse/retyping);
+  `set_segment_vertex_epsilon` is only a validator.  Exactly
+  on-segment vertices are incorporated into the polyline by the
+  segment traverser at insert_constrained_edge time.
+
+**The measured pinch mechanism** (provenance dump, every single
+non-manifold edge of the first runs): a separator insert (refine
+round, repair round, or the QEF duplicate clump) landing 0.15-0.25
+cells from a chain/Steiner vertex -> sliver tets -> 4-triangle
+edge.  The five landed counter-measures, in causal order:
+1. **Oracle-refereed segments**: |f|/|grad| at 1/4, 1/2, 3/4 vs 3%
+   of length; mislinked shortcut segments never become law.
+2. **The trust gate**: >10% rejected segments = untrusted chains =
+   no constraints at all for that model (csg: 35% rejected - two
+   creases crossing at the sharp point mislink the extractor; a
+   half-trusted polyline measured WORSE than none: 7 pinches).
+3. **Crease-band drop** (0.35 cells around accepted segments):
+   bisected surface points AND non-chain feature duplicates (26-51%
+   QEF clump on curves!) are redundant with the polyline; each
+   duplicate near a segment encroaches it and forces a Steiner at
+   its projection = guaranteed near-coincidence.  Steiner count on
+   spheres fell 131 -> 65, aligned cube 492 -> 0.  Sign witnesses
+   are never dropped.
+4. **Repair keep-out** (0.75 cells): repair pressing points onto a
+   constrained edge destroys it and the re-conform lands a sliver
+   (fold-gated mode escalated to a 1792-repair war with 716
+   Steiner).  The constraint owns the crease; repair owns the
+   smooth field.
+5. Refinement inserts stay unguarded (closure outranks cosmetics);
+   `STIBIUM_DMESH_SLIDE` (default off) can slide near-coincident
+   separators away, but stalls on short band edges (slid point
+   exits the conflict zone -> holes at cap).  Rejected for now.
+
+**Two dead ends, measured and reverted**: (a) shadowing band edges
++ mixed-cell-oracle signs + emit-and-project extraction - closed
+but the oracle sign alternation around band edges makes its own
+pinches (2-6) plus 19 sharp folds from skinny projected triangles;
+(b) fold-gated repair under constraints - see the war above.
+Mixed-sign cells now ask the centroid oracle (kept: strictly more
+correct at halt/cap exits than first-witness-wins).
+
+**The junction round (next design work, csg is the referee)**: the
+chain extractor treats crease CROSSINGS (union seam meets plane
+circle at csg's sharp point) as ordinary degree-2 walking and
+mislinks ~35% of segments.  Needed: junction detection (degree>=3
+or crossing-aware merge), chains split at junctions, junction
+vertices shared between chains as polyline endpoints.  Then csg's
+gate opens and its sharp point gets the structural cure the union
+already enjoys.  Diagnostics live: `STIBIUM_DMESH_NM_DEBUG=1`
+prints every non-manifold edge with vertex provenance
+(sample/bisect/feature/refine/repair + steiner + n-constraints);
+`constrained`/`steiner` counts are in DMesh and the [.dmeshSTL]
+output.  CCDT timing note: sphere 953 -> 1612 ms at 64^3 in
+[.dmeshVS] - the machinery (time stamps, hierarchy) costs ~70%;
+part of the performance round.
+
+## The original round map (2026-07-15, kept for the record)
 
 **Primitive confirmed**: CGAL 6.2's
 `Conforming_constrained_Delaunay_triangulation_3` exposes
