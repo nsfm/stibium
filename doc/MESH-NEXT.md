@@ -85,6 +85,20 @@ recognizable microscope, 35MB raw STL.  Residual: ~22K shallow
 chips at UNTRACED creases (blend tangencies the det guard
 correctly refuses) - tracer-coverage work.
 
+**Nate's eyeball audit of the zeiss lineage (2026-07-15, formal
+referee):** flats glorious; curved surfaces good but QUILTED
+(lattice-period ripple - investigate bisection/QEF placement
+interference); capped-cylinder rims (filleted = tangential) carry
+chips/warts, consistent with untraced-tangency attribution
+skips; sub-mm engravings thrash at 1 vox/mm (resolution, not
+pipeline).  KEY FINDING: v1 (unconstrained, pre-gate, 304K
+repairs, 700K tris) reads CLEANER in places than v10 (12K
+constraints, gated, 102K repairs, 325K tris) - brute repair
+volume doubled as sub-lattice detail rescue.  The discipline
+traded away accidental kindness; the middle path is constraints
+PLUS a generous repair budget for gate-approved candidates
+(raise MAX_REPAIR / relax crowding for real models?  measure).
+
 Next tracks, in order:
 1. **Tracer coverage for tangencies** (the zeiss residual): the
    kink-corner 3-field solve from the someday list is now the
