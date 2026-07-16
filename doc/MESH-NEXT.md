@@ -111,7 +111,29 @@ r2 run: quilt period halved WITH the lattice (sample-placement
 conviction confirmed), defect scale halved, 30,218 constraints,
 zero cascades, ~1 h runtime (iterate at r1; r2+ for eyeballs).
 
->>> NEXT SESSION: tracer coverage. <<<
+**Targeted-model autopsy (Nate's mesh_bench stable, 2026-07-15
+late):** examples/mesh_bench/*.sb - sharp step, torus lip, cone+
+torus, off-axis torus (export node m0).  VERDICT: the sharp
+control is 0.000 sp with ZERO repairs at every resolution -
+sharp creases are SOLVED.  The blend variants read 0.054-0.062 sp
+at r1 (mild), and the reframe: a torus lip is G1-SMOOTH - there
+is no crease at its rims, the tracer is CORRECT to refuse, and
+the chips are tight-curvature ALIASING (1mm blend at 1mm pitch:
+band sagitta ~0.13 sp > the 3% bar).  The zeiss residual is not
+a missing-constraint disease; it is an undersampled-curvature
+disease.  The crease war is won; the remaining campaign is
+SAMPLING DENSITY: stage-D adaptive drill-down with curvature as
+a trigger signal (normal variation across a leaf) alongside
+hidden_candidates (engravings) and min/max ambiguity (the dense
+round's existing trigger).  Nate's adaptive-vox/mm thought is
+the whole game.
+
+>>> NEXT SESSION: stage-D adaptive density (curvature +
+hidden_candidates triggers on the dense round's leaf-refinement
+machinery; per-leaf pitch map).  The mesh_bench models are the
+referee: torus lips must drop below 0.03 sp at r1 without a
+global resolution bump.  Tracer tangency coverage DEPRIORITIZED
+(the "untraced rims" were G1-smooth - correctly untraced). <<<
 1. **Enumerate OP_ABS as a crease generator** (prime suspect for
    lathed knob/eyepiece rims: 2D profile fields kink inside
    abs()) - extend tape_pairs to abs clauses ({f_A = 0} with the
