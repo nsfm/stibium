@@ -95,14 +95,19 @@ struct Collector
      *  the leaf's surviving-pair count - the tangle gate reads it.  */
     /*  mindot: min pairwise dot of the 8 corner full-field
      *  gradients.  Anti-parallel corners (~ -1) mean opposing
-     *  sheets in the leaf - a thin wall that pinches under a
-     *  denser lattice.  A lone fillet band curls ~90 deg
-     *  (mindot ~ 0) and takes density safely.  */
+     *  sheets in the leaf - but opposition alone is not danger:
+     *  sep estimates the DISTANCE between the opposing sheets
+     *  (Newton each corner of an anti-parallel pair onto its own
+     *  sheet, project the difference onto the shared normal, keep
+     *  the minimum).  A 2 mm bore-to-wall gap takes quarter-cell
+     *  cores safely; a 0.3 mm web pinches.  HUGE_VALF when no
+     *  anti-parallel pair exists.  */
     struct LeafBox
     {
         float lo[3], hi[3];
         unsigned live;
         float mindot;
+        float sep;
     };
     std::unordered_map<uint64_t, LeafBox> crease_leaves;
     uint64_t tangle_suppressed = 0;
@@ -376,6 +381,14 @@ float autod_tangle_dot()
     return env ? float(atof(env)) : -0.5f;
 }
 
+/*  Wall-gap bar for the level-2 core gate, in cells (see the
+ *  tangle comment at the flag site).  */
+float autod_sep_bar()
+{
+    const char* env = getenv("STIBIUM_DMESH_SEP");
+    return env ? float(atof(env)) : 0.7f;
+}
+
 bool autodense()
 {
     const char* env = getenv("STIBIUM_DMESH_AUTODENSE");
@@ -614,6 +627,7 @@ void descend(Collector& c, const Region& r, Tape* tape)
             dummy.Z = cgz;
             const derivative* g = tape_eval_g(sub, c.ctx, dummy);
             float mindot = 1.f;
+            float sep = HUGE_VALF;
             for (int a2 = 0; a2 < 8; ++a2)
                 for (int b2 = a2 + 1; b2 < 8; ++b2)
                 {
@@ -626,15 +640,53 @@ void descend(Collector& c, const Region& r, Tape* tape)
                     if (la < 1e-12f || lb < 1e-12f ||
                         !std::isfinite(la) || !std::isfinite(lb))
                         continue;
-                    mindot = std::min(mindot,
-                            (g[a2].dx * g[b2].dx +
-                             g[a2].dy * g[b2].dy +
-                             g[a2].dz * g[b2].dz) / (la * lb));
+                    const float dot = (g[a2].dx * g[b2].dx +
+                                       g[a2].dy * g[b2].dy +
+                                       g[a2].dz * g[b2].dz) /
+                                      (la * lb);
+                    mindot = std::min(mindot, dot);
+                    if (dot > autod_tangle_dot() ||
+                        !std::isfinite(g[a2].v) ||
+                        !std::isfinite(g[b2].v))
+                        continue;
+                    /*  Newton each corner onto its own sheet,
+                     *  project the difference onto A's OUTWARD
+                     *  normal.  The SIGN separates the two
+                     *  anti-parallel configurations (they read
+                     *  identically otherwise - measured): a thin
+                     *  WALL has sheets facing away (gradients
+                     *  diverge, signed gap negative) and pinches
+                     *  under density; a concave GROOVE has flanks
+                     *  facing each other (positive) and is exactly
+                     *  what density cures.  Only wall gaps count.  */
+                    const float ka = g[a2].v / (la * la);
+                    const float kb = g[b2].v / (lb * lb);
+                    const float ax = cgx[a2] - ka * g[a2].dx;
+                    const float ay = cgy[a2] - ka * g[a2].dy;
+                    const float az = cgz[a2] - ka * g[a2].dz;
+                    const float bx = cgx[b2] - kb * g[b2].dx;
+                    const float by = cgy[b2] - kb * g[b2].dy;
+                    const float bz = cgz[b2] - kb * g[b2].dz;
+                    const float s =
+                            ((bx - ax) * g[a2].dx +
+                             (by - ay) * g[a2].dy +
+                             (bz - az) * g[a2].dz) / la;
+                    if (s < 0)
+                        sep = std::min(sep, -s);
                 }
             c.crease_leaves[key] = {
                     { r.X[0], r.Y[0], r.Z[0] },
                     { r.X[r.ni], r.Y[r.nj], r.Z[r.nk] },
-                    live, mindot };
+                    live, mindot, sep };
+            if (c.census && c.census->dump)
+                fprintf(c.census->dump,
+                        "GATE %.6g %.6g %.6g live=%u mindot=%.4f "
+                        "sep=%.4f\n",
+                        0.5f * (r.X[0] + r.X[r.ni]),
+                        0.5f * (r.Y[0] + r.Y[r.nj]),
+                        0.5f * (r.Z[0] + r.Z[r.nk]),
+                        live, mindot,
+                        sep == HUGE_VALF ? -1.f : sep);
         }
 
         /*  Crease-band density: the push rewrites every DECIDED
@@ -660,7 +712,7 @@ void descend(Collector& c, const Region& r, Tape* tape)
             c.soup.dense_boxes.push_back({
                     { r.X[0], r.Y[0], r.Z[0] },
                     { r.X[r.ni], r.Y[r.nj], r.Z[r.nk] },
-                    levels });
+                    levels, key });
             std::vector<float> RX(r.X, r.X + r.ni + 1),
                                RY(r.Y, r.Y + r.nj + 1),
                                RZ(r.Z, r.Z + r.nk + 1);
@@ -854,9 +906,16 @@ void feature_points(Collector& c)
     const auto flag_leaf = [&c](uint64_t key, float nrv) {
         if (!autodense() || nrv < AUTOD_BAR)
             return;
+        /*  Tangle = a thin WALL within pinch reach of the level-2
+         *  pitch (STIBIUM_DMESH_SEP, in cells, default 0.7 =
+         *  2.8x the quarter-cell pitch).  Anti-parallelism alone
+         *  was the previous gate and over-blocked: concave grooves
+         *  (the thing density CURES) read anti-parallel too; only
+         *  the signed wall gap separates them (measured - the
+         *  populations are inseparable without the sign).  */
         const auto lit = c.crease_leaves.find(key);
         const bool tangle = lit != c.crease_leaves.end() &&
-                lit->second.mindot <= autod_tangle_dot();
+                lit->second.sep < autod_sep_bar() * c.spacing;
         if (tangle)
             ++c.tangle_suppressed;
         const int lvl = tangle ? 1
@@ -1528,7 +1587,8 @@ static void sample_pass(Collector& c, const Deck* deck, Region r,
     tape_ctx_free(c.ctx);
 }
 
-DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt)
+DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
+                      const std::unordered_set<uint64_t>* demote)
 {
     Census census;
     const char* cenv = getenv("STIBIUM_DMESH_CENSUS");
@@ -1619,13 +1679,19 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt)
                 continue;
             for (const auto& [k2, b2] : c.crease_leaves)
             {
-                if (b2.mindot <= autod_tangle_dot() ||
+                if (b2.sep < autod_sep_bar() * c.soup.spacing ||
                     !touches(it->second, b2))
                     continue;
                 int& l2 = dilated[k2];
                 l2 = std::max(l2, lvl);
             }
         }
+        /*  Retreat rollback: leaves whose cores MEASURABLY opened
+         *  the mesh on a previous attempt drop to flood level.  */
+        if (demote)
+            for (auto& [k, l] : dilated)
+                if (l >= 2 && demote->count(k))
+                    l = 1;
         if (dbg)
         {
             size_t l1 = 0, l2 = 0;
@@ -4923,20 +4989,80 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
 bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                    DMesh* out)
 {
-    PhaseTimer pt;
-    DSoup soup = delaunay_sample(deck, r, halt);
-    pt.mark("sample+bisect+QEF");
-    if (*halt)
-        return false;
-    static const char* tr_env = getenv("STIBIUM_DMESH_TRACE");
-    if (!tr_env || atoi(tr_env) != 0)
-        delaunay_trace(deck, r, &soup, halt);
-    pt.mark("crease tracer");
-    if (*halt)
-        return false;
-    const bool ok = delaunay_mesh_soup(deck, soup, halt, out);
-    pt.mark("mesh (B+C total)");
-    return ok;
+    /*  Optimism with rollback (2026-07-17): no a-priori gate can
+     *  cleanly split thin walls from concave grooves at leaf-corner
+     *  resolution (the wall-gap estimator's populations overlap in
+     *  0.2-1.5 mm - measured).  So the level-2 cores run
+     *  optimistically, and if the extraction reports OPEN edges,
+     *  the guilty leaves (open-edge midpoints inside level-2 dense
+     *  boxes) are demoted and stage A re-runs.  Damage is measured,
+     *  not predicted; models that produce no holes never pay.  */
+    std::unordered_set<uint64_t> demote;
+    for (int attempt = 0; attempt < 3; ++attempt)
+    {
+        PhaseTimer pt;
+        DSoup soup = delaunay_sample(deck, r, halt,
+                demote.empty() ? nullptr : &demote);
+        pt.mark("sample+bisect+QEF");
+        if (*halt)
+            return false;
+        static const char* tr_env = getenv("STIBIUM_DMESH_TRACE");
+        if (!tr_env || atoi(tr_env) != 0)
+            delaunay_trace(deck, r, &soup, halt);
+        pt.mark("crease tracer");
+        if (*halt)
+            return false;
+        *out = DMesh();
+        const bool ok = delaunay_mesh_soup(deck, soup, halt, out);
+        pt.mark("mesh (B+C total)");
+        if (!ok || out->open_edges == 0 || *halt)
+            return ok;
+
+        /*  Map open edges back to their level-2 leaves.  */
+        std::unordered_map<uint64_t, uint32_t> ec;
+        for (size_t t = 0; t < out->tris.size(); t += 3)
+            for (int e = 0; e < 3; ++e)
+            {
+                uint64_t a = out->tris[t + e];
+                uint64_t b = out->tris[t + (e + 1) % 3];
+                if (a > b)
+                    std::swap(a, b);
+                ++ec[(a << 32) | b];
+            }
+        size_t newly = 0;
+        for (const auto& [k, n2] : ec)
+        {
+            if (n2 >= 2)
+                continue;
+            const uint32_t va = uint32_t(k >> 32), vb = uint32_t(k);
+            const float mx = 0.5f * (out->verts[3*va] +
+                                     out->verts[3*vb]);
+            const float my = 0.5f * (out->verts[3*va + 1] +
+                                     out->verts[3*vb + 1]);
+            const float mz = 0.5f * (out->verts[3*va + 2] +
+                                     out->verts[3*vb + 2]);
+            for (const auto& db : soup.dense_boxes)
+            {
+                if (db.level < 2 ||
+                    mx < db.lo[0] || mx > db.hi[0] ||
+                    my < db.lo[1] || my > db.hi[1] ||
+                    mz < db.lo[2] || mz > db.hi[2])
+                    continue;
+                if (demote.insert(db.key).second)
+                    ++newly;
+            }
+        }
+        if (getenv("STIBIUM_DMESH_TIME") ||
+            getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+            fprintf(stderr, "AUTOD retreat %d: %llu open edges, "
+                    "%zu level-2 leaves demoted\n", attempt + 1,
+                    (unsigned long long)out->open_edges, newly);
+        /*  Holes outside any level-2 box are not core damage -
+         *  retreating cannot fix them.  */
+        if (newly == 0)
+            return ok;
+    }
+    return true;
 }
 
 bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
