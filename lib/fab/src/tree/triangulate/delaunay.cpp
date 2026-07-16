@@ -4420,6 +4420,110 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     }
             }
 
+            /*  Geometric fallback pairing (prov-5 pinch round,
+             *  2026-07-17: 62% of residual nm vertices were
+             *  repair-loop inserts whose tet-ring walk failed,
+             *  landing in the conservative keep-the-pinch path).
+             *  Two sheets crossing an edge are each locally
+             *  planar, so greedy max-dot normal matching recovers
+             *  the pairing with no DT walk at all.  The map is
+             *  shared by both endpoint fans, so duplication stays
+             *  consistent and cannot tear a hole.  */
+            for (const auto& [k, ts] : etris)
+            {
+                if (ts.size() <= 2 || (ts.size() & 1))
+                    continue;
+                /*  The walk loop default-constructs sheet[k] even
+                 *  when its pairing produced nothing - absent OR
+                 *  empty means unpaired.  */
+                const auto sf0 = sheet.find(k);
+                if (sf0 != sheet.end() && !sf0->second.empty())
+                    continue;
+                std::vector<std::array<float, 3>> nrm(ts.size());
+                for (size_t q = 0; q < ts.size(); ++q)
+                {
+                    const uint32_t t = ts[q];
+                    const float* A = &out->verts[3 *
+                            out->tris[3*t]];
+                    const float* B = &out->verts[3 *
+                            out->tris[3*t + 1]];
+                    const float* C = &out->verts[3 *
+                            out->tris[3*t + 2]];
+                    const float ux = B[0]-A[0], uy = B[1]-A[1],
+                                uz = B[2]-A[2];
+                    const float vx = C[0]-A[0], vy = C[1]-A[1],
+                                vz = C[2]-A[2];
+                    float nx = uy*vz - uz*vy;
+                    float ny = uz*vx - ux*vz;
+                    float nz = ux*vy - uy*vx;
+                    const float l = sqrtf(nx*nx + ny*ny + nz*nz);
+                    if (l > 0)
+                    {
+                        nx /= l;
+                        ny /= l;
+                        nz /= l;
+                    }
+                    nrm[q] = { nx, ny, nz };
+                }
+                std::vector<char> used(ts.size(), 0);
+                auto& sh = sheet[k];
+                int sid = 0;
+                bool bad = false;
+                for (size_t q = 0; q < ts.size() && !bad; ++q)
+                {
+                    if (used[q])
+                        continue;
+                    used[q] = 1;
+                    float bestd = -2.f;
+                    size_t bj = SIZE_MAX;
+                    for (size_t j = q + 1; j < ts.size(); ++j)
+                    {
+                        if (used[j])
+                            continue;
+                        const float d =
+                                nrm[q][0]*nrm[j][0] +
+                                nrm[q][1]*nrm[j][1] +
+                                nrm[q][2]*nrm[j][2];
+                        if (d > bestd)
+                        {
+                            bestd = d;
+                            bj = j;
+                        }
+                    }
+                    if (bj == SIZE_MAX)
+                    {
+                        bad = true;
+                        break;
+                    }
+                    used[bj] = 1;
+                    sh[ts[q]] = sid;
+                    sh[ts[bj]] = sid;
+                    ++sid;
+                }
+                if (bad)
+                    sheet.erase(k);
+            }
+            if (getenv("STIBIUM_DMESH_NM_DEBUG"))
+            {
+                size_t nm_e = 0, walk = 0, fall = 0, odd = 0;
+                for (const auto& [k, ts] : etris)
+                {
+                    if (ts.size() <= 2)
+                        continue;
+                    ++nm_e;
+                    if (ts.size() & 1)
+                        ++odd;
+                    const auto sf0 = sheet.find(k);
+                    if (sf0 != sheet.end() &&
+                        !sf0->second.empty())
+                        ++walk;
+                }
+                (void)fall;
+                fprintf(stderr, "MANIFOLD: %zu pinch edges, %zu "
+                        "paired, %zu odd-count\n", nm_e, walk,
+                        odd);
+            }
+
             /*  Fan split: per vertex, union incident triangles
              *  across manifold edges (and across paired pinch
              *  edges); each extra component gets a coincident
