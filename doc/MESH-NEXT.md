@@ -816,3 +816,14 @@ pair's operand values in flight; Newton only where both fields
 incremental re-extraction is the designed next round), insert
 85 s, snap 26 s.  Gate prunes 16M exhaustive (pair, seed) Newton
 attempts to 257K candidates (1.6%).
+
+**Perf round 2 (same night): repair stall exit.**  Two flat
+rounds = churn ahead, stop (round >= 3; stash keeps chips for the
+snap).  extract+repair 272 s -> 34 s; zeiss d1 TOTAL 23 min ->
+2.7 min across the evening (seed gate + stall exit).  Bonus: the
+churn rounds were the damage - nm 147 -> 50, tris 1.04M -> 407K
+(600K churn vertices), depth unchanged, constraints identical.
+AWAITING Nate's eyeball on v2fast vs the reviewed d1 (v1-kindness
+caveat: 17.5K repairs vs 333K).  Next perf target: insert points
+(84 s, now 52% of the pipeline) - CGAL single-threaded insertion;
+then threading the eval side.
