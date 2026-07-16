@@ -141,12 +141,21 @@ uint32_t tape_export_blob(const Deck* deck, const Tape* tape,
 typedef struct TapePair_ {
     unsigned clause;          /* prefix length: evaluate [0, clause) */
     unsigned slot_a, slot_b;  /* operand rows after the prefix eval */
-    uint8_t is_max;
+    uint8_t is_max;           /* 0 = min, 1 = max, 2 = abs (slot_b
+                                 unused: the second crease field is
+                                 the FULL oracle - abs(g) kinks on
+                                 {g = 0} INTERSECT {f = 0}) */
 } TapePair;
 
 /** @brief Enumerates min/max clauses (crease generators) in tape
     order.  Returns the total count; writes up to cap entries. */
 unsigned tape_pairs(const Tape* tape, TapePair* out, unsigned cap);
+
+/** @brief Enumerates OP_ABS clauses (the OTHER crease generator:
+    lathed/extruded profiles kink inside abs).  Same conventions;
+    entries carry is_max = 2 and slot_b = UINT32_MAX. */
+unsigned tape_abs_pairs(const Tape* tape, TapePair* out,
+                        unsigned cap);
 
 /** @brief Point evaluation of the first nclauses clauses only
     (clamped to the tape length).  Same semantics as tape_eval_r
