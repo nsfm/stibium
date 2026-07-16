@@ -86,13 +86,24 @@ struct Collector
      *  QEF-residual and hidden-candidate triggers.  */
     const std::unordered_map<uint64_t, int>* dense_map = nullptr;
     std::unordered_map<uint64_t, int> want_dense;
+    uint64_t phantom_rejected = 0;   // QEF corners the surface vetoed
 
     /*  Every crease-suspect leaf's box, for flag dilation: a blend
      *  band crossing a leaf boundary must not change pitch ON the
      *  crease (the seam T-junctions read as chips), so flags spread
      *  to touching crease-suspect leaves before pass 2.  live is
      *  the leaf's surviving-pair count - the tangle gate reads it.  */
-    struct LeafBox { float lo[3], hi[3]; unsigned live; };
+    /*  mindot: min pairwise dot of the 8 corner full-field
+     *  gradients.  Anti-parallel corners (~ -1) mean opposing
+     *  sheets in the leaf - a thin wall that pinches under a
+     *  denser lattice.  A lone fillet band curls ~90 deg
+     *  (mindot ~ 0) and takes density safely.  */
+    struct LeafBox
+    {
+        float lo[3], hi[3];
+        unsigned live;
+        float mindot;
+    };
     std::unordered_map<uint64_t, LeafBox> crease_leaves;
     uint64_t tangle_suppressed = 0;
 
@@ -351,7 +362,19 @@ int autod_max_level()
  *  NEEDS density maxes out at 4-5 live pairs.  Leaves above the
  *  gate are not densified at all; their divots are the untraced-
  *  blend class (tracer-coverage work, not density work).  */
-constexpr unsigned AUTOD_TANGLE_LIVE = 8;
+/*  STIBIUM_DMESH_TANGLE_DOT: leaves whose corner gradients contain
+ *  a pair more anti-parallel than this are thin-wall tangles - no
+ *  level-2 core (density resolves opposing sheets into pinches
+ *  faster than it fixes divots).  Live-pair count was the first
+ *  gate tried and REFUTED as the discriminator (zeiss collars and
+ *  damage sites both read live 55-201; the real variable is
+ *  opposing sheets, which fillet bands don't have).  -1 disables
+ *  the gate.  */
+float autod_tangle_dot()
+{
+    const char* env = getenv("STIBIUM_DMESH_TANGLE_DOT");
+    return env ? float(atof(env)) : -0.5f;
+}
 
 bool autodense()
 {
@@ -576,9 +599,43 @@ void descend(Collector& c, const Region& r, Tape* tape)
         const unsigned live = tape_pairs(sub, nullptr, 0);
         const bool crease_leaf = live > 0;
         if (crease_leaf && !c.dense_map)
+        {
+            float cgx[8], cgy[8], cgz[8];
+            for (int q = 0; q < 8; ++q)
+            {
+                cgx[q] = (q & 1) ? r.X[r.ni] : r.X[0];
+                cgy[q] = (q & 2) ? r.Y[r.nj] : r.Y[0];
+                cgz[q] = (q & 4) ? r.Z[r.nk] : r.Z[0];
+            }
+            Region dummy = {};
+            dummy.voxels = 8;
+            dummy.X = cgx;
+            dummy.Y = cgy;
+            dummy.Z = cgz;
+            const derivative* g = tape_eval_g(sub, c.ctx, dummy);
+            float mindot = 1.f;
+            for (int a2 = 0; a2 < 8; ++a2)
+                for (int b2 = a2 + 1; b2 < 8; ++b2)
+                {
+                    const float la = sqrtf(g[a2].dx * g[a2].dx +
+                                           g[a2].dy * g[a2].dy +
+                                           g[a2].dz * g[a2].dz);
+                    const float lb = sqrtf(g[b2].dx * g[b2].dx +
+                                           g[b2].dy * g[b2].dy +
+                                           g[b2].dz * g[b2].dz);
+                    if (la < 1e-12f || lb < 1e-12f ||
+                        !std::isfinite(la) || !std::isfinite(lb))
+                        continue;
+                    mindot = std::min(mindot,
+                            (g[a2].dx * g[b2].dx +
+                             g[a2].dy * g[b2].dy +
+                             g[a2].dz * g[b2].dz) / (la * lb));
+                }
             c.crease_leaves[key] = {
                     { r.X[0], r.Y[0], r.Z[0] },
-                    { r.X[r.ni], r.Y[r.nj], r.Z[r.nk] }, live };
+                    { r.X[r.ni], r.Y[r.nj], r.Z[r.nk] },
+                    live, mindot };
+        }
 
         /*  Crease-band density: the push rewrites every DECIDED
          *  min/max clause to a copy, so a min/max clause surviving
@@ -790,6 +847,32 @@ void feature_points(Collector& c)
     }
 
     constexpr float SPREAD_DOT = 0.9f;   // ~25 degrees
+
+    /*  Stage-D flag with the standing gates (bar, level-from-
+     *  magnitude, tangle demotion - zeiss: level 2 in thin-wall
+     *  tangles is nm 241 vs 48).  */
+    const auto flag_leaf = [&c](uint64_t key, float nrv) {
+        if (!autodense() || nrv < AUTOD_BAR)
+            return;
+        const auto lit = c.crease_leaves.find(key);
+        const bool tangle = lit != c.crease_leaves.end() &&
+                lit->second.mindot <= autod_tangle_dot();
+        if (tangle)
+            ++c.tangle_suppressed;
+        const int lvl = tangle ? 1
+                : std::min(autod_max_level(),
+                           nrv >= 4 * AUTOD_BAR ? 2 : 1);
+        int& lv = c.want_dense[key];
+        lv = std::max(lv, lvl);
+    };
+
+    /*  QEF candidates awaiting the phantom oracle (below).  */
+    struct FeatCand
+    {
+        const FeatCell* fc;
+        float x[3];
+    };
+    std::vector<FeatCand> cands;
     uint64_t added = 0;
     /*  A QEF vertex REPLACES the crossings it consumed (dual-
      *  contouring semantics): leaving both in the soup makes the
@@ -851,24 +934,7 @@ void feature_points(Collector& c)
          *  silent above 0.01; every problem model lights up).  */
         const float nr = (A * (x - centroid) - b).norm() /
                 (sqrtf(float(fc.n)) * (fc.hi[0] - fc.lo[0]));
-        if (autodense() && nr >= AUTOD_BAR)
-        {
-            /*  Tangle demotion: hot cells in crowded leaves still
-             *  SEED the component flood (the region wants density)
-             *  but never rate the 4x core - level 2 resolves pinch
-             *  geometry in thin-wall tangles faster than it fixes
-             *  divots (zeiss: nm 241 vs 48).  */
-            const auto lit = c.crease_leaves.find(fc.leaf_key);
-            const bool tangle = lit != c.crease_leaves.end() &&
-                    lit->second.live > AUTOD_TANGLE_LIVE;
-            if (tangle)
-                ++c.tangle_suppressed;
-            const int lvl = tangle ? 1
-                    : std::min(autod_max_level(),
-                               nr >= 4 * AUTOD_BAR ? 2 : 1);
-            int& lv = c.want_dense[fc.leaf_key];
-            lv = std::max(lv, lvl);
-        }
+        flag_leaf(fc.leaf_key, nr);
         if (c.census)
         {
             int bucket = 17;
@@ -901,10 +967,127 @@ void feature_points(Collector& c)
         if (!ok)
             continue;
 
-        c.soup.surface.push_back({ x(0), x(1), x(2) });
-        ++added;
-        for (uint8_t q = 0; q < fc.n; ++q)
-            suppress[fc.pts[q]] = 1;
+        cands.push_back({ &fc, { x(0), x(1), x(2) } });
+    }
+
+    /*  Phantom oracle (2026-07-16, the zeiss "knurled collar"
+     *  autopsy): a sub-lattice fillet turns entirely inside one
+     *  cell, so the cell's crossings read the two FLANK normals
+     *  and the QEF reconstructs the sharp corner the model rounds
+     *  off - a vertex up to half a cell OFF the surface, invisible
+     *  to the residual (a corner explains the crossings; the
+     *  surface just disagrees).  One question the pipeline never
+     *  asked: is the minimizer ON the surface?  Real corners read
+     *  |f|/|grad| ~ 1e-3 cells; phantoms read the fillet depth.
+     *  Phantoms are rejected (their true crossings stay), and the
+     *  miss distance feeds stage-D - it is exactly the sagitta the
+     *  cell hid from the residual.  */
+    if (!cands.empty())
+    {
+        const size_t nc = cands.size();
+        const float h = c.spacing * 0.01f;
+        std::vector<float> qx(nc * 7), qy(nc * 7), qz(nc * 7), qv;
+        for (size_t i = 0; i < nc; ++i)
+        {
+            for (int q = 0; q < 7; ++q)
+            {
+                qx[i*7 + q] = cands[i].x[0];
+                qy[i*7 + q] = cands[i].x[1];
+                qz[i*7 + q] = cands[i].x[2];
+            }
+            qx[i*7 + 1] += h;   qx[i*7 + 2] -= h;
+            qy[i*7 + 3] += h;   qy[i*7 + 4] -= h;
+            qz[i*7 + 5] += h;   qz[i*7 + 6] -= h;
+        }
+        eval_points(deck_base(c.deck), c.ctx, qx, qy, qz, qv);
+
+        const auto fdist_of = [&](size_t i) {
+            const float f = qv[i*7];
+            const float gx = (qv[i*7 + 1] - qv[i*7 + 2]);
+            const float gy = (qv[i*7 + 3] - qv[i*7 + 4]);
+            const float gz = (qv[i*7 + 5] - qv[i*7 + 6]);
+            const float gl = sqrtf(gx*gx + gy*gy + gz*gz) / (2 * h);
+            const float f2 = fabsf(f) / (gl > 1e-12f ? gl : 1e30f);
+            return (std::isfinite(f) && std::isfinite(gl)) ? f2
+                                                           : 0.f;
+        };
+
+        /*  Off-surface minimizers are PROJECTED back onto f = 0,
+         *  not discarded: a tightly curved TRUE crease leaves the
+         *  plane-fit corner a small sagitta off the surface, and
+         *  rejecting those punches gaps in the fallback chains
+         *  (csg loop -> 3 open chains, [.dchain]).  A fillet
+         *  phantom projects onto the mid-band - an on-surface
+         *  vertex where the knurl used to bulge.  Only points the
+         *  projection cannot bring home are rejected (their miss
+         *  distance feeds stage-D).  */
+        std::vector<size_t> off;
+        for (size_t i = 0; i < nc; ++i)
+        {
+            const FeatCell& fc = *cands[i].fc;
+            if (fdist_of(i) > 0.05f * (fc.hi[0] - fc.lo[0]))
+                off.push_back(i);
+        }
+        if (!off.empty())
+        {
+            std::vector<float> px2(off.size()), py2(off.size()),
+                    pz2(off.size()),
+                    hs2(off.size(), h),
+                    cl2(off.size(), 0.75f * c.spacing);
+            for (size_t k = 0; k < off.size(); ++k)
+            {
+                px2[k] = cands[off[k]].x[0];
+                py2[k] = cands[off[k]].x[1];
+                pz2[k] = cands[off[k]].x[2];
+            }
+            project_points_impl(c.deck, c.ctx, px2, py2, pz2,
+                                hs2, cl2);
+            for (size_t k = 0; k < off.size(); ++k)
+            {
+                cands[off[k]].x[0] = px2[k];
+                cands[off[k]].x[1] = py2[k];
+                cands[off[k]].x[2] = pz2[k];
+            }
+            /*  Re-measure the projected points (batched).  */
+            for (size_t k = 0; k < off.size(); ++k)
+            {
+                const size_t i = off[k];
+                for (int q = 0; q < 7; ++q)
+                {
+                    qx[i*7 + q] = cands[i].x[0];
+                    qy[i*7 + q] = cands[i].x[1];
+                    qz[i*7 + q] = cands[i].x[2];
+                }
+                qx[i*7 + 1] += h;   qx[i*7 + 2] -= h;
+                qy[i*7 + 3] += h;   qy[i*7 + 4] -= h;
+                qz[i*7 + 5] += h;   qz[i*7 + 6] -= h;
+            }
+            eval_points(deck_base(c.deck), c.ctx, qx, qy, qz, qv);
+        }
+
+        for (size_t i = 0; i < nc; ++i)
+        {
+            const FeatCell& fc = *cands[i].fc;
+            const float cell = fc.hi[0] - fc.lo[0];
+            const float fdist = fdist_of(i);
+            if (fdist > 0.05f * cell)
+            {
+                ++c.phantom_rejected;
+                flag_leaf(fc.leaf_key, fdist / cell);
+                if (c.census && c.census->dump)
+                    fprintf(c.census->dump,
+                            "PHANTOM %.6g %.6g %.6g fdist=%.5f\n",
+                            cands[i].x[0], cands[i].x[1],
+                            cands[i].x[2], fdist / cell);
+                continue;
+            }
+            c.soup.surface.push_back({ cands[i].x[0],
+                                       cands[i].x[1],
+                                       cands[i].x[2] });
+            ++added;
+            for (uint8_t q = 0; q < fc.n; ++q)
+                suppress[fc.pts[q]] = 1;
+        }
     }
     c.soup.feature_points = added;
 
@@ -1436,7 +1619,7 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt)
                 continue;
             for (const auto& [k2, b2] : c.crease_leaves)
             {
-                if (b2.live > AUTOD_TANGLE_LIVE ||
+                if (b2.mindot <= autod_tangle_dot() ||
                     !touches(it->second, b2))
                     continue;
                 int& l2 = dilated[k2];
@@ -1450,9 +1633,10 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt)
                 ++(l >= 2 ? l2 : l1);
             fprintf(stderr, "AUTOD drill-down: %zu leaves flagged, "
                     "%zu after flood+cores (%zu @1, %zu @2), "
-                    "%llu tangle-demoted\n",
+                    "%llu tangle-demoted, %llu phantom QEF\n",
                     c.want_dense.size(), dilated.size(), l1, l2,
-                    (unsigned long long)c.tangle_suppressed);
+                    (unsigned long long)c.tangle_suppressed,
+                    (unsigned long long)c.phantom_rejected);
         }
 
         Census census2;

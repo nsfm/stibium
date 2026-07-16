@@ -17,18 +17,28 @@ Where things stand, one line each:
   pie is honest work (insert ~100 s = CGAL sequential).
 
 Next fights, pick by mood or Nate's lead:
-1. TANGLE-PINCH CLEANUP (new front of queue): the zeiss worst
-   divot (0.573 sp, stable across every config) and the 51 nm
-   are ONE class - chips whose triangles alias the snap position
-   key through pinch-split duplicate sheets (nhit != 2, snap
-   correctly refuses).  Same neighbourhoods as the nm sites
-   (live 9-201 tangles).  The FAR/untraced-blend depth TAIL is
-   already cured by snap-to-surface (2026-07-16, below); what
-   remains needs extraction- or manifold-pass-level work in
-   crowded thin walls.  Note: seam tracing {f_A = f_B, f = 0}
-   was REFUTED on paper - double root at G1 contact (fields
-   agree to 1st order; the equality sheet osculates the surface),
-   Newton cannot march it.  Don't re-derive.
+1. CONCAVE-GROOVE RESOLUTION (front of queue; Nate's eyeball
+   synthesis 2026-07-17: EVERY remaining visible defect ADDS
+   volume - chords across concave junctions.  Convex is solved).
+   The zeiss "knurled collar" fuzz = alternating chords across
+   sub-lattice concave fillet grooves; tents can't fix a BAND of
+   chords (an apex per chord = finer zigzag), the groove needs
+   lattice points INSIDE it.  Level-2 cores visibly shrink it
+   (Nate ranked ungated autod7 cleanest); full smoothness likely
+   wants level 3 in grooves, which re-raises the pinch question:
+   nm/open damage lives in the same leaves (opposing sheets).
+   The mindot gate (below) is the current compromise; the next
+   lever is separation-aware gating (sheets far apart RELATIVE TO
+   THE DENSE PITCH are safe even at mindot -1) or pinch cleanup
+   at extraction level.  Also: the eyeball loop is now
+   self-serve - scratchpad stlview.py renders STL regions to PNG
+   (I can look), roughness.py ranks dihedral-noise clusters.
+   Old-mesher reference for problem areas:
+   build/zeiss_old_algo_ref.stl (7 vox/mm, simplified).
+   Note: seam tracing {f_A = f_B, f = 0} was REFUTED on paper -
+   double root at G1 contact (fields agree to 1st order; the
+   equality sheet osculates the surface), Newton cannot march
+   it.  Don't re-derive.
 2. Perf machinery: CCDT bulk-insert research (insert ~100 s,
    ~50%), threading the eval side, repair incremental
    re-detection (only edges near fresh inserts).
@@ -47,6 +57,47 @@ eyeballs out-diagnose your instruments - when texture looks like
 geometry, ASK THEM (the knob was never knurled).  Referee models:
 examples/mesh_bench/*.sb (m0), examples/torture/zeiss (m20,
 --resolution 1, ~2.4 min, STIBIUM_DMESH_TIME=1 for heartbeats).
+
+## >>> PHANTOM ORACLE + MINDOT GATE (2026-07-17, LANDED) <<<
+
+**The QEF now answers to the surface.**  A sub-lattice fillet
+turns entirely inside one cell; its crossings read the two flank
+normals and the plane-fit reconstructs the sharp corner the model
+ROUNDS OFF - a vertex up to half a cell off the surface,
+invisible to the residual (a corner explains the crossings; the
+surface just disagrees), invisible to the depth referee until it
+alternates into the "knurled collar" fuzz.  This is also what
+textured the focus knob two nights ago.  Cure, two stages:
+- **Project, don't reject**: every accepted QEF minimizer is
+  oracle-checked (|f|/|grad| at the point, batched); off-surface
+  minimizers are Newton-projected back onto f = 0.  Tightly
+  curved TRUE creases come home (rejecting them punched gaps in
+  the fallback chains - csg loop -> 3 open chains, [.dchain]);
+  fillet phantoms land mid-band as honest on-surface vertices.
+  Only unprojectable points are dropped (miss feeds stage-D).
+  Zeiss: 1,740 off-surface minimizers, 3 unprojectable.
+- **Tangle gate re-keyed to anti-parallelism**
+  (STIBIUM_DMESH_TANGLE_DOT, default -0.5): live-pair count was
+  REFUTED as the discriminator (zeiss collars and damage sites
+  both read live 55-201); the pinch mechanism needs OPPOSING
+  sheets, so the gate now reads min pairwise dot of the 8
+  leaf-corner gradients (computed per crease leaf at descend).
+  Fillet bands (mindot ~ 0, one sheet curling 90 deg) get their
+  level-2 cores; thin walls (mindot ~ -1) stay at flood level.
+
+Zeiss lineage (Nate's eyeballs + renders, one line each):
+- autod3/6 (live gate): knurled collars, 0 open / 51 nm.
+- autod7 (no gate): cleanest collars, 10 open / 209 nm - the
+  proof that groove density cures the fuzz, at structural cost.
+- autod8 (phantom REJECT + live gate): knurl unchanged - the
+  fuzz is chord geometry, not just phantom vertices.
+- autod11 (project + dot -0.5): 0 open / 77 nm / 556K tris.
+- autod12 (project + dot -0.9): 0 open / 87 nm / 600K tris,
+  visibly closer to autod7 (618 level-2 cores vs 462).
+Bench panel (final): all under/at the 0.03 bar (off_axis rides
+it at 0.032, 1 pinch nm), sharp models bit-identical, and the
+honest geometry is LEANER - emboss_0_5 58K -> 39K tris, torus
+trio 52-59K -> 38-50K.  Suite 627,666 + all hidden tags green.
 
 ## >>> SNAP-TO-SURFACE (2026-07-16, same night, LANDED) <<<
 
