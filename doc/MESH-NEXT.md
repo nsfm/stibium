@@ -784,3 +784,22 @@ interface residual is the CROWDING interaction: stacked features
 1-2 cells apart whose corridors/keep-outs overlap and starve the
 strip between.  Nate's boss models (1mm cylinder on flat, 0.5/2mm
 variants) are the referee for that fight.
+
+**Boss-model bisection (Nate's emboss/engrave stable, 2026-07-15
+night):** cylinders stacked/sunken at 0.5/1/2mm steps, r1.
+CROWDING THEORY DEAD: 1mm and 2mm steps (emboss AND engrave) mesh
+PERFECT - 0.000 sp, ~5K tris, zero repairs.  The law is sharp:
+features >= 1 lattice cell are solved; BELOW one cell they do not
+fail gracefully - repair churn sprays 68K inserts and 28x
+triangles for a metrically-tiny finish (the zeiss rough
+interfaces and smeared inlay in one sentence).  The dense band
+RESCUES sub-lattice features: engrave 0.5mm at DENSE=1 = 16
+chips / 0.000 sp / 16K tris; emboss 0.5mm needs DENSE=2 (58K
+tris; lattice-phase asymmetry, dig later).  Grand unification:
+ambiguity-triggered local density cures BOTH residual diseases
+(blend aliasing + sub-lattice steps).  Remaining stage-D work:
+(1) automatic per-leaf level selection (feature-scale detection
+instead of the global env knob), (2) churn suppression when a
+feature stays unresolvable (stall detection, stop early).
+Repair-budget theory also refuted same night (48 rounds = 12x
+topology damage, zero depth gain - 16 is a safety rail).
