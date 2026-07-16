@@ -88,6 +88,10 @@ struct Collector
     std::unordered_map<uint64_t, int> want_dense;
     uint64_t phantom_rejected = 0;   // QEF corners the surface vetoed
 
+    /*  Weld rollback: sites where a previous attempt's weld seam
+     *  minted an open edge - no welding within 1 cell of these.  */
+    const std::vector<std::array<float, 3>>* noweld = nullptr;
+
     /*  Every crease-suspect leaf's box, for flag dilation: a blend
      *  band crossing a leaf boundary must not change pitch ON the
      *  crease (the seam T-junctions read as chips), so flags spread
@@ -208,6 +212,110 @@ void sample_block(Collector& c, const Region& r, Tape* tape,
                 zs[q] = r.Z[k];
             }
     eval_points(tape, c.ctx, xs, ys, zs, vals);
+
+    /*  Clearance weld (sheet-separation campaign, 2026-07-17):
+     *  the pinch anatomy read 160 of 183 non-manifold sites as AIR
+     *  gaps at or below the first probe step - near-tangent
+     *  contacts between assembled parts, far below the 0.1 mm
+     *  product bar ("features >= 0.1 mm retained").  A sample
+     *  whose air gap is thinner than the bar is flipped to solid,
+     *  so the parts fuse cleanly at extraction - exactly what a
+     *  printer would do with the clearance.  STIBIUM_DMESH_WELD
+     *  sets the bar in model units; 0 disables.  */
+    /*  Default OFF until the weld-induced fan tear is cured: with
+     *  welding on, the bino referee trades nm 178 -> 13 (93% of
+     *  the pinch class) but mints 4 open edges at ONE constrained
+     *  vertex (-9.07, 47.64, 51.94) via repair dynamics - not
+     *  spatially weld-adjacent, so the no-weld rollback can't
+     *  reach it.  Next session's opening autopsy.  */
+    static const char* weld_env = getenv("STIBIUM_DMESH_WELD");
+    const float weld = weld_env ? float(atof(weld_env)) : 0.f;
+    if (weld > 0)
+    {
+        std::vector<size_t> candv;
+        for (size_t p = 0; p < n; ++p)
+            if (vals[p] > 0 && vals[p] < weld)
+                candv.push_back(p);
+        if (!candv.empty())
+        {
+            const float h = 0.01f * c.spacing > 0
+                    ? 0.01f * c.spacing : 0.01f;
+            std::vector<float> px, py, pz, pv;
+            for (const size_t p : candv)
+                for (int q = 0; q < 7; ++q)
+                {
+                    px.push_back(xs[p] + (q==1?h:q==2?-h:0));
+                    py.push_back(ys[p] + (q==3?h:q==4?-h:0));
+                    pz.push_back(zs[p] + (q==5?h:q==6?-h:0));
+                }
+            eval_points(tape, c.ctx, px, py, pz, pv);
+            std::vector<std::array<float, 3>> nd(candv.size());
+            for (size_t i = 0; i < candv.size(); ++i)
+            {
+                float gx = pv[i*7+1] - pv[i*7+2];
+                float gy = pv[i*7+3] - pv[i*7+4];
+                float gz = pv[i*7+5] - pv[i*7+6];
+                const float l = sqrtf(gx*gx + gy*gy + gz*gz);
+                nd[i] = l > 0
+                    ? std::array<float,3>{ gx/l, gy/l, gz/l }
+                    : std::array<float,3>{ 0, 0, 0 };
+            }
+            /*  March both ways along the gap normal; solid on BOTH
+             *  sides within the bar means the sample sits in a
+             *  sub-bar clearance.  4 steps of weld/2 each way.  */
+            constexpr int WK = 4;
+            px.clear(); py.clear(); pz.clear();
+            for (size_t i = 0; i < candv.size(); ++i)
+                for (int s2 = 0; s2 < 2; ++s2)
+                    for (int j = 1; j <= WK; ++j)
+                    {
+                        const float t = (s2 ? 1.f : -1.f) *
+                                0.5f * weld * j;
+                        const size_t p = candv[i];
+                        px.push_back(xs[p] + t*nd[i][0]);
+                        py.push_back(ys[p] + t*nd[i][1]);
+                        pz.push_back(zs[p] + t*nd[i][2]);
+                    }
+            eval_points(tape, c.ctx, px, py, pz, pv);
+            /*  Weld rollback (measured: an enclosure pre-rule
+             *  strangled the weld to 1 sample - most gaps are one
+             *  sample thin).  Flip aggressively; if a weld seam
+             *  mints an open edge, the retreat loop feeds the
+             *  site back as a no-weld zone and re-runs.  */
+            for (size_t i = 0; i < candv.size(); ++i)
+            {
+                bool neg_lo = false, neg_hi = false;
+                for (int j = 0; j < WK; ++j)
+                {
+                    if (pv[i*2*WK + j] < 0)
+                        neg_lo = true;
+                    if (pv[i*2*WK + WK + j] < 0)
+                        neg_hi = true;
+                }
+                if (!(neg_lo && neg_hi))
+                    continue;
+                const size_t p = candv[i];
+                bool banned = false;
+                if (c.noweld)
+                    for (const auto& q : *c.noweld)
+                    {
+                        const float dx = xs[p] - q[0];
+                        const float dy = ys[p] - q[1];
+                        const float dz = zs[p] - q[2];
+                        if (dx*dx + dy*dy + dz*dz <
+                            9.f * c.spacing * c.spacing)
+                        {
+                            banned = true;
+                            break;
+                        }
+                    }
+                if (banned)
+                    continue;
+                vals[p] = -vals[p];
+                ++c.soup.welded;
+            }
+        }
+    }
 
     const auto idx = [&](uint32_t i, uint32_t j, uint32_t k) {
         return (size_t(k) * cy + j) * cx + i;
@@ -1594,13 +1702,16 @@ static void census_print(const Census& census, const DSoup& soup,
 static void sample_pass(Collector& c, const Deck* deck, Region r,
                         volatile int* halt,
                         const std::unordered_map<uint64_t, int>* map,
-                        Census* census)
+                        Census* census,
+                        const std::vector<std::array<float, 3>>*
+                                noweld = nullptr)
 {
     c.deck = deck;
     c.ctx = tape_ctx_new(deck);
     c.halt = halt;
     c.dense_map = map;
     c.census = census;
+    c.noweld = noweld;
     descend(c, r, deck_base(deck));
     bisect_edges(c);
     feature_points(c);
@@ -1609,7 +1720,9 @@ static void sample_pass(Collector& c, const Deck* deck, Region r,
 }
 
 DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
-                      const std::unordered_set<uint64_t>* demote)
+                      const std::unordered_set<uint64_t>* demote,
+                      const std::vector<std::array<float, 3>>*
+                              noweld)
 {
     Census census;
     const char* cenv = getenv("STIBIUM_DMESH_CENSUS");
@@ -1622,9 +1735,15 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
 
     Collector c;
     sample_pass(c, deck, r, halt, nullptr,
-                census.on ? &census : nullptr);
+                census.on ? &census : nullptr, noweld);
     if (census.on)
         census_print(census, c.soup, "CENSUS");
+    if (c.soup.welded && (census.on ||
+                          getenv("STIBIUM_DMESH_TIME") ||
+                          getenv("STIBIUM_DMESH_CHIP_DEBUG")))
+        fprintf(stderr, "WELD: %llu air samples fused (sub-bar "
+                "clearances)\n",
+                (unsigned long long)c.soup.welded);
 
     /*  Stage-D drill-down: pass 1 is also the survey.  When any
      *  leaf triggered (QEF residual over the bar, or a hidden
@@ -1731,7 +1850,7 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
         census2.on = census.on;
         Collector c2;
         sample_pass(c2, deck, r, halt, &dilated,
-                    census2.on ? &census2 : nullptr);
+                    census2.on ? &census2 : nullptr, noweld);
         if (census2.on)
             census_print(census2, c2.soup, "CENSUS2");
         if (dbg && !c2.want_dense.empty())
@@ -4429,8 +4548,13 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
              *  the pairing with no DT walk at all.  The map is
              *  shared by both endpoint fans, so duplication stays
              *  consistent and cannot tear a hole.  */
+            static const char* fb_env =
+                    getenv("STIBIUM_DMESH_PAIR_FALLBACK");
+            const bool fb_on = fb_env && atoi(fb_env) != 0;
             for (const auto& [k, ts] : etris)
             {
+                if (!fb_on)
+                    break;
                 if (ts.size() <= 2 || (ts.size() & 1))
                     continue;
                 /*  The walk loop default-constructs sheet[k] even
@@ -5167,6 +5291,108 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         else if (n2 > 2)
             ++out->nonmanifold_edges;
     }
+    /*  Pinch-site anatomy (sheet-separation campaign, opening
+     *  instrument): at every non-manifold edge midpoint, march the
+     *  surface normal both ways and measure how thick the SOLID
+     *  web (inward) and the AIR gap (outward) are.  The cure's
+     *  shape depends on which species dominates and at what
+     *  thickness relative to the local pitch.  */
+    if (getenv("STIBIUM_DMESH_NM_DEBUG"))
+    {
+        std::vector<std::array<float, 3>> mids;
+        for (const auto& [k, n2] : edge_count)
+        {
+            if (n2 <= 2)
+                continue;
+            const uint32_t va = uint32_t(k >> 32);
+            const uint32_t vb = uint32_t(k);
+            mids.push_back({
+                0.5f * (out->verts[3*va] + out->verts[3*vb]),
+                0.5f * (out->verts[3*va+1] + out->verts[3*vb+1]),
+                0.5f * (out->verts[3*va+2] + out->verts[3*vb+2]) });
+        }
+        if (!mids.empty())
+        {
+            const float sp = soup.spacing;
+            const float h = 0.01f * sp;
+            const int NT = 40;               // 40 x 0.05 sp = 2 sp
+            /*  Per site: 7 gradient taps + 2*NT march points  */
+            std::vector<float> qx, qy, qz, qv;
+            for (const auto& m : mids)
+                for (int q = 0; q < 7; ++q)
+                {
+                    qx.push_back(m[0] + (q==1?h:q==2?-h:0));
+                    qy.push_back(m[1] + (q==3?h:q==4?-h:0));
+                    qz.push_back(m[2] + (q==5?h:q==6?-h:0));
+                }
+            eval_points(deck_base(deck), ctx, qx, qy, qz, qv);
+            std::vector<std::array<float, 3>> nrm(mids.size());
+            for (size_t i = 0; i < mids.size(); ++i)
+            {
+                float gx = qv[i*7+1] - qv[i*7+2];
+                float gy = qv[i*7+3] - qv[i*7+4];
+                float gz = qv[i*7+5] - qv[i*7+6];
+                const float l = sqrtf(gx*gx + gy*gy + gz*gz);
+                nrm[i] = l > 0
+                    ? std::array<float,3>{ gx/l, gy/l, gz/l }
+                    : std::array<float,3>{ 0, 0, 0 };
+            }
+            qx.clear(); qy.clear(); qz.clear();
+            for (size_t i = 0; i < mids.size(); ++i)
+                for (int s2 = 0; s2 < 2; ++s2)
+                    for (int j = 1; j <= NT; ++j)
+                    {
+                        const float t = (s2 ? 1.f : -1.f) *
+                                0.05f * sp * j;
+                        qx.push_back(mids[i][0] + t*nrm[i][0]);
+                        qy.push_back(mids[i][1] + t*nrm[i][1]);
+                        qz.push_back(mids[i][2] + t*nrm[i][2]);
+                    }
+            eval_points(deck_base(deck), ctx, qx, qy, qz, qv);
+            int hist_solid[5] = {}, hist_air[5] = {}, none = 0;
+            const auto bucket = [](float t) {
+                return t < 0.25f ? 0 : t < 0.5f ? 1 : t < 1.f ? 2
+                     : t < 2.f ? 3 : 4;
+            };
+            for (size_t i = 0; i < mids.size(); ++i)
+            {
+                float solid = 1e9f, air = 1e9f;
+                for (int j = 0; j < NT; ++j)     // inward (-n)
+                    if (qv[i*2*NT + j] >= 0)
+                    {
+                        solid = 0.05f * (j + 1);
+                        break;
+                    }
+                for (int j = 0; j < NT; ++j)     // outward (+n)
+                    if (qv[i*2*NT + NT + j] <= 0)
+                    {
+                        air = 0.05f * (j + 1);
+                        break;
+                    }
+                if (solid > 100 && air > 100)
+                    ++none;
+                else if (solid <= air)
+                    ++hist_solid[bucket(solid)];
+                else
+                    ++hist_air[bucket(air)];
+                fprintf(stderr, "NM site (%.4f, %.4f, %.4f) "
+                        "solid %.2f sp, air %.2f sp\n",
+                        mids[i][0], mids[i][1], mids[i][2],
+                        solid > 100 ? -1.f : solid,
+                        air > 100 ? -1.f : air);
+            }
+            fprintf(stderr, "NM anatomy (%zu sites, thinnest "
+                    "species; buckets <.25/<.5/<1/<2/none sp):\n"
+                    "  solid web: %d %d %d %d\n"
+                    "  air gap:   %d %d %d %d\n"
+                    "  thick both ways: %d\n",
+                    mids.size(),
+                    hist_solid[0], hist_solid[1], hist_solid[2],
+                    hist_solid[3],
+                    hist_air[0], hist_air[1], hist_air[2],
+                    hist_air[3], none);
+        }
+    }
     if (getenv("STIBIUM_DMESH_NM_DEBUG"))
         for (const auto& [k, n2] : edge_count)
         {
@@ -5232,11 +5458,13 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
      *  boxes) are demoted and stage A re-runs.  Damage is measured,
      *  not predicted; models that produce no holes never pay.  */
     std::unordered_set<uint64_t> demote;
+    std::vector<std::array<float, 3>> noweld;
     for (int attempt = 0; attempt < 3; ++attempt)
     {
         PhaseTimer pt;
         DSoup soup = delaunay_sample(deck, r, halt,
-                demote.empty() ? nullptr : &demote);
+                demote.empty() ? nullptr : &demote,
+                noweld.empty() ? nullptr : &noweld);
         pt.mark("sample+bisect+QEF");
         if (*halt)
             return false;
@@ -5263,7 +5491,7 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                     std::swap(a, b);
                 ++ec[(a << 32) | b];
             }
-        size_t newly = 0;
+        size_t newly = 0, newly_weld = 0;
         for (const auto& [k, n2] : ec)
         {
             if (n2 >= 2)
@@ -5279,6 +5507,7 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
              *  boundary and read epsilon-outside it (measured:
              *  6 opens, 0 demotions, retreat stuck).  */
             const float be = 0.5f * soup.spacing;
+            bool claimed = false;
             for (const auto& db : soup.dense_boxes)
             {
                 if (db.level < 2 ||
@@ -5286,18 +5515,28 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                     my < db.lo[1] - be || my > db.hi[1] + be ||
                     mz < db.lo[2] - be || mz > db.hi[2] + be)
                     continue;
+                claimed = true;
                 if (demote.insert(db.key).second)
                     ++newly;
+            }
+            /*  Unclaimed holes near welded samples are weld-seam
+             *  damage: ban welding there and re-run.  */
+            if (!claimed && soup.welded)
+            {
+                noweld.push_back({ mx, my, mz });
+                ++newly_weld;
             }
         }
         if (getenv("STIBIUM_DMESH_TIME") ||
             getenv("STIBIUM_DMESH_CHIP_DEBUG"))
             fprintf(stderr, "AUTOD retreat %d: %llu open edges, "
-                    "%zu level-2 leaves demoted\n", attempt + 1,
-                    (unsigned long long)out->open_edges, newly);
-        /*  Holes outside any level-2 box are not core damage -
-         *  retreating cannot fix them.  */
-        if (newly == 0)
+                    "%zu level-2 leaves demoted, %zu no-weld "
+                    "zones\n", attempt + 1,
+                    (unsigned long long)out->open_edges, newly,
+                    newly_weld);
+        /*  Holes neither core- nor weld-attributable cannot be
+         *  fixed by retreating.  */
+        if (newly == 0 && newly_weld == 0)
             return ok;
     }
     return true;
