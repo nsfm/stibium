@@ -131,7 +131,17 @@ zero cascades, ~1 h runtime (iterate at r1; r2+ for eyeballs).
    2x the triangles; find the disciplined middle.  Measure at r1.
 4. **Flat-face decimation** (Nate's ask): oracle-certified planar
    patch re-triangulation; sketch under "Queued rounds".
-5. Someday: higher-res zeiss (residuals are sp-units - they
+5. **Performance pass sketch** (Nate asked, 2026-07-15; nothing
+   algorithmic, the engine just has no legs yet): (a) the whole
+   pipeline is single-threaded - sampling evals, tracer pairs,
+   repair-round oracles all parallelize with one TapeCtx per
+   thread (old-mesher pattern; expect 4-8x); (b) the repair loop
+   re-classifies EVERY tet and re-extracts 16 times - early-exit
+   on stalled progress (zeiss rounds 4-15 accomplish ~nothing);
+   (c) descend() still uses scalar tape_eval_i - port the
+   tile renderer's tape_eval_i_batch 64-box fan-out; (d) CGAL
+   DT_3 has Parallel_tag (CCDT compatibility = research).
+6. Someday: higher-res zeiss (residuals are sp-units - they
    shrink with lattice; r2 ~ 1 h), engraving smear (sub-lattice
    detail; relates to hidden_candidates drill-down), repair-churn
    budget, chain-extractor dense robustness, upstream letter
