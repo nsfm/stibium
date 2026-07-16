@@ -771,3 +771,16 @@ mesh converges by densification-where-needed.
 - Where the new mesher lives: `lib/fab/src/mesh/delaunay/`?
 - Does detect-features (Kobbelt) stay as an option forever, or is
   feature capture via step-3 points expected to replace it?
+
+**Repair-budget experiment (2026-07-15 night, REFUTED with
+numbers):** zeiss d1 at STIBIUM_DMESH_ROUNDS=48 vs 16: 3.5x the
+repairs, 2.4x the triangles, worst depth IDENTICAL (0.599 sp,
+same point), and non-manifold edges exploded 147 -> 1747 (pinch
+splits 3.8K -> 34K).  The 16-round cap is a safety rail, not a
+budget shortage - extra rounds churn self-similar sliver chips
+into topology damage (the csg keep-out escalation at model
+scale).  The v1-kindness hypothesis dies with it.  The rough-
+interface residual is the CROWDING interaction: stacked features
+1-2 cells apart whose corridors/keep-outs overlap and starve the
+strip between.  Nate's boss models (1mm cylinder on flat, 0.5/2mm
+variants) are the referee for that fight.
