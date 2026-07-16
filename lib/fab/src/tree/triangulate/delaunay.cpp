@@ -2702,6 +2702,15 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
      *  vertex/triangle indices go stale the moment a re-extraction
      *  happens, so the MAX_REPAIR exit clears them).  */
     std::vector<uint32_t> snap_va, snap_vb, snap_t1, snap_t2;
+    /*  Stall exit (perf round: repair was 64% of the export and
+     *  zeiss's depth flatlines by round ~3 while rounds 4-15 pay
+     *  full re-detection price for nothing - and the budget
+     *  experiment proved extra rounds only convert churn into
+     *  topology damage).  Two consecutive rounds without depth
+     *  improvement = churn ahead, stop; the stash keeps the
+     *  residual chips for the snap pass.  */
+    float stall_prev = 1e30f;
+    int stall_rounds = 0;
     std::vector<float> snap_d;   // chip depth at detection
     for (;; ++repair_round)
     {
@@ -3080,6 +3089,21 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             }
         if (cand.empty())
             break;
+        if (worst_chip >= stall_prev * 0.98f)
+        {
+            if (++stall_rounds >= 2 && repair_round >= 3)
+            {
+                if (chip_env)
+                    fprintf(stderr, "REPAIR: depth stalled at "
+                            "%.3f sp, stopping after round %d\n",
+                            worst_chip / soup.spacing,
+                            repair_round);
+                break;
+            }
+        }
+        else
+            stall_rounds = 0;
+        stall_prev = std::min(stall_prev, worst_chip);
 
         /*  TBP refinement targets for chips (DelIso lineage; see
          *  doc/research/2026-07-15-pinch-manifoldness.md): a divot
