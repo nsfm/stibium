@@ -1211,6 +1211,27 @@ extern "C" unsigned tape_pairs(const Tape* tape, TapePair* out,
     return n;
 }
 
+/*  abs(g) = max(g, -g): the pair machinery's two fields degenerate
+ *  (their gradients are anti-parallel), but the kink locus is
+ *  {g = 0} INTERSECT {surface} - so the tracer pairs the operand
+ *  with the FULL oracle instead.  slot_b is a sentinel; is_max = 2
+ *  tells the probe to substitute f/grad f for field B.  */
+extern "C" unsigned tape_abs_pairs(const Tape* tape, TapePair* out,
+                                   unsigned cap)
+{
+    unsigned n = 0;
+    for (uint32_t k = 0; k < tape->clauses.size(); ++k)
+    {
+        const Clause& c = tape->clauses[k];
+        if (c.op != OP_ABS)
+            continue;
+        if (out && n < cap)
+            out[n] = { k, c.a, UINT32_MAX, uint8_t(2) };
+        ++n;
+    }
+    return n;
+}
+
 extern "C" void tape_eval_r_prefix(const Tape* tape, TapeCtx* ctx,
                                    Region r, unsigned nclauses)
 {

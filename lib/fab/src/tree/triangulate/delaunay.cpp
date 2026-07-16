@@ -1038,19 +1038,23 @@ struct CreaseTracer
         Probe out;
         tape_eval_r_prefix(base, ctx, dummy, tp.clause);
         const float* ra = tape_ctx_r_row(ctx, tp.slot_a);
-        const float* rb = tape_ctx_r_row(ctx, tp.slot_b);
         out.fa = ra[0];
-        out.fb = rb[0];
         const float h2 = 2 * h;
         out.ga[0] = (ra[1] - ra[2]) / h2;
         out.ga[1] = (ra[3] - ra[4]) / h2;
         out.ga[2] = (ra[5] - ra[6]) / h2;
-        out.gb[0] = (rb[1] - rb[2]) / h2;
-        out.gb[1] = (rb[3] - rb[4]) / h2;
-        out.gb[2] = (rb[5] - rb[6]) / h2;
         float fa7[7], fb7[7];
         memcpy(fa7, ra, sizeof(fa7));
-        memcpy(fb7, rb, sizeof(fb7));
+        if (tp.is_max != 2)
+        {
+            /*  min/max: field B is the sibling operand  */
+            const float* rb = tape_ctx_r_row(ctx, tp.slot_b);
+            out.fb = rb[0];
+            out.gb[0] = (rb[1] - rb[2]) / h2;
+            out.gb[1] = (rb[3] - rb[4]) / h2;
+            out.gb[2] = (rb[5] - rb[6]) / h2;
+            memcpy(fb7, rb, sizeof(fb7));
+        }
 
         const float* rf = tape_eval_r(base, ctx, dummy);
         const float f = rf[0];
@@ -1059,12 +1063,78 @@ struct CreaseTracer
         const float gfz = (rf[5] - rf[6]) / h2;
         const float gfl = sqrtf(gfx*gfx + gfy*gfy + gfz*gfz);
         out.fdist = gfl > 0 ? fabsf(f) / gfl : 1e30f;
+        if (tp.is_max == 2)
+        {
+            /*  abs(g): the kink locus is {g = 0} INTERSECT the
+             *  surface, so field B is the FULL oracle - already
+             *  evaluated for the trim distance.  */
+            out.fb = f;
+            out.gb[0] = gfx;
+            out.gb[1] = gfy;
+            out.gb[2] = gfz;
+            memcpy(fb7, rf, sizeof(fb7));
+        }
         out.finite = std::isfinite(out.fa) && std::isfinite(out.fb) &&
                 std::isfinite(f);
         for (int q = 0; q < 7 && out.finite; ++q)
             if (!std::isfinite(fa7[q]) || !std::isfinite(fb7[q]))
                 out.finite = false;
         return out;
+    }
+
+    /*  Kink-activity test for abs creases: the |f| trim can never
+     *  fire on {g = 0, f = 0} (the curve is ON the surface by
+     *  construction), so the trim analog asks whether the surface
+     *  is actually creased here - one-sided full-oracle gradients
+     *  across the g = 0 sheet must disagree.  A smooth crossing
+     *  (the abs branch pruned away or dominated elsewhere) reads
+     *  parallel gradients and the march stops.  */
+    bool kinked(const float p[3], const Probe& pr) const
+    {
+        const float gal = sqrtf(pr.ga[0]*pr.ga[0] +
+                pr.ga[1]*pr.ga[1] + pr.ga[2]*pr.ga[2]);
+        if (!(gal > 0))
+            return false;
+        const float e = 0.05f * sp;
+        float gl3[3], gr3[3];
+        for (int side = 0; side < 2; ++side)
+        {
+            const float s = side ? e : -e;
+            const float q[3] = { p[0] + s * pr.ga[0] / gal,
+                                 p[1] + s * pr.ga[1] / gal,
+                                 p[2] + s * pr.ga[2] / gal };
+            float xs[7], ys[7], zs[7];
+            const float h = 0.01f * sp;
+            for (int u = 0; u < 7; ++u)
+            {
+                xs[u] = q[0];
+                ys[u] = q[1];
+                zs[u] = q[2];
+            }
+            xs[1] += h;  xs[2] -= h;
+            ys[3] += h;  ys[4] -= h;
+            zs[5] += h;  zs[6] -= h;
+            Region dummy = {};
+            dummy.voxels = 7;
+            dummy.X = xs;
+            dummy.Y = ys;
+            dummy.Z = zs;
+            const float* rf = tape_eval_r(base, ctx, dummy);
+            float* g3 = side ? gr3 : gl3;
+            const float h2 = 2 * h;
+            g3[0] = (rf[1] - rf[2]) / h2;
+            g3[1] = (rf[3] - rf[4]) / h2;
+            g3[2] = (rf[5] - rf[6]) / h2;
+            const float l = sqrtf(g3[0]*g3[0] + g3[1]*g3[1] +
+                                  g3[2]*g3[2]);
+            if (!(l > 0) || !std::isfinite(l))
+                return false;
+            g3[0] /= l;
+            g3[1] /= l;
+            g3[2] /= l;
+        }
+        return gl3[0]*gr3[0] + gl3[1]*gr3[1] + gl3[2]*gr3[2]
+                < 0.9f;
     }
 
     /*  Newton onto {f_A = 0, f_B = 0}: minimal-norm step
@@ -1173,6 +1243,13 @@ struct CreaseTracer
                     0.01f * step * step)
                     break;
             }
+            /*  abs trim analog: fdist can't lift (field B IS the
+             *  oracle) - the crease ends where the surface stops
+             *  being creased.  No corner bisection yet: the
+             *  overshoot is at most one step of on-surface
+             *  polyline, which constrains harmlessly.  */
+            if (tp.is_max == 2 && !kinked(pt, pr))
+                break;
             if (pr.fdist > trim)
             {
                 /*  Left the boundary: a third branch owns the
@@ -1241,11 +1318,17 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
                     volatile int* halt)
 {
     Tape* base = deck_base(deck);
-    const unsigned npairs = tape_pairs(base, nullptr, 0);
+    const unsigned nmm = tape_pairs(base, nullptr, 0);
+    const unsigned nabs = tape_abs_pairs(base, nullptr, 0);
+    const unsigned npairs = nmm + nabs;
     if (!npairs || soup->feature_points == 0)
         return false;
     std::vector<TapePair> pairs(npairs);
-    tape_pairs(base, pairs.data(), npairs);
+    tape_pairs(base, pairs.data(), nmm);
+    tape_abs_pairs(base, pairs.data() + nmm, nabs);
+    if (getenv("STIBIUM_DMESH_TRACE_DEBUG"))
+        fprintf(stderr, "TRACE generators: %u min/max, %u abs\n",
+                nmm, nabs);
 
     TapeCtx* ctx = tape_ctx_new(deck);
     const float sp = soup->spacing;
@@ -1297,6 +1380,12 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
                 continue;                // converged elsewhere
             if (pr.fdist > 0.05f * sp)
                 continue;                // crease not on the surface
+            /*  abs creases can't lift off the surface (field B IS
+             *  the oracle), so the on-surface gate always passes -
+             *  the activity question is whether the surface is
+             *  actually creased here.  */
+            if (tp.is_max == 2 && !tr.kinked(p0, pr))
+                continue;
             /*  Duplicate-trace guard: a seed can converge onto a
              *  curve this pair already traced from further away
              *  than the consumption radius (Newton moves seeds up

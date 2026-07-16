@@ -492,6 +492,22 @@ TEST_CASE("Crease tracer: exact curves with junctions", "[.dtrace]")
          *  (traced through its two branch-switch kinks)  */
         { "csg", "ai-r++qXqYqZf1-r++q-Xf0.5qYqZf0.7n-Zf0.2",
           1, 1 },
+        /*  tent prism (abs round, 2026-07-15): the ridge
+         *  {x = 0, z = 0.8} is an ABS crease (the surface kinks
+         *  inside abs(x) with the clause active on both sides) -
+         *  invisible to the min/max pair machinery, traced by the
+         *  abs generator.  (The two 135-degree base creases sit
+         *  below the QEF feature threshold, so the pair tracer
+         *  has no seeds there - a seed-coverage limit, not an abs
+         *  regression.)  */
+        { "tent", "a-+bXZf0.8nZ",
+          1, 0 },
+        /*  extruded cylinder: rims are pair creases (2 closed
+         *  loops); the abs(z) clause kinks at z = 0 where the
+         *  CIRCLE branch owns the surface - the kink-activity
+         *  gate must refuse that phantom equator.  */
+        { "extrude", "a-r+qXqYf1-bZf0.6",
+          0, 2 },
     };
     for (const Case& tc : CASES)
     {
