@@ -157,6 +157,17 @@ unsigned tape_pairs(const Tape* tape, TapePair* out, unsigned cap);
 unsigned tape_abs_pairs(const Tape* tape, TapePair* out,
                         unsigned cap);
 
+/** @brief One scalar walk that records every listed pair's operand
+    values at the moment its clause executes (they are unreadable
+    afterward - register reuse).  pairs must be sorted by clause;
+    abs pairs receive the root value as field B.  Returns the root.
+    The tracer's seed gate: replaces npairs prefix evaluations per
+    seed with one full walk. */
+float tape_eval_f_pairs(const Tape* tape, TapeCtx* ctx,
+                        float x, float y, float z,
+                        const TapePair* pairs, unsigned npairs,
+                        float* fa, float* fb);
+
 /** @brief Point evaluation of the first nclauses clauses only
     (clamped to the tape length).  Same semantics as tape_eval_r
     otherwise; read results via tape_ctx_r_row. */

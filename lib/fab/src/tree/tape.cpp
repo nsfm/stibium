@@ -1185,6 +1185,89 @@ extern "C" const float* tape_eval_r(const Tape* tape, TapeCtx* ctx, Region r)
     return eval_r_span(tape, ctx, r, tape->clauses.size());
 }
 
+/*  Seed-gate support for the crease tracer (perf round,
+ *  2026-07-15): ONE scalar walk records every listed pair's
+ *  operand values at the moment its clause executes (register
+ *  reuse makes them unreadable afterward - this is the same
+ *  liveness fact that forces prefix evaluation, exploited in the
+ *  other direction).  pairs must be sorted by clause; abs pairs
+ *  (is_max == 2) get the ROOT value as field B.  Replaces
+ *  npairs prefix evaluations per seed with one full walk.  */
+extern "C" float tape_eval_f_pairs(const Tape* tape, TapeCtx* ctx,
+                                   float x, float y, float z,
+                                   const TapePair* pairs,
+                                   unsigned npairs,
+                                   float* fa, float* fb)
+{
+    Region r = {};
+    r.voxels = 1;
+    r.X = &x;
+    r.Y = &y;
+    r.Z = &z;
+    if (ctx->g_mode)
+        fill_const_rows(ctx, false);
+    float* base = ctx->r;
+#define ROW(s)  (base + size_t(s) * MIN_VOLUME)
+    for (uint32_t s : ctx->deck->xs)  X_r(r.X, ROW(s), 1);
+    for (uint32_t s : ctx->deck->ys)  Y_r(r.Y, ROW(s), 1);
+    for (uint32_t s : ctx->deck->zs)  Z_r(r.Z, ROW(s), 1);
+    unsigned cur = 0;
+    for (size_t k = 0; k < tape->clauses.size(); ++k)
+    {
+        const auto& c = tape->clauses[k];
+        float *A = ROW(c.a), *B = ROW(c.b), *R = ROW(c.out);
+        while (cur < npairs && pairs[cur].clause < k)
+            ++cur;   // defensive: unsorted input skips, never lags
+        if (cur < npairs && pairs[cur].clause == k)
+        {
+            fa[cur] = A[0];
+            fb[cur] = pairs[cur].is_max == 2 ? 0.f : B[0];
+            ++cur;
+        }
+        switch (c.op)
+        {
+            case OP_ADD:    add_r(A, B, R, 1); break;
+            case OP_SUB:    sub_r(A, B, R, 1); break;
+            case OP_MUL:    mul_r(A, B, R, 1); break;
+            case OP_DIV:    div_r(A, B, R, 1); break;
+            case OP_MIN:    min_r(A, B, R, 1); break;
+            case OP_MAX:    max_r(A, B, R, 1); break;
+            case OP_POW:    pow_r(A, B, R, 1); break;
+            case OP_ATAN2:  atan2_r(A, B, R, 1); break;
+            case OP_MOD:    mod_r(A, B, R, 1); break;
+            case OP_ABS:    abs_r(A, R, 1); break;
+            case OP_SQUARE: square_r(A, R, 1); break;
+            case OP_SQRT:   sqrt_r(A, R, 1); break;
+            case OP_SIN:    sin_r(A, R, 1); break;
+            case OP_COS:    cos_r(A, R, 1); break;
+            case OP_TAN:    tan_r(A, R, 1); break;
+            case OP_ASIN:   asin_r(A, R, 1); break;
+            case OP_ACOS:   acos_r(A, R, 1); break;
+            case OP_ATAN:   atan_r(A, R, 1); break;
+            case OP_NEG:    neg_r(A, R, 1); break;
+            case OP_EXP:    exp_r(A, R, 1); break;
+            case OP_FLOOR:  floor_r(A, R, 1); break;
+            case OP_LOG:    log_r(A, R, 1); break;
+            case OP_GRID: {
+                const MeshGrid* grid =
+                        static_cast<const MeshGrid*>(c.payload);
+                const float* M = ROW(c.m);
+                R[0] = grid_eval_f(grid, A[0], B[0], M[0]);
+                break;
+            }
+            case OP_CONST:  R[0] = c.imm; break;
+            case OP_COPY:   if (R != A) R[0] = A[0]; break;
+            default: ;
+        }
+    }
+    const float root = ROW(tape->root)[0];
+    for (unsigned i = 0; i < npairs; ++i)
+        if (pairs[i].is_max == 2)
+            fb[i] = root;
+    return root;
+#undef ROW
+}
+
 /*  Crease-tracer support (doc/MESH-NEXT.md, crease tracing round).
  *
  *  A min/max clause is a crease generator: the surface kinks where
