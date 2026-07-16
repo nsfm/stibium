@@ -1,5 +1,45 @@
 # The meshing campaign: adaptive Delaunay on sound intervals
 
+## >>> NEXT SESSION OPENS HERE (note to self, 2026-07-16) <<<
+
+Read this block, then the campaign-state sections below it.  As of
+de3544fc everything is GREEN: suite 627,666; showcase all 0.000 sp;
+zeiss d1 exports in 2.4 min (was 23) at the cleanest quality yet
+(Nate: "noticeably nice" - the stall exit REMOVED damage).
+
+Where things stand, one line each:
+- Sharp creases: solved at every resolution (tracer+CCDT+snap).
+- Sub-lattice features + blend bands: solved by DENSE=1-2
+  (opt-in); churn without it.  Resolving is CHEAPER than failing.
+- Perf: tracer 100x (seed gate), repair stall exit; remaining
+  pie is honest work (insert 69s = CGAL sequential).
+
+Next fights, pick by mood or Nate's lead:
+1. STAGE-D AUTO-DENSITY (the flagship): per-leaf dense level
+   chosen automatically (feature scale / curvature /
+   hidden_candidates), replacing the global env knob.  Referee:
+   mesh_bench torus lips < 0.03 sp at r1 WITHOUT global cost;
+   sharp control must stay ~5K tris (currently 2.9x under
+   DENSE=1 for zero gain - that waste is the target).
+   Also dig: emboss_0_5mm needs DENSE=2 where engrave_0_5mm
+   needs only DENSE=1 (lattice-phase asymmetry).
+2. Perf machinery: CCDT bulk-insert research (insert = 69s,
+   52%), threading the eval side, repair incremental
+   re-detection (only edges near fresh inserts).
+3. Flat-face decimation (Nate's old ask) + the engraving smear
+   (hidden_candidates drill-down, folds into stage-D).
+4. Someday: upstream letter (DELAUNAY-MESHER.md ready), zeiss
+   knurled-knob revisit once density is automatic.
+
+House rules, unchanged and battle-proven twice over: measure
+before productionize, on EVERY model; negatives get numbers;
+anchor against the committed baseline (git stash) before
+believing any delta; count is a LYING metric, use depth; Nate's
+eyeballs out-diagnose your instruments - when texture looks like
+geometry, ASK THEM (the knob was never knurled).  Referee models:
+examples/mesh_bench/*.sb (m0), examples/torture/zeiss (m20,
+--resolution 1, ~2.4 min, STIBIUM_DMESH_TIME=1 for heartbeats).
+
 ## >>> CAMPAIGN STATE (2026-07-15, chip round CLOSED) <<<
 
 **The chip class is dead.**  End-of-pipeline referee (full-mesh
