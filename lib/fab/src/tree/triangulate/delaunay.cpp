@@ -2101,15 +2101,20 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     (unsigned long long)dup_dropped,
                     (unsigned long long)cross_dropped,
                     (unsigned long long)quar_dropped);
-        /*  Targeted forensics: STIBIUM_DMESH_PROBE="x,y,z" dumps
-         *  every accepted segment within one cell of the point
-         *  (chasing a recurring conforming-cascade corner).  */
+        /*  Targeted forensics: STIBIUM_DMESH_PROBE="x,y,z[,r]"
+         *  dumps everything the constraint pipeline knows within
+         *  r cells (default 1) of the point: accepted segments,
+         *  QEF feature points (the tracer's seeds), and traced
+         *  polyline points.  Segments-without-features = seedless
+         *  crease; features-without-polylines = seeds refused.  */
         if (const char* pe = getenv("STIBIUM_DMESH_PROBE"))
         {
-            float px2, py2, pz2;
-            if (sscanf(pe, "%f,%f,%f", &px2, &py2, &pz2) == 3)
+            float px2, py2, pz2, prr = 1;
+            const int nsc = sscanf(pe, "%f,%f,%f,%f",
+                                   &px2, &py2, &pz2, &prr);
+            if (nsc >= 3)
             {
-                const float pr2 =
+                const float pr2 = prr * prr *
                         soup.spacing * soup.spacing;
                 for (const auto& s : cseg)
                 {
@@ -2128,6 +2133,37 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                 s[0], s[1], s[2],
                                 s[3], s[4], s[5]);
                 }
+                const size_t pf0 = soup.surface.size() -
+                        size_t(soup.feature_points);
+                uint64_t nfeat = 0;
+                for (size_t i = pf0; i < soup.surface.size(); ++i)
+                {
+                    const DSurfPoint& p = soup.surface[i];
+                    const float dx = p.x - px2, dy = p.y - py2,
+                                dz = p.z - pz2;
+                    if (dx*dx + dy*dy + dz*dz < pr2)
+                    {
+                        ++nfeat;
+                        fprintf(stderr, "PROBE feat "
+                                "(%.6f,%.6f,%.6f)\n",
+                                p.x, p.y, p.z);
+                    }
+                }
+                uint64_t ntr = 0;
+                for (const auto& ch : soup.tchains)
+                    for (const uint32_t idx : ch)
+                    {
+                        const DSurfPoint& p = soup.surface[idx];
+                        const float dx = p.x - px2,
+                                    dy = p.y - py2,
+                                    dz = p.z - pz2;
+                        if (dx*dx + dy*dy + dz*dz < pr2)
+                            ++ntr;
+                    }
+                fprintf(stderr, "PROBE summary: %llu features, "
+                        "%llu traced points in radius\n",
+                        (unsigned long long)nfeat,
+                        (unsigned long long)ntr);
             }
         }
     }
@@ -2570,7 +2606,15 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
      *  Newton-projected onto the surface and inserted, and the mesh
      *  re-extracted, until clean or capped (error-driven insertion,
      *  after Wang et al. 2025).  */
-    constexpr int MAX_REPAIR = 16;
+    /*  Repair-round budget (STIBIUM_DMESH_ROUNDS overrides): the
+     *  bench minis converge in 3-4 rounds, but zeiss exits by CAP
+     *  with work left on the table (333K inserts and climbing) -
+     *  Nate's budget theory, and the v1-kindness finding (brute
+     *  repair volume doubled as detail rescue), both want this
+     *  dial.  */
+    static const char* rounds_env = getenv("STIBIUM_DMESH_ROUNDS");
+    const int MAX_REPAIR = rounds_env && atoi(rounds_env) > 0
+            ? atoi(rounds_env) : 16;
     uint64_t repaired_total = 0;
     int repair_round = 0;
     std::vector<VH> xvh;   // extraction order -> vertex handle
@@ -3663,6 +3707,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
              *  rewrites and earlier snaps), and skips triangles
              *  already touched this wave.  */
             std::vector<uint8_t> done(snap_va.size(), 0);
+            std::vector<std::array<float, 3>> far_pts;
             bool progress = true;
             while (progress)
             {
@@ -3746,6 +3791,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                         done[s] = 1;
                         ++snap_skipped;
                         ++skip_far;
+                        far_pts.push_back({ mx, my, mz });
                         continue;
                     }
                     /*  Locate the edge's two triangles by position.
@@ -3831,6 +3877,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 }
             }
             if (getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+            {
                 fprintf(stderr, "SNAP: %llu chip edges tented onto "
                         "the crease, %llu skipped (%llu far, "
                         "%llu hits)\n",
@@ -3838,6 +3885,40 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                         (unsigned long long)snap_skipped,
                         (unsigned long long)skip_far,
                         (unsigned long long)skip_hits);
+                /*  Where do the UNTRACED chips live?  5-cell bins,
+                 *  top clusters - probe targets for the seed-
+                 *  coverage hunt.  */
+                std::unordered_map<uint64_t, uint32_t> bins;
+                const float bw = 5.f * soup.spacing;
+                for (const auto& P : far_pts)
+                {
+                    const int64_t bx2 = int64_t(floorf(P[0] / bw));
+                    const int64_t by2 = int64_t(floorf(P[1] / bw));
+                    const int64_t bz2 = int64_t(floorf(P[2] / bw));
+                    ++bins[(uint64_t(bx2 & 0x1FFFFF) << 42) |
+                           (uint64_t(by2 & 0x1FFFFF) << 21) |
+                            uint64_t(bz2 & 0x1FFFFF)];
+                }
+                std::vector<std::pair<uint32_t, uint64_t>> top;
+                for (const auto& [k, n2] : bins)
+                    top.push_back({ n2, k });
+                std::sort(top.rbegin(), top.rend());
+                for (size_t i = 0; i < top.size() && i < 6; ++i)
+                {
+                    const auto sx17 = [](uint64_t v) {
+                        int64_t s = int64_t(v & 0x1FFFFF);
+                        if (s & 0x100000)
+                            s -= 0x200000;
+                        return s;
+                    };
+                    const uint64_t k = top[i].second;
+                    fprintf(stderr, "  FAR cluster: %u chips near "
+                            "(%.1f, %.1f, %.1f)\n", top[i].first,
+                            (sx17(k >> 42) + 0.5f) * bw,
+                            (sx17(k >> 21) + 0.5f) * bw,
+                            (sx17(k) + 0.5f) * bw);
+                }
+            }
         }
         out->snapped = snapped;
     }
