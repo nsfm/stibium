@@ -2044,9 +2044,22 @@ struct CreaseTracer
                             pr.gb[2]*pr.gb[2];
             const float c = pr.ga[0]*pr.gb[0] + pr.ga[1]*pr.gb[1] +
                             pr.ga[2]*pr.gb[2];
+            /*  Tangency gate with teeth (2026-07-17, the additive-
+             *  joint autopsy): coincident-surface seams - the same
+             *  wall computed through two arithmetic paths, e.g. an
+             *  eyepiece fitted exactly into a bore - degenerate the
+             *  kink locus into a 2D sheet.  Rounding noise keeps
+             *  the operand gradients JUST non-parallel (the old
+             *  1e-6 bar = accepts pairs meeting at ~0.06 deg), so
+             *  Newton converges anywhere on the sheet and the
+             *  march wanders along noise, hallucinating constraint
+             *  polylines that become the visible interference
+             *  rings.  det > 0.01*a*b demands the surfaces meet at
+             *  >~5.7 deg - real creases are 30-90 deg, rounding
+             *  ghosts are thousandths.  */
             const float det = a*b - c*c;
-            if (!(det > 1e-6f * a * b) || !(a > 0) || !(b > 0))
-                return false;                    // tangency
+            if (!(det > 1e-2f * a * b) || !(a > 0) || !(b > 0))
+                return false;                    // tangency/ghost
             const float u = (-pr.fa * b + pr.fb * c) / det;
             const float v = (-pr.fb * a + pr.fa * c) / det;
             float dx = pr.ga[0]*u + pr.gb[0]*v;

@@ -82,6 +82,32 @@ geometry, ASK THEM (the knob was never knurled).  Referee models:
 examples/mesh_bench/*.sb (m0), examples/torture/zeiss (m20,
 --resolution 1, ~2.4 min, STIBIUM_DMESH_TIME=1 for heartbeats).
 
+## >>> THE ADDITIVE-JOINT DIAGNOSIS (2026-07-17, campaign-defining) <<<
+
+Nate's modeling note cracked it: the stubborn joints are
+ADDITIVELY-FITTED parts (fully-modeled eyepiece inserted into an
+exactly-matching bore) - the same surface computed through two
+arithmetic paths.  Consequences, each measured:
+- The coincident WALLS flicker at rounding scale -> the pinch/nm
+  class (thin-air anatomy above; the clearance weld is its cure).
+- Nate's key referee datapoint: weld-on vs weld-off are VISUALLY
+  identical - nm was never the visible artifact.
+- The visible interference = the RIMS: probe at the bino joint
+  shows several REAL crease rings 0.22-0.77 mm apart (eyepiece
+  rim vs tube rim at slightly different heights).  ABOVE the
+  0.1 mm bar = in-spec features, but closer together than even
+  the level-2 pitch (0.25 mm at r1) - the strip between paired
+  rings has NO surface witnesses and gets chorded ring-to-ring.
+  NOT hallucination (tangency-gate hardening to 5.7 deg changed
+  nothing, kept anyway as robustness), NOT coincident-duplicate
+  chains (dedupe already merges those; probe shows distinct
+  rings), NOT the corridor (witness rule stands).
+NEXT CAMPAIGN - CLOSE-RING STRIP CORES: after tracing, find
+chain pairs within ~3 dense pitches; flag exactly their strip
+leaves for level 3 (tens of leaves - NOT the blanket level-3
+disaster; retreat loop guards).  Composes with the weld (walls)
+to close the additive-joint class entirely.
+
 ## >>> SHEET SEPARATION ROUND 1: ANATOMY + CLEARANCE WELD (2026-07-17) <<<
 
 **Anatomy (the campaign's opening instrument, in the NM_DEBUG
