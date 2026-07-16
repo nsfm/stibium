@@ -49,6 +49,12 @@ Next fights, pick by mood or Nate's lead:
    knurled-knob revisit (density is automatic now), a
    graze-vs-feature oracle to bring the hidden trigger back.
 
+PRODUCT BAR (Nate, 2026-07-17): features >= ~0.1 mm retained BY
+DEFAULT = traditional-3D-print-ready.  Stretch goal: finer, for
+resin.  Implication: sub-quarter-cell resolution must become
+SAFE (the pinch class is the gate - level 3 currently costs 7x
+nm), and production-res exports must finish in sane time.
+
 House rules, unchanged and battle-proven twice over: measure
 before productionize, on EVERY model; negatives get numbers;
 anchor against the committed baseline (git stash) before
@@ -57,6 +63,28 @@ eyeballs out-diagnose your instruments - when texture looks like
 geometry, ASK THEM (the knob was never knurled).  Referee models:
 examples/mesh_bench/*.sb (m0), examples/torture/zeiss (m20,
 --resolution 1, ~2.4 min, STIBIUM_DMESH_TIME=1 for heartbeats).
+
+## >>> PINCH CENSUS: THE TRUE-PINCH CLASS (2026-07-17, opening data) <<<
+
+The nm residual (bino 178 / zeiss 124) is now PRECISELY
+characterized, and it is NOT a pairing gap:
+- 62% of nm vertices are prov-5 (repair-loop inserts), largely
+  constraint-free (steiner 0 / ncstr 0).
+- The manifold pass PAIRS EVERY pinch edge (MANIFOLD debug line
+  under NM_DEBUG: 963/963 on the bino; the tet-ring walk never
+  failed here).  A normal-similarity fallback pairing now backs
+  the walk anyway (fires on absent-or-empty entries - note the
+  walk default-constructs empty sheet[k] entries, a trap).
+- The residual edges survive the fan split because their two
+  sheets are GENUINELY CONNECTED one ring away - the union-find
+  correctly refuses a split that would tear.  This is the
+  restricted-Delaunay true pinch: two sheets within lattice
+  quantization, joined nearby.
+NEXT CAMPAIGN (the 0.1 mm gate): spatial separation - detect
+near-coincident opposing sheets at sampling/insert time and keep
+them a minimum distance apart, or dissolve sub-quantization webs
+entirely.  Local topology surgery is exhausted; the fix is
+geometric.
 
 ## >>> THE RING AUTOPSY: KEEP-OUT CONVICTED (2026-07-17) <<<
 
