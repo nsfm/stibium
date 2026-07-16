@@ -4181,7 +4181,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         static const char* snap_env = getenv("STIBIUM_DMESH_SNAP");
         const bool snap_on = !snap_env || atoi(snap_env) != 0;
         uint64_t snapped = 0, snap_skipped = 0;
-        uint64_t skip_far = 0, skip_hits = 0;
+        uint64_t skip_far = 0, skip_hits = 0, snap_surf = 0;
         /*  Self-feeding stash (zeiss run, 2026-07-15): when the
          *  repair loop exhausts MAX_REPAIR (real models churn), the
          *  per-round stash is stale and was cleared - but the chips
@@ -4389,11 +4389,68 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                      0.35f * soup.spacing));
                     if (best > acap * acap)
                     {
-                        done[s] = 1;
-                        ++snap_skipped;
-                        ++skip_far;
-                        far_pts.push_back({ mx, my, mz });
-                        continue;
+                        /*  No polyline owns this chip: a divot in
+                         *  SMOOTH surface (untraced tangent blends
+                         *  - the zeiss FAR clusters; the seam
+                         *  system {f_A = f_B, f = 0} that would
+                         *  trace their centerline has a DOUBLE
+                         *  root at G1 contact and cannot be
+                         *  marched).  The apex that can never
+                         *  build a ridge is the surface itself:
+                         *  Newton-project the midpoint onto f = 0
+                         *  and tent there (STIBIUM_DMESH_SNAP_SURF
+                         *  = 0 reverts to skipping).  The same
+                         *  depth-proportional acceptance applies -
+                         *  a projection that travels further than
+                         *  the divot is deep is a bad gradient,
+                         *  not a cure.  */
+                        static const char* ss_env =
+                                getenv("STIBIUM_DMESH_SNAP_SURF");
+                        /*  Depth floor: tenting a near-zero divot
+                         *  onto the surface is pure churn (the
+                         *  surface is already there), and on
+                         *  repair-churned bands it self-feeds
+                         *  through the stash sweep (engrave_0_5:
+                         *  7,795 tents of 0.000-depth noise, +9K
+                         *  tris).  0.01 sp splits the measured
+                         *  populations: the churn noise reads
+                         *  exactly 0.000, the real zeiss FAR
+                         *  divots 0.01-0.59 (a 0.05 floor left
+                         *  5.2K of them unfixed).  */
+                        bool surf_ok = (!ss_env ||
+                                        atoi(ss_env) != 0) &&
+                                snap_d[s] >= 0.01f * soup.spacing;
+                        if (surf_ok)
+                        {
+                            std::vector<float>
+                                    sx{ mx }, sy{ my }, sz{ mz },
+                                    hs2{ 0.01f * soup.spacing },
+                                    cl2{ 0.75f * soup.spacing };
+                            project_points_impl(deck, ctx, sx, sy,
+                                                sz, hs2, cl2);
+                            const float dx2 = sx[0] - mx,
+                                        dy2 = sy[0] - my,
+                                        dz2 = sz[0] - mz;
+                            const float d2 = dx2*dx2 + dy2*dy2 +
+                                             dz2*dz2;
+                            surf_ok = std::isfinite(d2) &&
+                                      d2 <= acap * acap;
+                            if (surf_ok)
+                            {
+                                px = sx[0];
+                                py = sy[0];
+                                pz = sz[0];
+                                ++snap_surf;
+                            }
+                        }
+                        if (!surf_ok)
+                        {
+                            done[s] = 1;
+                            ++snap_skipped;
+                            ++skip_far;
+                            far_pts.push_back({ mx, my, mz });
+                            continue;
+                        }
                     }
                     /*  Locate the edge's two triangles by position.
                      *  Coincident sheet duplicates (pinch splits)
@@ -4479,10 +4536,11 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             }
             if (getenv("STIBIUM_DMESH_CHIP_DEBUG"))
             {
-                fprintf(stderr, "SNAP: %llu chip edges tented onto "
-                        "the crease, %llu skipped (%llu far, "
-                        "%llu hits)\n",
+                fprintf(stderr, "SNAP: %llu chip edges tented "
+                        "(%llu onto the surface), %llu skipped "
+                        "(%llu far, %llu hits)\n",
                         (unsigned long long)snapped,
+                        (unsigned long long)snap_surf,
                         (unsigned long long)snap_skipped,
                         (unsigned long long)skip_far,
                         (unsigned long long)skip_hits);

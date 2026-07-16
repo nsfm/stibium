@@ -17,12 +17,18 @@ Where things stand, one line each:
   pie is honest work (insert ~100 s = CGAL sequential).
 
 Next fights, pick by mood or Nate's lead:
-1. TRACER COVERAGE (new front of queue): the residual zeiss
-   divots (0.573 sp worst) are UNTRACED tangent blends in
-   thin-wall tangles (live pairs 9-201/leaf) - snap has nothing
-   to snap to there, and density is the wrong tool (measured:
-   nm 241).  Teach the tracer tangent-blend creases, or a
-   blend-aware smoothing pass.
+1. TANGLE-PINCH CLEANUP (new front of queue): the zeiss worst
+   divot (0.573 sp, stable across every config) and the 51 nm
+   are ONE class - chips whose triangles alias the snap position
+   key through pinch-split duplicate sheets (nhit != 2, snap
+   correctly refuses).  Same neighbourhoods as the nm sites
+   (live 9-201 tangles).  The FAR/untraced-blend depth TAIL is
+   already cured by snap-to-surface (2026-07-16, below); what
+   remains needs extraction- or manifold-pass-level work in
+   crowded thin walls.  Note: seam tracing {f_A = f_B, f = 0}
+   was REFUTED on paper - double root at G1 contact (fields
+   agree to 1st order; the equality sheet osculates the surface),
+   Newton cannot march it.  Don't re-derive.
 2. Perf machinery: CCDT bulk-insert research (insert ~100 s,
    ~50%), threading the eval side, repair incremental
    re-detection (only edges near fresh inserts).
@@ -41,6 +47,34 @@ eyeballs out-diagnose your instruments - when texture looks like
 geometry, ASK THEM (the knob was never knurled).  Referee models:
 examples/mesh_bench/*.sb (m0), examples/torture/zeiss (m20,
 --resolution 1, ~2.4 min, STIBIUM_DMESH_TIME=1 for heartbeats).
+
+## >>> SNAP-TO-SURFACE (2026-07-16, same night, LANDED) <<<
+
+**The unattributed-chip class (zeiss FAR clusters) is cured.**
+When no traced polyline claims a chip (best > acap), the snap
+pass now Newton-projects the chip midpoint onto f = 0 and tents
+there instead of skipping (STIBIUM_DMESH_SNAP_SURF=0 reverts).
+The apex lands ON the surface, so the ridge failure mode of far
+attribution cannot occur; the same depth-proportional acceptance
+gates a bad gradient.  Zeiss (shipped 0.01 floor): 6,795 tents,
+deep FAR clusters cured, residue reads < 0.01 sp (10 um at r1 -
+sub-visual); 0 open / 51 nm held; bench unchanged.
+
+Two guards, both measured in:
+- **Depth floor 0.01 sp**: tenting near-zero divots is churn that
+  SELF-FEEDS through the stash sweep on repair-churned bands
+  (engrave_0_5 with no floor: 7,795 tents of 0.000-depth noise,
+  +9K tris, chip count 4.6K -> 18K).  The measured populations
+  split at 0.01: churn noise reads exactly 0.000, real FAR
+  divots 0.01-0.59 (a 0.05 floor left 5.2K of them unfixed).
+- The projection must travel no further than the divot is deep
+  (acap), or it's a bad gradient, not a cure.
+
+Worst depth is UNCHANGED (0.573 sp, same site) - the tail was
+FAR-class, the single worst is tangle-pinch-class (nhit != 2:
+pinch-split duplicate sheets alias the position key; snap
+correctly refuses aliased topology).  That class is next fight
+#1 above.
 
 ## >>> STAGE-D AUTO-DENSITY (2026-07-16, LANDED) <<<
 
