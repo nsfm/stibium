@@ -82,6 +82,35 @@ geometry, ASK THEM (the knob was never knurled).  Referee models:
 examples/mesh_bench/*.sb (m0), examples/torture/zeiss (m20,
 --resolution 1, ~2.4 min, STIBIUM_DMESH_TIME=1 for heartbeats).
 
+## >>> SHEET SEPARATION ROUND 1: ANATOMY + CLEARANCE WELD (2026-07-17) <<<
+
+**Anatomy (the campaign's opening instrument, in the NM_DEBUG
+dump): the pinch class is thin AIR, not thin solid.**  Bino: 160
+of 183 sites are air gaps, 155 of them at or below the FIRST
+march step (0.05 sp = 50 um at r1) - near-tangent contacts
+between assembled parts.  Zeiss: 93 of 124 air, mostly <0.25 sp.
+All far below the 0.1 mm product bar, so welding them is
+spec-compliant (a printer fuses such clearances anyway).
+
+**Clearance weld (STIBIUM_DMESH_WELD, model units - currently
+DEFAULT OFF, opt-in experiment):** air samples whose probe finds
+solid within the bar on BOTH sides of the gap normal flip to
+inside during sampling; parts fuse cleanly at extraction.
+Measured with weld=0.1: bino nm 178 -> 13 (93% of the class),
+mesh 8% lighter.  BLOCKED ON one defect: 4 open edges minted at
+a single constrained vertex (-9.07, 47.64, 51.94), prov-3/5 mix
+with split duplicates - a fan-split tear reached through REPAIR
+DYNAMICS, not weld-adjacent geometry, so the no-weld retreat
+rollback (implemented, plumbed, working) cannot reach it by
+radius.  Also refereed: an enclosure pre-rule (only weld samples
+fully surrounded by solid/welded) strangles the weld to 1 sample
+- the gaps are one sample thin; and the normal-fallback pairing
+was exonerated for the tear (now opt-in via
+STIBIUM_DMESH_PAIR_FALLBACK).
+NEXT SESSION OPENS HERE: autopsy the tear site (NM_DEBUG +
+stlview render at that coordinate, weld on), cure, then flip
+STIBIUM_DMESH_WELD default to 0.1 and re-referee everything.
+
 ## >>> PINCH CENSUS: THE TRUE-PINCH CLASS (2026-07-17, opening data) <<<
 
 The nm residual (bino 178 / zeiss 124) is now PRECISELY

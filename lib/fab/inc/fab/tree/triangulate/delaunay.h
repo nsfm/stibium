@@ -19,6 +19,7 @@
  *  see MESH-NEXT.)
  */
 
+#include <array>
 #include <cstdint>
 #include <unordered_set>
 #include <vector>
@@ -76,6 +77,11 @@ struct DSoup
     };
     std::vector<DDenseBox> dense_boxes;
 
+    /*  Clearance weld (STIBIUM_DMESH_WELD, model units, default
+     *  0.1): air samples inside a sub-bar gap flipped to solid -
+     *  near-tangent assembly contacts fuse instead of pinching.  */
+    uint64_t welded = 0;
+
     /*  QEF-placed sharp-feature points appended to `surface`.  */
     uint64_t feature_points = 0;
     /*  Crossings replaced by their cell's feature point.  */
@@ -96,10 +102,14 @@ struct DSoup
 
 /*  Stage A: collect the point soup for a region.  demote lists
  *  leaf addresses whose level-2 cores are rolled back to the
- *  flood level (the retreat loop's measured-damage feedback).  */
+ *  flood level; noweld lists sites where a previous attempt's
+ *  clearance weld minted an open edge (both are the retreat
+ *  loop's measured-damage feedback).  */
 DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
                       const std::unordered_set<uint64_t>* demote
-                              = nullptr);
+                              = nullptr,
+                      const std::vector<std::array<float, 3>>*
+                              noweld = nullptr);
 
 /*  The crease tracer: marches every min/max clause's crease
  *  {f_A = 0, f_B = 0} with an SSI predictor-corrector on the tape's
