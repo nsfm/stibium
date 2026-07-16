@@ -2579,6 +2579,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
      *  keep repair out.  */
     std::vector<std::pair<uint32_t, uint32_t>> accepted;
     std::vector<std::array<float, 6>> cseg;
+    std::vector<uint32_t> cseg_chain;   // owning chain per segment
     if constexpr (CCDT_MODE)
     {
         /*  Traced chains (exact, ordered, junction-sharing) when
@@ -2593,13 +2594,20 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         else
             chains = delaunay_chains(soup);
         std::vector<std::pair<uint32_t, uint32_t>> cand;
+        std::vector<uint32_t> cand_chain;
         for (size_t c = 0; c < chains.chains.size(); ++c)
         {
             const auto& chain = chains.chains[c];
             for (size_t j = 0; j + 1 < chain.size(); ++j)
+            {
                 cand.push_back({ chain[j], chain[j + 1] });
+                cand_chain.push_back(uint32_t(c));
+            }
             if (chains.closed[c] && chain.size() > 2)
+            {
                 cand.push_back({ chain.back(), chain.front() });
+                cand_chain.push_back(uint32_t(c));
+            }
         }
         Tape* base = deck_base(deck);
         constexpr int NS = 3;
@@ -2796,6 +2804,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         for (size_t i = 0; i < cand.size(); ++i)
         {
             bool good = slen[i] > 0;
+            int judged_samples = 0;
             for (int u = 0; good && u < NS; ++u)
             {
                 const size_t o = (i * NS + u) * 7;
@@ -2812,11 +2821,33 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                  *  of its densest (0.5-0.9 cell) segments at
                  *  3.0-4.1% while true shortcuts sit far beyond
                  *  either bound.  */
-                if (!std::isfinite(f) || !(gl > 0) ||
-                    fabsf(f) / gl > std::max(slen[i] * 0.03f,
+                /*  "Couldn't judge" is NOT "guilty" (bino model,
+                 *  2026-07-17: 198 of 292 rejections carried 0.0%
+                 *  measured error and tipped the trust gate,
+                 *  torching 2,000+ good constraints).  A non-finite
+                 *  sample gives no verdict; a zero-gradient sample
+                 *  with f ~ 0 sits exactly ON the kink (the central
+                 *  difference cancels across a crease - which is
+                 *  where these polylines live).  Only samples with
+                 *  a real distance reading can convict.  */
+                if (!std::isfinite(f))
+                    continue;
+                if (!(gl > 0))
+                {
+                    if (fabsf(f) > 1e-6f)
+                        good = false;
+                    continue;
+                }
+                ++judged_samples;
+                if (fabsf(f) / gl > std::max(slen[i] * 0.03f,
                             soup.spacing * 0.05f))
                     good = false;
             }
+            /*  A segment with NO judgeable sample could hide a
+             *  shortcut through a NaN void - demand at least one
+             *  real reading.  */
+            if (judged_samples == 0)
+                good = false;
             if (good)
             {
                 const DSurfPoint& A = soup.surface[cand[i].first];
@@ -2872,6 +2903,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 }
                 accepted.push_back(cand[i]);
                 cseg.push_back({ A.x, A.y, A.z, B.x, B.y, B.z });
+                cseg_chain.push_back(cand_chain[i]);
             }
             else if (getenv("STIBIUM_DMESH_SEG_DEBUG"))
             {
@@ -2918,6 +2950,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         {
             accepted.clear();
             cseg.clear();
+            cseg_chain.clear();
         }
         if ((dup_dropped || cross_dropped || quar_dropped) &&
             getenv("STIBIUM_DMESH_SEG_DEBUG"))
@@ -3026,14 +3059,76 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
      *  the band's pitch.  Quick-reject with the widest possible
      *  radius before paying for the box lookup.  */
     const float drop_max = 0.35f * soup.spacing / dense_factor();
-    const auto in_corridor = [&](float x, float y, float z,
-                                 auto&& near_fn) {
-        if (!near_fn(x, y, z, drop_max))
+    /*  Two-chain witness rule (the eyepiece-ring autopsy,
+     *  2026-07-17): a vertex is redundant only when ONE crease
+     *  owns it.  Between two constrained rings closer than two
+     *  corridor widths the old test deleted every witness of the
+     *  surface BETWEEN them, and extraction spanned the strip
+     *  with chords through air (the double ring of thorns, fuzzed
+     *  full-circle only when constraints are on - bino A/B).
+     *  Junction corners still drop: there the two chains' closest
+     *  points coincide at the shared corner, so the foot points
+     *  sit within the radius of each other.  */
+    const auto sole_owner = [&](float x, float y, float z,
+                                float r) {
+        float d1 = 1e30f, d2 = 1e30f;
+        float f1x = 0, f1y = 0, f1z = 0;
+        float f2x = 0, f2y = 0, f2z = 0;
+        uint32_t c1 = UINT32_MAX;
+        for (size_t si = 0; si < cseg.size(); ++si)
+        {
+            const auto& s = cseg[si];
+            const float ax = s[0], ay = s[1], az = s[2];
+            const float bx = s[3] - ax, by = s[4] - ay,
+                        bz = s[5] - az;
+            const float px = x - ax, py = y - ay, pz = z - az;
+            const float bb = bx*bx + by*by + bz*bz;
+            float t = bb > 0 ? (px*bx + py*by + pz*bz) / bb : 0;
+            t = t < 0 ? 0 : t > 1 ? 1 : t;
+            const float fx = ax + t*bx, fy = ay + t*by,
+                        fz = az + t*bz;
+            const float dx = x - fx, dy = y - fy, dz = z - fz;
+            const float d = dx*dx + dy*dy + dz*dz;
+            const uint32_t ch = cseg_chain[si];
+            if (ch == c1)
+            {
+                if (d < d1)
+                {
+                    d1 = d;
+                    f1x = fx; f1y = fy; f1z = fz;
+                }
+            }
+            else if (d < d1)
+            {
+                d2 = d1;
+                f2x = f1x; f2y = f1y; f2z = f1z;
+                d1 = d;
+                f1x = fx; f1y = fy; f1z = fz;
+                c1 = ch;
+            }
+            else if (d < d2)
+            {
+                d2 = d;
+                f2x = fx; f2y = fy; f2z = fz;
+            }
+        }
+        if (!(d1 < r * r))
+            return false;             // near no crease: keep
+        if (!(d2 < r * r))
+            return true;              // one owner: redundant, drop
+        const float gx = f2x - f1x, gy = f2y - f1y, gz = f2z - f1z;
+        /*  Feet together = junction corner (drop as before);
+         *  feet apart = the point sits BETWEEN two creases and is
+         *  the strip's only witness.  */
+        return gx*gx + gy*gy + gz*gz < r * r;
+    };
+    const auto in_corridor = [&](float x, float y, float z) {
+        if (!near_crease(x, y, z, drop_max))
             return false;
         const float eff = 0.35f * soup.spacing /
                 std::max(dense_factor(),
                          box_dense_factor(soup, x, y, z));
-        return eff >= drop_max || near_fn(x, y, z, eff);
+        return sole_owner(x, y, z, std::min(eff, drop_max));
     };
     /*  Feature points referenced by an accepted segment are the
      *  chain itself and always enter; the rest of the QEF clump
@@ -3060,7 +3155,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     for (const DSample& s : soup.samples)
     {
         if (s.on_surface && !cseg.empty() &&
-            in_corridor(s.x, s.y, s.z, near_crease))
+            in_corridor(s.x, s.y, s.z))
             continue;
         pts.push_back({ TPoint(s.x, s.y, s.z),
                         int8_t(s.on_surface ? 0
@@ -3114,7 +3209,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
          *  slivers - drop them, EXCEPT the chain members
          *  themselves.  */
         if (!cseg.empty() && !chain_used.count(uint32_t(si)) &&
-            in_corridor(s.x, s.y, s.z, near_crease))
+            in_corridor(s.x, s.y, s.z))
         {
             surf_vh.push_back(VH());
             continue;
@@ -4124,13 +4219,26 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
              *  depth stuck at 0.375 sp; 0.6 x chord-length proxy
              *  ditto - chords ARE one local pitch, so it resolved
              *  to 0.30 sp and still blocked everything).  */
-            const float ko = kspec[i] == 2 ? 0.0f
+            /*  STIBIUM_DMESH_KEEPOUT scales the repair keep-out.
+             *  DEFAULT 0 (off) since the eyepiece-ring autopsy
+             *  (2026-07-17): the keep-out was starving groove
+             *  repairs beside every constrained crease (the ring
+             *  "thorn crown"; zeiss worst depth 0.573 -> 0.212 sp
+             *  and nm 168 -> 124 with it off, bench better
+             *  everywhere) while its anti-sliver duty is already
+             *  covered by the crowding guard below.  =1 restores
+             *  the old radii.  */
+            static const char* ko_env =
+                    getenv("STIBIUM_DMESH_KEEPOUT");
+            const float ko_scale = ko_env ? float(atof(ko_env))
+                                          : 0.f;
+            const float ko = ko_scale * (kspec[i] == 2 ? 0.0f
                     : kspec[i]
                         ? 0.35f * soup.spacing /
                           std::max(dense_factor(),
                                    box_dense_factor(soup, kx[i],
                                                     ky[i], kz[i]))
-                        : 0.75f * soup.spacing;
+                        : 0.75f * soup.spacing);
             if (ko > 0 && !cseg.empty() &&
                 near_crease(kx[i], ky[i], kz[i], ko))
             {
