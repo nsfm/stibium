@@ -354,6 +354,11 @@ constexpr float AUTOD_BAR = 0.03f;
  *  thin walls) in one move.  */
 int autod_max_level()
 {
+    /*  Default 3 was tried and REFUTED (2026-07-17): local
+     *  eighth-cell cores on zeiss = 1,147 nm (7x), 2x triangles,
+     *  3x wall-clock - the global-8x disaster in local form.
+     *  Level 3 remains an opt-in knob for models whose sub-lattice
+     *  detail justifies it (e.g. ~0.2 mm emboss at 1 vox/mm).  */
     const char* env = getenv("STIBIUM_DMESH_AUTODENSE_MAX");
     const int lv = env ? atoi(env) : 2;
     return lv < 1 ? 1 : lv;
@@ -918,9 +923,16 @@ void feature_points(Collector& c)
                 lit->second.sep < autod_sep_bar() * c.spacing;
         if (tangle)
             ++c.tangle_suppressed;
-        const int lvl = tangle ? 1
-                : std::min(autod_max_level(),
-                           nrv >= 4 * AUTOD_BAR ? 2 : 1);
+        /*  One level per factor of 4 over the bar (sagitta
+         *  quarters per level): 0.12 cells wants 2, 0.48 wants 3.
+         *  Level 3 is LOCAL eighth-cells in grooves - safe only
+         *  because the retreat loop measures and rolls back any
+         *  hole it opens (global 8x remains a proven disaster).  */
+        int lvl = 1;
+        if (!tangle)
+            for (float t = 4 * AUTOD_BAR;
+                 nrv >= t && lvl < autod_max_level(); t *= 4)
+                ++lvl;
         int& lv = c.want_dense[key];
         lv = std::max(lv, lvl);
     };
@@ -1077,15 +1089,24 @@ void feature_points(Collector& c)
          *  rejecting those punches gaps in the fallback chains
          *  (csg loop -> 3 open chains, [.dchain]).  A fillet
          *  phantom projects onto the mid-band - an on-surface
-         *  vertex where the knurl used to bulge.  Only points the
-         *  projection cannot bring home are rejected (their miss
-         *  distance feeds stage-D).  */
+         *  vertex where the knurl used to bulge.  Every
+         *  off-surface minimizer flags stage-D with its
+         *  PRE-projection miss - that distance is the
+         *  corner-rounding depth, exactly the groove sagitta the
+         *  cell hides from the residual (the first projection
+         *  round only flagged UNprojectable points, silently
+         *  starving projected groove cells of their cores).  */
         std::vector<size_t> off;
         for (size_t i = 0; i < nc; ++i)
         {
             const FeatCell& fc = *cands[i].fc;
-            if (fdist_of(i) > 0.05f * (fc.hi[0] - fc.lo[0]))
+            const float cell = fc.hi[0] - fc.lo[0];
+            const float fd = fdist_of(i);
+            if (fd > 0.05f * cell)
+            {
+                flag_leaf(fc.leaf_key, fd / cell);
                 off.push_back(i);
+            }
         }
         if (!off.empty())
         {
@@ -1694,14 +1715,15 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
                     l = 1;
         if (dbg)
         {
-            size_t l1 = 0, l2 = 0;
+            size_t l1 = 0, l2 = 0, l3 = 0;
             for (const auto& [k, l] : dilated)
-                ++(l >= 2 ? l2 : l1);
+                ++(l >= 3 ? l3 : l >= 2 ? l2 : l1);
             fprintf(stderr, "AUTOD drill-down: %zu leaves flagged, "
-                    "%zu after flood+cores (%zu @1, %zu @2), "
-                    "%llu tangle-demoted, %llu phantom QEF\n",
+                    "%zu after flood+cores (%zu @1, %zu @2, "
+                    "%zu @3), %llu tangle-demoted, "
+                    "%llu phantom QEF\n",
                     c.want_dense.size(), dilated.size(), l1, l2,
-                    (unsigned long long)c.tangle_suppressed,
+                    l3, (unsigned long long)c.tangle_suppressed,
                     (unsigned long long)c.phantom_rejected);
         }
 
@@ -5041,12 +5063,16 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                                      out->verts[3*vb + 1]);
             const float mz = 0.5f * (out->verts[3*va + 2] +
                                      out->verts[3*vb + 2]);
+            /*  Half-cell inflation: seam holes sit ON the box
+             *  boundary and read epsilon-outside it (measured:
+             *  6 opens, 0 demotions, retreat stuck).  */
+            const float be = 0.5f * soup.spacing;
             for (const auto& db : soup.dense_boxes)
             {
                 if (db.level < 2 ||
-                    mx < db.lo[0] || mx > db.hi[0] ||
-                    my < db.lo[1] || my > db.hi[1] ||
-                    mz < db.lo[2] || mz > db.hi[2])
+                    mx < db.lo[0] - be || mx > db.hi[0] + be ||
+                    my < db.lo[1] - be || my > db.hi[1] + be ||
+                    mz < db.lo[2] - be || mz > db.hi[2] + be)
                     continue;
                 if (demote.insert(db.key).second)
                     ++newly;

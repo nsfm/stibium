@@ -58,6 +58,29 @@ geometry, ASK THEM (the knob was never knurled).  Referee models:
 examples/mesh_bench/*.sb (m0), examples/torture/zeiss (m20,
 --resolution 1, ~2.4 min, STIBIUM_DMESH_TIME=1 for heartbeats).
 
+## >>> LEAK FIX + LEVEL-3 VERDICT (2026-07-17, round close) <<<
+
+- **Signal leak fixed**: projected-home phantom minimizers now
+  flag stage-D with their PRE-projection miss (the corner-rounding
+  depth) - the projection round had silently stopped feeding the
+  density signal, starving exactly the groove cells it repaired.
+  Zeiss cores 1,078 -> 1,458; **0 open on the FIRST attempt**
+  (no retreat needed), 187 nm, 823K tris (autod16).
+- **Level 3 as default REFUTED**: zeiss 1,147 nm (7x), 2x tris,
+  3x wall-clock - the global-8x disaster in local form.  Stays an
+  opt-in (STIBIUM_DMESH_AUTODENSE_MAX=3) for sub-quarter-cell
+  detail; the level formula now assigns one level per factor of
+  4 over the bar, clamped by the knob.
+- Retreat box test inflated half a cell (seam holes read
+  epsilon-outside their box: 6 opens, 0 demotions, loop stuck).
+- The zeiss base NAMEPLATE (plaque ~0.2 mm proud, x~-2.5 y~32.5
+  z~2.5) is NOT a model gap (old-mesher reference shows it crisp)
+  - it is sub-lattice below even level-2 reach at r1.  Cures:
+  MAX=3 (with its price) or a higher export resolution.
+- [.dchain] pins STIBIUM_DMESH_AUTODENSE=0 alongside DENSE=0
+  (the phantom-oracle flags would drill csg's crease band dense;
+  base-density features are that extractor's contract).
+
 ## >>> RETREAT LOOP: OPTIMISM WITH ROLLBACK (2026-07-17, LANDED) <<<
 
 **The gate saga's end state: damage is measured, not predicted.**
