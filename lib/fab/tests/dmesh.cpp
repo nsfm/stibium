@@ -582,6 +582,10 @@ TEST_CASE("Crease chains: known topology recovered", "[.dchain]")
      *  oracle trust gate (>10% rejected segments -> DT semantics);
      *  dense-input robustness is queued in MESH-NEXT.  */
     setenv("STIBIUM_DMESH_DENSE", "0", 1);
+    /*  Same contract for stage-D: the phantom-oracle flags (curved
+     *  creases report their plane-fit sagitta) would otherwise
+     *  drill csg's crease band dense.  */
+    setenv("STIBIUM_DMESH_AUTODENSE", "0", 1);
     for (const Case& tc : CASES)
     {
         CAPTURE(tc.name);
@@ -614,4 +618,5 @@ TEST_CASE("Crease chains: known topology recovered", "[.dchain]")
         }
     }
     unsetenv("STIBIUM_DMESH_DENSE");
+    unsetenv("STIBIUM_DMESH_AUTODENSE");
 }
