@@ -1379,14 +1379,67 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
     std::vector<uint8_t> closed;
     std::vector<uint32_t> poly_pair;
 
-    std::vector<uint8_t> consumed(soup->feature_points, 0);
-    for (const TapePair& tp : pairs)
+    /*  Seed gate (perf round, 2026-07-15: the tracer was 69% of a
+     *  zeiss export - 957 s - because every pair ran full Newton
+     *  from every seed, and almost every (pair, seed) match is
+     *  impossible).  One recording walk per seed captures every
+     *  pair's operand values; Newton then runs only where BOTH
+     *  fields are already small.  The gate is generous (Newton
+     *  moves seeds up to 1.5 cells and verifies everything) and
+     *  STIBIUM_DMESH_SEEDGATE=0 restores the exhaustive loop.  */
+    static const char* sg_env = getenv("STIBIUM_DMESH_SEEDGATE");
+    const bool seedgate = !sg_env || atoi(sg_env) != 0;
+    std::vector<std::vector<uint32_t>> pair_seeds(npairs);
+    if (seedgate)
     {
+        std::vector<TapePair> sorted(pairs);
+        std::vector<uint32_t> order(npairs);
+        for (unsigned i = 0; i < npairs; ++i)
+            order[i] = i;
+        std::sort(order.begin(), order.end(),
+                  [&](uint32_t l, uint32_t r2) {
+                      return pairs[l].clause < pairs[r2].clause;
+                  });
+        for (unsigned i = 0; i < npairs; ++i)
+            sorted[i] = pairs[order[i]];
+        std::vector<float> fa(npairs), fb(npairs);
+        const float gate = 8.f * sp;
+        for (size_t s = 0; s < size_t(soup->feature_points); ++s)
+        {
+            const DSurfPoint& seed = soup->surface[f0 + s];
+            tape_eval_f_pairs(base, ctx, seed.x, seed.y, seed.z,
+                              sorted.data(), npairs,
+                              fa.data(), fb.data());
+            for (unsigned i = 0; i < npairs; ++i)
+                if (std::isfinite(fa[i]) && std::isfinite(fb[i]) &&
+                    fabsf(fa[i]) < gate && fabsf(fb[i]) < gate)
+                    pair_seeds[order[i]].push_back(uint32_t(s));
+        }
+        if (getenv("STIBIUM_DMESH_TRACE_DEBUG"))
+        {
+            size_t total = 0;
+            for (const auto& v : pair_seeds)
+                total += v.size();
+            fprintf(stderr, "TRACE seed gate: %zu candidate "
+                    "(pair, seed) matches of %zu exhaustive\n",
+                    total,
+                    size_t(npairs) * size_t(soup->feature_points));
+        }
+    }
+
+    std::vector<uint8_t> consumed(soup->feature_points, 0);
+    for (unsigned pi = 0; pi < npairs; ++pi)
+    {
+        const TapePair& tp = pairs[pi];
         if (*halt)
             break;
         tr.tp = tp;
-        for (size_t s = 0; s < consumed.size(); ++s)
+        const size_t nseeds = seedgate ? pair_seeds[pi].size()
+                                       : consumed.size();
+        for (size_t si = 0; si < nseeds; ++si)
         {
+            const size_t s = seedgate ? size_t(pair_seeds[pi][si])
+                                      : si;
             if (consumed[s] || *halt)
                 continue;
             const DSurfPoint& seed = soup->surface[f0 + s];
