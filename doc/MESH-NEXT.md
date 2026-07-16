@@ -9,27 +9,29 @@ zeiss d1 exports in 2.4 min (was 23) at the cleanest quality yet
 
 Where things stand, one line each:
 - Sharp creases: solved at every resolution (tracer+CCDT+snap).
-- Sub-lattice features + blend bands: solved by DENSE=1-2
-  (opt-in); churn without it.  Resolving is CHEAPER than failing.
+- Density: AUTOMATIC as of 2026-07-16 (stage-D section below).
+  QEF-residual trigger + graduated coverage; auto equals or
+  beats the best manual config on every referee, sharp models
+  bit-identical.  Zeiss: 0.573 sp, 0 open, 51 nm, no knob.
 - Perf: tracer 100x (seed gate), repair stall exit; remaining
-  pie is honest work (insert 69s = CGAL sequential).
+  pie is honest work (insert ~100 s = CGAL sequential).
 
 Next fights, pick by mood or Nate's lead:
-1. STAGE-D AUTO-DENSITY (the flagship): per-leaf dense level
-   chosen automatically (feature scale / curvature /
-   hidden_candidates), replacing the global env knob.  Referee:
-   mesh_bench torus lips < 0.03 sp at r1 WITHOUT global cost;
-   sharp control must stay ~5K tris (currently 2.9x under
-   DENSE=1 for zero gain - that waste is the target).
-   Also dig: emboss_0_5mm needs DENSE=2 where engrave_0_5mm
-   needs only DENSE=1 (lattice-phase asymmetry).
-2. Perf machinery: CCDT bulk-insert research (insert = 69s,
-   52%), threading the eval side, repair incremental
+1. TRACER COVERAGE (new front of queue): the residual zeiss
+   divots (0.573 sp worst) are UNTRACED tangent blends in
+   thin-wall tangles (live pairs 9-201/leaf) - snap has nothing
+   to snap to there, and density is the wrong tool (measured:
+   nm 241).  Teach the tracer tangent-blend creases, or a
+   blend-aware smoothing pass.
+2. Perf machinery: CCDT bulk-insert research (insert ~100 s,
+   ~50%), threading the eval side, repair incremental
    re-detection (only edges near fresh inserts).
-3. Flat-face decimation (Nate's old ask) + the engraving smear
-   (hidden_candidates drill-down, folds into stage-D).
+3. Flat-face decimation (Nate's old ask) + engraving-smear
+   verification on zeiss eyeballs (the 0.5 mm bench referees are
+   solved; confirm the real inlay reads crisp at r1).
 4. Someday: upstream letter (DELAUNAY-MESHER.md ready), zeiss
-   knurled-knob revisit once density is automatic.
+   knurled-knob revisit (density is automatic now), a
+   graze-vs-feature oracle to bring the hidden trigger back.
 
 House rules, unchanged and battle-proven twice over: measure
 before productionize, on EVERY model; negatives get numbers;
@@ -39,6 +41,88 @@ eyeballs out-diagnose your instruments - when texture looks like
 geometry, ASK THEM (the knob was never knurled).  Referee models:
 examples/mesh_bench/*.sb (m0), examples/torture/zeiss (m20,
 --resolution 1, ~2.4 min, STIBIUM_DMESH_TIME=1 for heartbeats).
+
+## >>> STAGE-D AUTO-DENSITY (2026-07-16, LANDED) <<<
+
+**The global density knob is now automatic, and the auto path
+equals or beats the best manual config on every referee owned.**
+Final zeiss r1: worst depth 0.573 sp (best ever; manual champ d1
+was 0.609, d0 0.774), 0 open / 51 nm (champ: 0/50), 409,710 tris
+(champ: 406,752), ~4 min - no knob set.  Sharp models stay
+bit-identical to base.  Two-pass drill-down
+(STIBIUM_DMESH_AUTODENSE, default ON; STIBIUM_DMESH_DENSE > 0
+still forces the uniform manual band):
+
+- **Trigger = QEF residual, in cell units.**  For near-parallel
+  normals the clamped DC solve degenerates to a plane fit, so the
+  residual IS the surface sagitta across the cell - the trigger,
+  the referee bar (0.03 sp), and the level formula are one number.
+  Census (STIBIUM_DMESH_CENSUS=1 summary, =path per-leaf/per-cell
+  dump) proved bimodal separation: solved models are SILENT above
+  nr 0.01 (sharp stack: 0 cells; emboss_2: 0), problem models
+  light up exactly where they hurt (sub-lattice 0.5 mm lips: a
+  clean spike of 80 cells at nr 0.2-0.3, nothing between).
+- **Level from magnitude**: one extra level per factor of 4 over
+  the bar (sagitta quarters per level), capped at 2.
+- **Pass 2** re-runs stage A with a leaf-key -> level map; flagged
+  leaves sample the midpoint-refined lattice.  Pass 1 is also the
+  survey (cost: sampling x2, ~2 s -> 14 s on zeiss of a 40 s run).
+- **Coverage must be CONTIGUOUS - the night's central law,
+  measured four ways.**  (a) No dilation: pitch T-junction seams
+  ON the crease band, 0.057 sp chips on off_axis.  (b) One-ring
+  dilation: bench clean, but zeiss flag boundaries still cut
+  mid-band - 8-10 open edges.  (c) Tangle-suppressed islands
+  (8 flags surviving): isolated dense tiles = maximum
+  seam-per-band, worst depth 1.111 sp - WORSE than d0.
+  (d) Graduated coverage (shipped): level 1 FLOODS the connected
+  crease-suspect component containing any flag (the global-d1
+  treatment, but only for components that asked), level-2 cores
+  dilate one ring into non-tangle neighbours.  Every seam <= 2x,
+  never mid-tangle.  Zeiss: 0 open.
+- **Tangle gate (AUTOD_TANGLE_LIVE = 8)**: every open/nm site in
+  the ungated zeiss sat in leaves with 9-201 live pairs (thin-wall
+  CSG tangles - focusing mechanism, eyepiece guts); every referee
+  model that NEEDS density maxes at 4-5.  Level 2 in tangles
+  resolves pinch geometry faster than it fixes divots (nm 241
+  gated off to 48).  Tangle flags demote to level-1 flood seeds.
+- **Local radii**: DSoup carries dense_boxes; the crease corridor
+  and chip keep-out divide by max(global knob, densest box at the
+  point).  Global mode unchanged (box level == knob there).
+
+Referee (mesh_bench, r1, worst FINAL chip depth / tris, final
+graduated config): sharp control 0.000 / 9,616 (bit-identical to
+base - ZERO waste); emboss_2 0.000 / 5,742 (identical); torus_lip
+0.005 / 58K; cone_torus_lip 0.006 / 52K; off_axis 0.018 / 55K;
+emboss_0_5 0.003 / 58K (was 667-repair churn + smear; == global
+d2 exactly); engrave_0_5 0.000 / 67K (1 sub-visual pinch nm, the
+accepted class).  Every blend under the 0.03 bar; cost lands only
+where the problems were.  Suite 627,666 green;
+[.dmesh]/[.dchain]/[.dtrace]/[.dmeshSTL] green.
+
+Refereed negatives:
+- **Hidden trigger demoted to STIBIUM_DMESH_HIDDEN=1 (default
+  OFF)**: on the sharp control it fired on 18 tangent-GRAZE leaves
+  (still hidden at 4x - there is nothing there), and dilation
+  spread them into 74 dense leaves: 9.6K -> 38.5K tris for zero
+  depth gain.  The smear features the trigger was meant for are
+  partially visible and already caught by the residual.  Needs a
+  graze-vs-feature oracle (sign of f vs distance-to-surface at
+  the dense corners?) before it can default on.
+- **Leaf-corner pair crowding is NOT a trigger**: the solved sharp
+  stack has 40 leaves with 3+ crease-active pairs (0 repairs).
+  Crowding hurts per CELL, not per leaf; corner sampling can't see
+  it, the residual can.
+- Pass-2 residue (leaves still hot at their OWN quarter-cell
+  scale) is expected and reported, not chased: the bar is
+  scale-free, so pass-2 judges absolute sagittas 4x stricter.
+  Zeiss residue 462 - mostly tangle-demoted leaves; their divots
+  are the untraced-tangent-blend class (tracer-coverage work,
+  not density work).
+- STIBIUM_DMESH_AUTODENSE_MAX (default 2) caps the core level -
+  the discriminator knob that convicted level-2-in-tangles
+  (nm 241 -> 48 at cap 1, depth unchanged).  Level 3+ cores never
+  earned their damage risk on any referee; revisit only if a
+  model's eyeballs demand sub-0.005 sp blends.
 
 ## >>> CAMPAIGN STATE (2026-07-15, chip round CLOSED) <<<
 

@@ -61,6 +61,8 @@ struct PendingEdge
 struct FeatCell
 {
     float lo[3], hi[3];
+    uint64_t leaf_key = 0;   // coord_hash of the owning leaf's lo
+                             // corner (stage-D drill-down address)
     uint32_t pts[12];
     uint8_t n = 0;
 };
@@ -77,6 +79,22 @@ struct Collector
     std::vector<PendingEdge> edges;
     std::vector<FeatCell> cells;
     float spacing = 0;   // finest lattice pitch (uniform grid)
+    struct Census* census = nullptr;    // stage-D leaf census (opt-in)
+
+    /*  Stage-D drill-down: pass 2 reads dense_map (leaf lo-corner
+     *  hash -> extra levels); pass 1 writes want_dense from the
+     *  QEF-residual and hidden-candidate triggers.  */
+    const std::unordered_map<uint64_t, int>* dense_map = nullptr;
+    std::unordered_map<uint64_t, int> want_dense;
+
+    /*  Every crease-suspect leaf's box, for flag dilation: a blend
+     *  band crossing a leaf boundary must not change pitch ON the
+     *  crease (the seam T-junctions read as chips), so flags spread
+     *  to touching crease-suspect leaves before pass 2.  live is
+     *  the leaf's surviving-pair count - the tangle gate reads it.  */
+    struct LeafBox { float lo[3], hi[3]; unsigned live; };
+    std::unordered_map<uint64_t, LeafBox> crease_leaves;
+    uint64_t tangle_suppressed = 0;
 
     void add_sample(float x, float y, float z, bool inside,
                     bool on_surface = false)
@@ -152,8 +170,12 @@ void eval_points(const Tape* tape, TapeCtx* ctx,
 }
 
 /*  Leaf block: evaluate the corner lattice, tag signs, and queue
- *  every sign-change lattice edge for bisection.  */
-void sample_block(Collector& c, const Region& r, Tape* tape)
+ *  every sign-change lattice edge for bisection.  leaf_key is the
+ *  leaf's drill-down address; crease_leaf says the pushed tape kept
+ *  a live crease pair (gates the hidden-feature trigger - smooth
+ *  tangent grazes read hidden too, and they never need density).  */
+void sample_block(Collector& c, const Region& r, Tape* tape,
+                  uint64_t leaf_key, bool crease_leaf)
 {
     const uint32_t ni = r.ni, nj = r.nj, nk = r.nk;
     const uint32_t cx = ni + 1, cy = nj + 1, cz = nk + 1;
@@ -200,7 +222,24 @@ void sample_block(Collector& c, const Region& r, Tape* tape)
 
     ++c.soup.leaf_blocks;
     if (!(any_in && any_out))
+    {
         ++c.soup.hidden_candidates;   // interval said maybe; samples say no
+        /*  Hidden trigger (STIBIUM_DMESH_HIDDEN=1, default OFF):
+         *  a crease-suspect leaf whose samples all agree is where a
+         *  sub-lattice feature could vanish whole.  Measured
+         *  2026-07-16: on the sharp control this fires on tangent
+         *  GRAZES (18 leaves, still hidden at 4x, dilating them
+         *  4x'd the triangle count for zero depth gain), while the
+         *  partially-visible features the smear complains about are
+         *  already caught by the residual trigger.  Needs a
+         *  graze-vs-feature oracle before it can be default.  */
+        static const char* hid_env = getenv("STIBIUM_DMESH_HIDDEN");
+        if (crease_leaf && hid_env && atoi(hid_env) != 0)
+        {
+            int& lv = c.want_dense[leaf_key];
+            lv = std::max(lv, 2);
+        }
+    }
 
     /*  Candidate feature cells: any voxel with >= 3 crossing edges.
      *  Judged later, once bisected positions and normals exist.  */
@@ -209,6 +248,7 @@ void sample_block(Collector& c, const Region& r, Tape* tape)
             for (uint32_t i = 0; i < ni; ++i)
             {
                 FeatCell fc;
+                fc.leaf_key = leaf_key;
                 fc.lo[0] = r.X[i];    fc.hi[0] = r.X[i + 1];
                 fc.lo[1] = r.Y[j];    fc.hi[1] = r.Y[j + 1];
                 fc.lo[2] = r.Z[k];    fc.hi[2] = r.Z[k + 1];
@@ -281,6 +321,60 @@ float dense_factor()
     return float(1 << dense_levels());
 }
 
+/*  Stage-D auto-density (STIBIUM_DMESH_AUTODENSE, default ON;
+ *  STIBIUM_DMESH_DENSE > 0 overrides with the uniform manual knob).
+ *  Trigger bar: QEF residual in cell units.  0.03 is the torus-lip
+ *  referee bar itself - for near-parallel normals the clamped
+ *  solve degenerates to a plane fit, so the residual IS the
+ *  surface sagitta across the cell.  Level from magnitude:
+ *  curvature sagitta quarters per level, so one level per factor
+ *  of 4 over the bar (measured: sub-lattice lips read nr 0.2-0.3
+ *  and need level 2; gentle blends read 0.03-0.12 and need 1).  */
+constexpr float AUTOD_BAR = 0.03f;
+
+/*  Level cap (STIBIUM_DMESH_AUTODENSE_MAX, default 2): the
+ *  discriminator knob for damage bisection - cap 1 removes every
+ *  level-2 tile (and with it both 4x-pitch seams and 4x-resolved
+ *  thin walls) in one move.  */
+int autod_max_level()
+{
+    const char* env = getenv("STIBIUM_DMESH_AUTODENSE_MAX");
+    const int lv = env ? atoi(env) : 2;
+    return lv < 1 ? 1 : lv;
+}
+
+/*  Tangle gate (zeiss autopsy, 2026-07-16): every open/non-manifold
+ *  site in the auto-density zeiss sat in a leaf with 9-201 live
+ *  pairs - thin-wall CSG tangles where a denser lattice resolves
+ *  pinch geometry faster than it fixes divots (level 2 there:
+ *  nm 241; level 1 patchy: 8 holes).  Every referee model that
+ *  NEEDS density maxes out at 4-5 live pairs.  Leaves above the
+ *  gate are not densified at all; their divots are the untraced-
+ *  blend class (tracer-coverage work, not density work).  */
+constexpr unsigned AUTOD_TANGLE_LIVE = 8;
+
+bool autodense()
+{
+    const char* env = getenv("STIBIUM_DMESH_AUTODENSE");
+    return (!env || atoi(env) != 0) && dense_levels() == 0;
+}
+
+/*  Local band factor at a point: the densest recorded drill-down
+ *  box containing it (1 outside all bands).  Crease-local radii
+ *  divide by max(global knob, this) - the density round measured
+ *  that corridor and keep-out must track the LOCAL pitch or the
+ *  band starves repair (281/281 blocked at fixed radii).  */
+float box_dense_factor(const DSoup& soup, float x, float y, float z)
+{
+    float f = 1.f;
+    for (const auto& b : soup.dense_boxes)
+        if (x >= b.lo[0] && x <= b.hi[0] &&
+            y >= b.lo[1] && y <= b.hi[1] &&
+            z >= b.lo[2] && z <= b.hi[2])
+            f = std::max(f, float(1 << b.level));
+    return f;
+}
+
 /*  Midpoint-refine one lattice axis: n cells -> 2n, original corner
  *  coordinates preserved bit-exact (shared faces of mixed-density
  *  neighbours must dedup in add_sample).  */
@@ -295,6 +389,150 @@ void refine_axis(std::vector<float>& a)
     }
     b[2 * n] = a[n];
     a = std::move(b);
+}
+
+/*  Stage-D leaf census (STIBIUM_DMESH_CENSUS=1 for a summary,
+ *  =path for a per-leaf dump): the signals available at the
+ *  density decision point, measured so the auto-density triggers
+ *  are chosen from populations, not guesses.  Per crease-suspect
+ *  leaf (live pair in the pushed tape):
+ *    - SHEET-active: the pair's kink sheet {f_A = f_B} (or {g = 0}
+ *      for abs) changes sign across the 8 leaf corners;
+ *    - CREASE-active: sheet crossing AND the crease locus itself is
+ *      near (min over corners of max(|f_A|,|f_B|) under the leaf
+ *      diagonal - both fields small means the curve is close);
+ *    - corner-gradient spread: min pairwise dot of the 8 normalized
+ *      full-field gradients (a blend band curls the normal inside
+ *      one leaf; a flat or gently curved patch does not).  */
+struct Census
+{
+    bool on = false;
+    FILE* dump = nullptr;
+    uint64_t leaves = 0;        // crease-suspect (live pairs > 0)
+    uint64_t by_sheet[4] = {};  // 0 / 1 / 2 / 3+ sheet-active pairs
+    uint64_t by_crease[4] = {};
+    uint64_t dot_hist[12] = {}; // min-dot: [-1,1] in 12 buckets,
+                                // leaves with >= 1 crease-active pair
+
+    /*  Per-cell QEF residual (feature_points): RMS distance of the
+     *  cell's crossing-planes from the minimizer, in cell units.
+     *  For near-parallel normals the clamped solve is a plane fit,
+     *  so the residual IS the surface sagitta across the cell - the
+     *  same units as the torus-lip referee bar (0.03 sp).  */
+    static constexpr float NR_EDGES[17] = {
+        0.005f, 0.01f, 0.02f, 0.03f, 0.05f, 0.075f, 0.1f, 0.15f,
+        0.2f, 0.3f, 0.5f, 0.75f, 1.f, 1.5f, 2.f, 3.f, 5.f };
+    uint64_t nr_hist[18] = {};
+};
+
+void leaf_census(Collector& c, const Region& r, Tape* sub)
+{
+    Census& cs = *c.census;
+    const unsigned nmm = tape_pairs(sub, nullptr, 0);
+    const unsigned nabs = tape_abs_pairs(sub, nullptr, 0);
+    const unsigned np = nmm + nabs;
+    if (!np)
+        return;
+    ++cs.leaves;
+
+    std::vector<TapePair> pairs(np);
+    tape_pairs(sub, pairs.data(), nmm);
+    tape_abs_pairs(sub, pairs.data() + nmm, nabs);
+    std::sort(pairs.begin(), pairs.end(),
+              [](const TapePair& a, const TapePair& b) {
+                  return a.clause < b.clause;
+              });
+
+    const float x0 = r.X[0], x1 = r.X[r.ni];
+    const float y0 = r.Y[0], y1 = r.Y[r.nj];
+    const float z0 = r.Z[0], z1 = r.Z[r.nk];
+    const float diag = sqrtf((x1 - x0) * (x1 - x0) +
+                             (y1 - y0) * (y1 - y0) +
+                             (z1 - z0) * (z1 - z0));
+
+    /*  Pair fields at the 8 corners: one recording walk each.  */
+    std::vector<float> fa(8 * size_t(np)), fb(8 * size_t(np));
+    float cx[8], cy[8], cz[8];
+    for (int q = 0; q < 8; ++q)
+    {
+        cx[q] = (q & 1) ? x1 : x0;
+        cy[q] = (q & 2) ? y1 : y0;
+        cz[q] = (q & 4) ? z1 : z0;
+        tape_eval_f_pairs(sub, c.ctx, cx[q], cy[q], cz[q],
+                          pairs.data(), np,
+                          fa.data() + size_t(q) * np,
+                          fb.data() + size_t(q) * np);
+    }
+
+    unsigned nsheet = 0, ncrease = 0;
+    float leaf_close = HUGE_VALF;
+    for (unsigned i = 0; i < np; ++i)
+    {
+        bool pos = false, neg = false;
+        float close = HUGE_VALF;
+        for (int q = 0; q < 8; ++q)
+        {
+            const float A = fa[size_t(q) * np + i];
+            const float B = fb[size_t(q) * np + i];
+            if (!std::isfinite(A) || !std::isfinite(B))
+                continue;
+            const float d = pairs[i].is_max == 2 ? A : A - B;
+            ((d < 0) ? neg : pos) = true;
+            close = std::min(close, std::max(fabsf(A), fabsf(B)));
+        }
+        const bool sheet = pos && neg;
+        const bool crease = sheet && close < diag;
+        nsheet += sheet;
+        ncrease += crease;
+        if (crease)
+            leaf_close = std::min(leaf_close, close);
+    }
+    ++cs.by_sheet[std::min(nsheet, 3u)];
+    ++cs.by_crease[std::min(ncrease, 3u)];
+
+    /*  Corner gradients of the full field (analytic g-mode walk):
+     *  the spread says how far the normal turns inside one leaf.  */
+    Region dummy = {};
+    dummy.voxels = 8;
+    dummy.X = cx;
+    dummy.Y = cy;
+    dummy.Z = cz;
+    const derivative* g = tape_eval_g(sub, c.ctx, dummy);
+    float mindot = 1.f;
+    for (int a = 0; a < 8; ++a)
+        for (int b = a + 1; b < 8; ++b)
+        {
+            const float la = sqrtf(g[a].dx * g[a].dx +
+                                   g[a].dy * g[a].dy +
+                                   g[a].dz * g[a].dz);
+            const float lb = sqrtf(g[b].dx * g[b].dx +
+                                   g[b].dy * g[b].dy +
+                                   g[b].dz * g[b].dz);
+            if (la < 1e-12f || lb < 1e-12f ||
+                !std::isfinite(la) || !std::isfinite(lb))
+                continue;
+            const float dot = (g[a].dx * g[b].dx +
+                               g[a].dy * g[b].dy +
+                               g[a].dz * g[b].dz) / (la * lb);
+            mindot = std::min(mindot, dot);
+        }
+    if (ncrease > 0)
+    {
+        const int bucket = std::min(11, std::max(0,
+                int((mindot + 1.f) * 6.f)));
+        ++cs.dot_hist[bucket];
+    }
+
+    if (cs.dump)
+    {
+        const float cell = r.X[1] - r.X[0];
+        fprintf(cs.dump,
+                "LEAF %.6g %.6g %.6g live=%u sheet=%u crease=%u "
+                "mindot=%.4f close=%.4f\n",
+                0.5f * (x0 + x1), 0.5f * (y0 + y1),
+                0.5f * (z0 + z1), np, nsheet, ncrease, mindot,
+                leaf_close == HUGE_VALF ? -1.f : leaf_close / cell);
+    }
 }
 
 /*  Octree descent, mirroring the production mesher's structure:
@@ -331,20 +569,45 @@ void descend(Collector& c, const Region& r, Tape* tape)
         if (c.spacing == 0)
             c.spacing = r.X[1] - r.X[0];
 
-        /*  Crease-band density (STIBIUM_DMESH_DENSE = extra levels,
-         *  default 1): the push rewrites every DECIDED min/max
-         *  clause to a copy, so a min/max clause surviving in the
-         *  leaf's pushed tape means this box straddles an unresolved
-         *  crease choice.  Those leaves sample a midpoint-refined
-         *  lattice - the chip plateau is guard x density, and the
-         *  lattice is the lever (MESH-NEXT density round).  */
-        if (dense_levels() > 0 && tape_pairs(sub, nullptr, 0) > 0)
+        if (c.census)
+            leaf_census(c, r, sub);
+
+        const uint64_t key = coord_hash(r.X[0], r.Y[0], r.Z[0]);
+        const unsigned live = tape_pairs(sub, nullptr, 0);
+        const bool crease_leaf = live > 0;
+        if (crease_leaf && !c.dense_map)
+            c.crease_leaves[key] = {
+                    { r.X[0], r.Y[0], r.Z[0] },
+                    { r.X[r.ni], r.Y[r.nj], r.Z[r.nk] }, live };
+
+        /*  Crease-band density: the push rewrites every DECIDED
+         *  min/max clause to a copy, so a min/max clause surviving
+         *  in the leaf's pushed tape means this box straddles an
+         *  unresolved crease choice.  STIBIUM_DMESH_DENSE > 0
+         *  refines every such leaf uniformly (the manual knob);
+         *  otherwise stage-D's pass-2 drill-down map picks the
+         *  level per leaf from pass-1 evidence.  */
+        int levels = 0;
+        if (dense_levels() > 0)
+            levels = crease_leaf ? dense_levels() : 0;
+        else if (c.dense_map)
+        {
+            const auto it = c.dense_map->find(key);
+            if (it != c.dense_map->end())
+                levels = it->second;
+        }
+
+        if (levels > 0)
         {
             ++c.soup.dense_blocks;
+            c.soup.dense_boxes.push_back({
+                    { r.X[0], r.Y[0], r.Z[0] },
+                    { r.X[r.ni], r.Y[r.nj], r.Z[r.nk] },
+                    levels });
             std::vector<float> RX(r.X, r.X + r.ni + 1),
                                RY(r.Y, r.Y + r.nj + 1),
                                RZ(r.Z, r.Z + r.nk + 1);
-            for (int lv = 0; lv < dense_levels(); ++lv)
+            for (int lv = 0; lv < levels; ++lv)
             {
                 refine_axis(RX);
                 refine_axis(RY);
@@ -358,10 +621,10 @@ void descend(Collector& c, const Region& r, Tape* tape)
             rd.X = RX.data();
             rd.Y = RY.data();
             rd.Z = RZ.data();
-            sample_block(c, rd, sub);
+            sample_block(c, rd, sub, key, crease_leaf);
         }
         else
-            sample_block(c, r, sub);
+            sample_block(c, r, sub, key, crease_leaf);
     }
     else
     {
@@ -546,7 +809,8 @@ void feature_points(Collector& c)
                 if (d < min_dot)
                     min_dot = d;
             }
-        if (min_dot > SPREAD_DOT)
+        const bool feat = min_dot <= SPREAD_DOT;
+        if (!feat && !c.census && !autodense())
             continue;
 
         Eigen::MatrixXf A(fc.n, 3);
@@ -577,6 +841,55 @@ void feature_points(Collector& c)
                 svd.matrixV() *
                         inv.asDiagonal() *
                         (svd.matrixU().transpose() * b);
+
+        /*  QEF residual in units of the cell's own edge (pass-2
+         *  cells are smaller; the bar is scale-free).  This is the
+         *  stage-D trigger: sharp creases solve to ~0 at any
+         *  resolution, while blend aliasing, crease crowding, and
+         *  sub-lattice churn all leave a residual the minimizer
+         *  cannot explain (census 2026-07-16: solved models are
+         *  silent above 0.01; every problem model lights up).  */
+        const float nr = (A * (x - centroid) - b).norm() /
+                (sqrtf(float(fc.n)) * (fc.hi[0] - fc.lo[0]));
+        if (autodense() && nr >= AUTOD_BAR)
+        {
+            /*  Tangle demotion: hot cells in crowded leaves still
+             *  SEED the component flood (the region wants density)
+             *  but never rate the 4x core - level 2 resolves pinch
+             *  geometry in thin-wall tangles faster than it fixes
+             *  divots (zeiss: nm 241 vs 48).  */
+            const auto lit = c.crease_leaves.find(fc.leaf_key);
+            const bool tangle = lit != c.crease_leaves.end() &&
+                    lit->second.live > AUTOD_TANGLE_LIVE;
+            if (tangle)
+                ++c.tangle_suppressed;
+            const int lvl = tangle ? 1
+                    : std::min(autod_max_level(),
+                               nr >= 4 * AUTOD_BAR ? 2 : 1);
+            int& lv = c.want_dense[fc.leaf_key];
+            lv = std::max(lv, lvl);
+        }
+        if (c.census)
+        {
+            int bucket = 17;
+            for (int q = 0; q < 17; ++q)
+                if (nr < Census::NR_EDGES[q])
+                {
+                    bucket = q;
+                    break;
+                }
+            ++c.census->nr_hist[bucket];
+            if (c.census->dump)
+                fprintf(c.census->dump,
+                        "CELL %.6g %.6g %.6g n=%u mindot=%.4f "
+                        "nr=%.5f feat=%d\n",
+                        0.5f * (fc.lo[0] + fc.hi[0]),
+                        0.5f * (fc.lo[1] + fc.hi[1]),
+                        0.5f * (fc.lo[2] + fc.hi[2]),
+                        unsigned(fc.n), min_dot, nr, int(feat));
+        }
+        if (!feat)
+            continue;
 
         /*  Reject escapes (with a small margin): a QEF that leaves
          *  its cell is extrapolating noise.  */
@@ -981,17 +1294,184 @@ DChains delaunay_chains(const DSoup& soup)
     return out;
 }
 
-DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt)
+static void census_print(const Census& census, const DSoup& soup,
+                         const char* tag)
 {
-    Collector c;
+    fprintf(stderr, "%s %llu crease leaves of %llu\n", tag,
+            (unsigned long long)census.leaves,
+            (unsigned long long)soup.leaf_blocks);
+    fprintf(stderr, "%s sheet-active  0/1/2/3+: "
+            "%llu %llu %llu %llu\n", tag,
+            (unsigned long long)census.by_sheet[0],
+            (unsigned long long)census.by_sheet[1],
+            (unsigned long long)census.by_sheet[2],
+            (unsigned long long)census.by_sheet[3]);
+    fprintf(stderr, "%s crease-active 0/1/2/3+: "
+            "%llu %llu %llu %llu\n", tag,
+            (unsigned long long)census.by_crease[0],
+            (unsigned long long)census.by_crease[1],
+            (unsigned long long)census.by_crease[2],
+            (unsigned long long)census.by_crease[3]);
+    fprintf(stderr, "%s min-dot hist [-1..1]:", tag);
+    for (int i = 0; i < 12; ++i)
+        fprintf(stderr, " %llu",
+                (unsigned long long)census.dot_hist[i]);
+    fprintf(stderr, "\n");
+    fprintf(stderr, "%s cell nr hist (edges .005 .01 .02 "
+            ".03 .05 .075 .1 .15 .2 .3 .5 .75 1 1.5 2 3 5):", tag);
+    for (int i = 0; i < 18; ++i)
+        fprintf(stderr, " %llu",
+                (unsigned long long)census.nr_hist[i]);
+    fprintf(stderr, "\n");
+}
+
+/*  One stage-A pass: descend + bisect + QEF.  dense_map is the
+ *  drill-down input (null on pass 1); the pass's own drill-down
+ *  requests land in c.want_dense.  */
+static void sample_pass(Collector& c, const Deck* deck, Region r,
+                        volatile int* halt,
+                        const std::unordered_map<uint64_t, int>* map,
+                        Census* census)
+{
     c.deck = deck;
     c.ctx = tape_ctx_new(deck);
     c.halt = halt;
+    c.dense_map = map;
+    c.census = census;
     descend(c, r, deck_base(deck));
     bisect_edges(c);
     feature_points(c);
     c.soup.spacing = c.spacing;
     tape_ctx_free(c.ctx);
+}
+
+DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt)
+{
+    Census census;
+    const char* cenv = getenv("STIBIUM_DMESH_CENSUS");
+    if (cenv && *cenv)
+    {
+        census.on = true;
+        if (strcmp(cenv, "1") != 0)
+            census.dump = fopen(cenv, "w");
+    }
+
+    Collector c;
+    sample_pass(c, deck, r, halt, nullptr,
+                census.on ? &census : nullptr);
+    if (census.on)
+        census_print(census, c.soup, "CENSUS");
+
+    /*  Stage-D drill-down: pass 1 is also the survey.  When any
+     *  leaf triggered (QEF residual over the bar, or a hidden
+     *  crease-suspect leaf), re-run stage A with the map; flagged
+     *  leaves sample a midpoint-refined lattice at their chosen
+     *  level.  One drill-down round (the level formula already
+     *  predicts the need from the residual magnitude); leftover
+     *  pass-2 requests are reported, not chased.  */
+    if (autodense() && !c.want_dense.empty() && !(*halt))
+    {
+        const bool dbg = census.on ||
+                getenv("STIBIUM_DMESH_TIME") != nullptr;
+
+        /*  Graduated coverage (every configuration measured
+         *  2026-07-16 taught the same lesson: coverage must be
+         *  CONTIGUOUS - pitch-band borders may only sit on quiet
+         *  geometry).  Level 1 floods the whole connected
+         *  crease-suspect component containing any flag - exactly
+         *  the global-d1 treatment, but only for components that
+         *  asked; sharp models raise no flag and pay nothing.
+         *  Level-2 cores then dilate one ring into touching
+         *  non-tangle crease leaves, so every seam is at most a
+         *  2x jump and never lands mid-tangle.  */
+        const float eps = 0.5f * c.soup.spacing;
+        const auto touches = [&](const Collector::LeafBox& a,
+                                 const Collector::LeafBox& b) {
+            return !(b.lo[0] > a.hi[0] + eps ||
+                     b.hi[0] < a.lo[0] - eps ||
+                     b.lo[1] > a.hi[1] + eps ||
+                     b.hi[1] < a.lo[1] - eps ||
+                     b.lo[2] > a.hi[2] + eps ||
+                     b.hi[2] < a.lo[2] - eps);
+        };
+
+        std::unordered_map<uint64_t, int> dilated = c.want_dense;
+        /*  BFS flood at level 1 through box adjacency.  */
+        std::vector<uint64_t> wave;
+        wave.reserve(c.want_dense.size());
+        for (const auto& [key, lvl] : c.want_dense)
+            wave.push_back(key);
+        std::unordered_set<uint64_t> visited(wave.begin(),
+                                             wave.end());
+        while (!wave.empty())
+        {
+            std::vector<uint64_t> next;
+            for (const auto& [k2, b2] : c.crease_leaves)
+            {
+                if (visited.count(k2))
+                    continue;
+                for (const uint64_t k : wave)
+                {
+                    const auto it = c.crease_leaves.find(k);
+                    if (it != c.crease_leaves.end() &&
+                        touches(it->second, b2))
+                    {
+                        visited.insert(k2);
+                        next.push_back(k2);
+                        int& lv = dilated[k2];
+                        lv = std::max(lv, 1);
+                        break;
+                    }
+                }
+            }
+            wave = std::move(next);
+        }
+        /*  Level-2 core dilation (one ring, non-tangle only).  */
+        for (const auto& [key, lvl] : c.want_dense)
+        {
+            if (lvl < 2)
+                continue;
+            const auto it = c.crease_leaves.find(key);
+            if (it == c.crease_leaves.end())
+                continue;
+            for (const auto& [k2, b2] : c.crease_leaves)
+            {
+                if (b2.live > AUTOD_TANGLE_LIVE ||
+                    !touches(it->second, b2))
+                    continue;
+                int& l2 = dilated[k2];
+                l2 = std::max(l2, lvl);
+            }
+        }
+        if (dbg)
+        {
+            size_t l1 = 0, l2 = 0;
+            for (const auto& [k, l] : dilated)
+                ++(l >= 2 ? l2 : l1);
+            fprintf(stderr, "AUTOD drill-down: %zu leaves flagged, "
+                    "%zu after flood+cores (%zu @1, %zu @2), "
+                    "%llu tangle-demoted\n",
+                    c.want_dense.size(), dilated.size(), l1, l2,
+                    (unsigned long long)c.tangle_suppressed);
+        }
+
+        Census census2;
+        census2.on = census.on;
+        Collector c2;
+        sample_pass(c2, deck, r, halt, &dilated,
+                    census2.on ? &census2 : nullptr);
+        if (census2.on)
+            census_print(census2, c2.soup, "CENSUS2");
+        if (dbg && !c2.want_dense.empty())
+            fprintf(stderr, "AUTOD residue: %zu leaves still hot "
+                    "after drill-down\n", c2.want_dense.size());
+        if (census.dump)
+            fclose(census.dump);
+        return std::move(c2.soup);
+    }
+
+    if (census.dump)
+        fclose(census.dump);
     return std::move(c.soup);
 }
 
@@ -2269,7 +2749,20 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     /*  Scaled by the dense round: the corridor exists along the
      *  constrained creases, which is exactly where the dense lattice
      *  fired - sliver pairing distance tracks the local pitch.  */
-    const float drop_r = 0.35f * soup.spacing / dense_factor();
+    /*  Auto-density makes the factor LOCAL: outside the drill-down
+     *  bands the corridor stays at base width; inside, it tracks
+     *  the band's pitch.  Quick-reject with the widest possible
+     *  radius before paying for the box lookup.  */
+    const float drop_max = 0.35f * soup.spacing / dense_factor();
+    const auto in_corridor = [&](float x, float y, float z,
+                                 auto&& near_fn) {
+        if (!near_fn(x, y, z, drop_max))
+            return false;
+        const float eff = 0.35f * soup.spacing /
+                std::max(dense_factor(),
+                         box_dense_factor(soup, x, y, z));
+        return eff >= drop_max || near_fn(x, y, z, eff);
+    };
     /*  Feature points referenced by an accepted segment are the
      *  chain itself and always enter; the rest of the QEF clump
      *  (curved creases run 26-51% duplicates, merged out of the
@@ -2295,7 +2788,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     for (const DSample& s : soup.samples)
     {
         if (s.on_surface && !cseg.empty() &&
-            near_crease(s.x, s.y, s.z, drop_r))
+            in_corridor(s.x, s.y, s.z, near_crease))
             continue;
         pts.push_back({ TPoint(s.x, s.y, s.z),
                         int8_t(s.on_surface ? 0
@@ -2349,7 +2842,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
          *  slivers - drop them, EXCEPT the chain members
          *  themselves.  */
         if (!cseg.empty() && !chain_used.count(uint32_t(si)) &&
-            near_crease(s.x, s.y, s.z, drop_r))
+            in_corridor(s.x, s.y, s.z, near_crease))
         {
             surf_vh.push_back(VH());
             continue;
@@ -3361,7 +3854,10 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
              *  to 0.30 sp and still blocked everything).  */
             const float ko = kspec[i] == 2 ? 0.0f
                     : kspec[i]
-                        ? 0.35f * soup.spacing / dense_factor()
+                        ? 0.35f * soup.spacing /
+                          std::max(dense_factor(),
+                                   box_dense_factor(soup, kx[i],
+                                                    ky[i], kz[i]))
                         : 0.75f * soup.spacing;
             if (ko > 0 && !cseg.empty() &&
                 near_crease(kx[i], ky[i], kz[i], ko))

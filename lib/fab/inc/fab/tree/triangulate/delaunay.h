@@ -58,6 +58,22 @@ struct DSoup
      *  unresolved crease choice) - sampled one lattice level denser
      *  (STIBIUM_DMESH_DENSE; the crease-band density round).  */
     uint64_t dense_blocks = 0;
+    /*  Stage-D auto-density (STIBIUM_DMESH_AUTODENSE, default on):
+     *  leaves the two-pass drill-down re-sampled at a finer pitch.
+     *  Trigger: a feature cell's QEF residual >= 0.03 cells (the
+     *  torus-lip referee bar - for near-parallel normals the
+     *  clamped solve is a plane fit and the residual IS the
+     *  surface sagitta), or a crease-suspect leaf whose samples
+     *  all agree on sign (hidden sub-lattice feature).  Downstream
+     *  crease-local radii divide by the LOCAL factor via these
+     *  boxes, not the global knob.  */
+    struct DDenseBox
+    {
+        float lo[3], hi[3];
+        int level;             // extra midpoint-refinement levels
+    };
+    std::vector<DDenseBox> dense_boxes;
+
     /*  QEF-placed sharp-feature points appended to `surface`.  */
     uint64_t feature_points = 0;
     /*  Crossings replaced by their cell's feature point.  */
