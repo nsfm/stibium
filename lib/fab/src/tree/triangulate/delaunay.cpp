@@ -2491,6 +2491,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
      *  vertex/triangle indices go stale the moment a re-extraction
      *  happens, so the MAX_REPAIR exit clears them).  */
     std::vector<uint32_t> snap_va, snap_vb, snap_t1, snap_t2;
+    std::vector<float> snap_d;   // chip depth at detection
     for (;; ++repair_round)
     {
     /*  Stage C: cell signs.  After convergence a finite cell cannot
@@ -2685,6 +2686,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     snap_vb.clear();
     snap_t1.clear();
     snap_t2.clear();
+    snap_d.clear();
     if (repair_round >= MAX_REPAIR || *halt)
         break;
 
@@ -2792,6 +2794,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         eval_points(base2, ctx, gxs, gys, gzs, gv);
         std::vector<size_t> cand;
         std::vector<uint8_t> cspec;   // 1 = chip (f < 0)
+        std::vector<float> cdist;     // |f|/|grad| at detection
         uint64_t n_chip = 0, n_wart = 0;
         float worst_chip = 0;
         size_t worst_i = SIZE_MAX;
@@ -2823,6 +2826,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             if (dist > wclamp[i] * 0.03f)
             {
                 cand.push_back(i);
+                cdist.push_back(dist);
                 /*  Sign of f at the sagging midpoint: f > 0 =
                  *  chord through EMPTY space (a wart), f < 0 =
                  *  chord through MATERIAL (a chip - the concave
@@ -2861,6 +2865,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 snap_vb.push_back(wvb[i]);
                 snap_t1.push_back(wt1[i]);
                 snap_t2.push_back(wt2[i]);
+                snap_d.push_back(cdist[q]);
             }
         if (cand.empty())
             break;
@@ -3443,6 +3448,94 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         const bool snap_on = !snap_env || atoi(snap_env) != 0;
         uint64_t snapped = 0, snap_skipped = 0;
         uint64_t skip_far = 0, skip_hits = 0;
+        /*  Self-feeding stash (zeiss run, 2026-07-15): when the
+         *  repair loop exhausts MAX_REPAIR (real models churn), the
+         *  per-round stash is stale and was cleared - but the chips
+         *  are still there and the polylines still know where the
+         *  creases are.  Sweep the FINAL mesh once and build the
+         *  snap list fresh; the wave lookup re-finds triangles by
+         *  position anyway.  */
+        static const char* rep_env2 = getenv("STIBIUM_DMESH_REPAIR");
+        const int rmode2 = rep_env2 ? atoi(rep_env2) : 2;
+        if (snap_on && snap_va.empty() && !soup.tchains.empty() &&
+            rmode2 >= 2 && !*halt)
+        {
+            std::unordered_map<uint64_t,
+                    std::pair<uint32_t, uint32_t>> fem;
+            for (uint32_t t = 0;
+                 t < uint32_t(out->tris.size() / 3); ++t)
+                for (int e = 0; e < 3; ++e)
+                {
+                    uint64_t a = out->tris[3*t + e];
+                    uint64_t b = out->tris[3*t + (e + 1) % 3];
+                    if (a > b)
+                        std::swap(a, b);
+                    const uint64_t k = (a << 32) | b;
+                    auto it = fem.find(k);
+                    if (it == fem.end())
+                        fem[k] = { t, UINT32_MAX };
+                    else if (it->second.second == UINT32_MAX)
+                        it->second.second = t;
+                }
+            std::vector<uint64_t> keys;
+            std::vector<float> qxs, qys, qzs, qhs, qlen;
+            for (const auto& [k, pr] : fem)
+            {
+                if (pr.second == UINT32_MAX)
+                    continue;
+                const float* A2 =
+                        &out->verts[3 * uint32_t(k >> 32)];
+                const float* B2 = &out->verts[3 * uint32_t(k)];
+                const float ex = B2[0]-A2[0], ey = B2[1]-A2[1],
+                            ez = B2[2]-A2[2];
+                const float len = sqrtf(ex*ex + ey*ey + ez*ez);
+                if (!(len > 0))
+                    continue;
+                keys.push_back(k);
+                qxs.push_back((A2[0]+B2[0]) * 0.5f);
+                qys.push_back((A2[1]+B2[1]) * 0.5f);
+                qzs.push_back((A2[2]+B2[2]) * 0.5f);
+                qhs.push_back(len * 0.01f);
+                qlen.push_back(len);
+            }
+            std::vector<float> gxs(keys.size()*7),
+                    gys(keys.size()*7), gzs(keys.size()*7), gv;
+            for (size_t i = 0; i < keys.size(); ++i)
+            {
+                for (int q = 0; q < 7; ++q)
+                {
+                    gxs[i*7+q] = qxs[i];
+                    gys[i*7+q] = qys[i];
+                    gzs[i*7+q] = qzs[i];
+                }
+                gxs[i*7+1] += qhs[i];  gxs[i*7+2] -= qhs[i];
+                gys[i*7+3] += qhs[i];  gys[i*7+4] -= qhs[i];
+                gzs[i*7+5] += qhs[i];  gzs[i*7+6] -= qhs[i];
+            }
+            if (!keys.empty())
+                eval_points(deck_base(deck), ctx, gxs, gys, gzs,
+                            gv);
+            for (size_t i = 0; i < keys.size(); ++i)
+            {
+                const float f = gv[i*7];
+                const float h2 = 2 * qhs[i];
+                const float gx = (gv[i*7+1]-gv[i*7+2]) / h2;
+                const float gy = (gv[i*7+3]-gv[i*7+4]) / h2;
+                const float gz = (gv[i*7+5]-gv[i*7+6]) / h2;
+                const float gl = sqrtf(gx*gx + gy*gy + gz*gz);
+                if (!(gl > 0) || !std::isfinite(f) || f >= 0)
+                    continue;
+                const float dist = fabsf(f) / gl;
+                if (dist <= qlen[i] * 0.03f ||
+                    dist > 2.0f * qlen[i])
+                    continue;
+                snap_va.push_back(uint32_t(keys[i] >> 32));
+                snap_vb.push_back(uint32_t(keys[i]));
+                snap_t1.push_back(fem[keys[i]].first);
+                snap_t2.push_back(fem[keys[i]].second);
+                snap_d.push_back(dist);
+            }
+        }
         if (snap_on && !snap_va.empty() && !soup.tchains.empty())
         {
             struct Seg { float ax, ay, az, bx, by, bz; };
@@ -3539,11 +3632,27 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                             px = cx2; py = cy2; pz = cz2;
                         }
                     }
-                    /*  Only crease-local chips: a chord further
-                     *  than a cell from every polyline is not a
-                     *  wedge shortcut and the tent would stab
-                     *  somewhere it doesn't belong.  */
-                    if (best > soup.spacing * soup.spacing)
+                    /*  Attribution gate: the tent apex must be
+                     *  CLOSE relative to the chip's own depth - a
+                     *  wedge corner sits within ~1.6x the |f|/grad
+                     *  reading (the central-difference inflation),
+                     *  so a polyline further than 2.5x the depth
+                     *  belongs to some OTHER feature, and tenting
+                     *  to it builds a ridge taller than the divot
+                     *  (measured on zeiss: worst depth ROSE 0.975
+                     *  -> 1.258 sp under unconditional 1 sp
+                     *  attribution).  The absolute 1-cell cap
+                     *  stays.  */
+                    /*  Floor at the drop-band radius: within
+                     *  0.35 sp the crease owns the surface by the
+                     *  pipeline's own corridor definition, so
+                     *  attribution there is never wrong (csg's
+                     *  shallow chips sit at ~0.2 sp with ~0.06 sp
+                     *  depth and must still tent).  */
+                    const float acap = std::min(soup.spacing,
+                            std::max(2.5f * snap_d[s],
+                                     0.35f * soup.spacing));
+                    if (best > acap * acap)
                     {
                         done[s] = 1;
                         ++snap_skipped;
