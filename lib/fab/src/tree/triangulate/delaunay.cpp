@@ -8,6 +8,7 @@
  */
 
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -233,6 +234,25 @@ void sample_block(Collector& c, const Region& r, Tape* tape)
                     c.cells.push_back(fc);
             }
 }
+
+/*  Phase wall-clock under STIBIUM_DMESH_TIME=1: the profile that
+ *  aims the performance pass (measure before optimizing - the
+ *  house rule applies to speed too).  */
+struct PhaseTimer
+{
+    const bool on = getenv("STIBIUM_DMESH_TIME") != nullptr;
+    std::chrono::steady_clock::time_point t0 =
+            std::chrono::steady_clock::now();
+    void mark(const char* name)
+    {
+        if (!on)
+            return;
+        const auto t1 = std::chrono::steady_clock::now();
+        fprintf(stderr, "TIME %-20s %8.2f s\n", name,
+                std::chrono::duration<double>(t1 - t0).count());
+        t0 = t1;
+    }
+};
 
 /*  Crease-band density (MESH-NEXT density round, measured
  *  2026-07-15): extra midpoint-refinement levels applied to
@@ -1720,6 +1740,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                        = nullptr)
 {
     using TPoint = typename Tri::Point;
+    PhaseTimer pt;
     using VH     = typename Tri::Vertex_handle;
     using CH     = typename Tri::Cell_handle;
 
@@ -2167,6 +2188,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             }
         }
     }
+    pt.mark("segment referee");
     const auto near_crease = [&](float x, float y, float z,
                                  float r) {
         for (const auto& s : cseg)
@@ -2326,6 +2348,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         surf_vh.push_back(vh);
     }
 
+    pt.mark("insert points");
     /*  Insert the refereed chain segments as constrained edges,
      *  batched with one Delaunay restoration at the end (each
      *  insert_constrained_edge(…, true) would restore
@@ -2453,6 +2476,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         sweep_steiner();
     }
 
+    pt.mark("constraints+restore");
     constexpr int MAX_ROUNDS = 48;
     uint64_t inserted = 0;
     int round = 0;
@@ -2598,6 +2622,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         if (!round_added)
             break;   // every insert coincided: no progress possible
     }
+    pt.mark("refinement");
 
     /*  Stage C runs inside the repair loop: extract, then hunt WARTS
      *  - fold edges (adjacent-triangle normals disagreeing) whose
@@ -3313,6 +3338,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         sweep_steiner();
     }
     }   // repair loop
+    pt.mark("extract+repair");
 
     /*  Manifold pass (Manifold-DC after Schaefer/Ju/Warren 2007;
      *  see doc/research/2026-07-15-pinch-manifoldness.md): our
@@ -3562,6 +3588,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         }
     }
 
+    pt.mark("manifold pass");
     /*  Crease-snap pass (STIBIUM_DMESH_SNAP=0 disables): the
      *  residual chips are chords of MOSTLY-AIR tets whose bottom
      *  facet dips under a concave crease - a facet-level defect no
@@ -3922,6 +3949,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         }
         out->snapped = snapped;
     }
+    pt.mark("snap pass");
 
     /*  End-of-pipeline chip referee (diagnostic): the repair-loop
      *  metric measures the raw extraction, so the snap pass needs
@@ -4079,15 +4107,20 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
 bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                    DMesh* out)
 {
+    PhaseTimer pt;
     DSoup soup = delaunay_sample(deck, r, halt);
+    pt.mark("sample+bisect+QEF");
     if (*halt)
         return false;
     static const char* tr_env = getenv("STIBIUM_DMESH_TRACE");
     if (!tr_env || atoi(tr_env) != 0)
         delaunay_trace(deck, r, &soup, halt);
+    pt.mark("crease tracer");
     if (*halt)
         return false;
-    return delaunay_mesh_soup(deck, soup, halt, out);
+    const bool ok = delaunay_mesh_soup(deck, soup, halt, out);
+    pt.mark("mesh (B+C total)");
+    return ok;
 }
 
 bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
