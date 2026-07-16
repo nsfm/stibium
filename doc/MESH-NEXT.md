@@ -58,6 +58,41 @@ geometry, ASK THEM (the knob was never knurled).  Referee models:
 examples/mesh_bench/*.sb (m0), examples/torture/zeiss (m20,
 --resolution 1, ~2.4 min, STIBIUM_DMESH_TIME=1 for heartbeats).
 
+## >>> THE RING AUTOPSY: KEEP-OUT CONVICTED (2026-07-17) <<<
+
+**The eyepiece "thorn crown" is dead, and with it the deep-divot
+class.**  Nate's screencap -> bino extraction (examples/torture/
+zeiss_id02_bino.sb, the fast quality-test model) -> four-suspect
+elimination, one variable at a time:
+1. Corridor overlap between close rings: REFUTED for the rings
+   (the two-chain witness rule was implemented and KEPT - it is
+   correct and cheap - but the rings did not move; dense bands
+   already shrink the corridor to irrelevance there).
+2. Snap tents: REFUTED (SNAP=0, thorns unchanged).
+3. Phantom QEF corners: already fixed; rings unchanged.
+4. **Repair KEEP-OUT: convicted.**  The 0.35 sp no-insert ring
+   around every constrained crease blocked exactly the repairs
+   that cure groove chips beside the crease (bino A/B: keep-out
+   off = repairs 7.9K -> 23K, thorn crown collapses).  Its
+   anti-sliver duty is covered by the crowding guard (quarter-
+   edge insert check).  DEFAULT NOW 0 (STIBIUM_DMESH_KEEPOUT=1
+   restores).  Zeiss: worst depth 0.573 -> **0.212 sp**, nm 168
+   -> 124, 0 open, at 1.04M tris / ~7 min (sanctioned trade).
+   Bench: better everywhere (torus_lip 19 chips @ 0.009).
+
+Also this round:
+- **Trust-gate verdict fix**: "couldn't judge" no longer counts
+  as "guilty" - non-finite samples give no verdict; zero-gradient
+  samples with f ~ 0 sit ON the kink and are evidence FOR the
+  segment.  The bino model's 198 phantom convictions (of 292)
+  were tipping the 10% gate and torching 2,000+ good constraints
+  (0 constrained -> 2,567).  Segments with zero judgeable
+  samples still reject (a shortcut could hide in a NaN void).
+- Renders for Nate land in build/zeiss_dmesh/renders/; the
+  stlview.py/roughness.py instruments live in the session
+  scratchpad (rebuild from MESH-NEXT if lost: ~100-line numpy
+  z-buffer + dihedral scan).
+
 ## >>> LEAK FIX + LEVEL-3 VERDICT (2026-07-17, round close) <<<
 
 - **Signal leak fixed**: projected-home phantom minimizers now
