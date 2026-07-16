@@ -20,6 +20,7 @@
  */
 
 #include <cstdint>
+#include <unordered_set>
 #include <vector>
 
 #include "fab/tree/tape.h"
@@ -71,6 +72,7 @@ struct DSoup
     {
         float lo[3], hi[3];
         int level;             // extra midpoint-refinement levels
+        uint64_t key;          // leaf address (retreat rollback)
     };
     std::vector<DDenseBox> dense_boxes;
 
@@ -92,8 +94,12 @@ struct DSoup
     uint64_t traced = 0;
 };
 
-/*  Stage A: collect the point soup for a region.  */
-DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt);
+/*  Stage A: collect the point soup for a region.  demote lists
+ *  leaf addresses whose level-2 cores are rolled back to the
+ *  flood level (the retreat loop's measured-damage feedback).  */
+DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
+                      const std::unordered_set<uint64_t>* demote
+                              = nullptr);
 
 /*  The crease tracer: marches every min/max clause's crease
  *  {f_A = 0, f_B = 0} with an SSI predictor-corrector on the tape's

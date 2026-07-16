@@ -58,6 +58,30 @@ geometry, ASK THEM (the knob was never knurled).  Referee models:
 examples/mesh_bench/*.sb (m0), examples/torture/zeiss (m20,
 --resolution 1, ~2.4 min, STIBIUM_DMESH_TIME=1 for heartbeats).
 
+## >>> RETREAT LOOP: OPTIMISM WITH ROLLBACK (2026-07-17, LANDED) <<<
+
+**The gate saga's end state: damage is measured, not predicted.**
+Three a-priori gates were built and each hit the same wall:
+live-pair count (collars == damage sites), anti-parallelism
+(concave grooves - the thing density CURES - read anti-parallel
+too), and the signed wall-gap estimator (sheets facing away =
+wall = pinch; facing toward = groove = safe; RIGHT physics, but
+leaf-corner sampling leaves the populations overlapping in
+0.2-1.5 mm).  So delaunay_mesh now runs the level-2 cores
+OPTIMISTICALLY (wall-gap gate, STIBIUM_DMESH_SEP = 0.7 cells, as
+the prior), and if extraction reports OPEN edges, maps them to
+their level-2 dense boxes (DDenseBox carries the leaf key),
+demotes exactly those leaves, and re-runs stage A (<= 3
+attempts; holes outside level-2 boxes are not core damage and
+stop the loop).  Models that produce no holes never pay.
+
+Zeiss: attempt 1 = 6 open edges -> ONE guilty leaf -> attempt 2 =
+**0 open, 168 nm, 726K tris, collars at the ungated ideal**
+(autod7 look, which Nate ranked cleanest, without its 10 holes).
+Bench: zero retreats fired anywhere, all bars pass, suite +
+hidden tags green.  The remaining nm are the pinch class
+(sub-visual point defects; extraction-level work, queued).
+
 ## >>> PHANTOM ORACLE + MINDOT GATE (2026-07-17, LANDED) <<<
 
 **The QEF now answers to the surface.**  A sub-lattice fillet
