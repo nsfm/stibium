@@ -141,11 +141,21 @@ zero cascades, ~1 h runtime (iterate at r1; r2+ for eyeballs).
    (c) descend() still uses scalar tape_eval_i - port the
    tile renderer's tape_eval_i_batch 64-box fan-out; (d) CGAL
    DT_3 has Parallel_tag (CCDT compatibility = research).
-6. Someday: higher-res zeiss (residuals are sp-units - they
-   shrink with lattice; r2 ~ 1 h), engraving smear (sub-lattice
-   detail; relates to hidden_candidates drill-down), repair-churn
-   budget, chain-extractor dense robustness, upstream letter
-   (doc/DELAUNAY-MESHER.md is written for it).
+6. **Stage-D adaptive drill-down** (Nate's "adaptive vox/mm"
+   thought, 2026-07-15, converging with the knob diagnosis): the
+   dense round's machinery (leaf-local midpoint refinement, knob
+   STIBIUM_DMESH_DENSE) generalized to key on hidden_candidates
+   (interval says surface, samples disagree = sub-lattice
+   features - fires EXACTLY on the knurled knob, 0 QEF features
+   in an 11K-chip carpet).  Local 8x on a knob = thousands of
+   points; global r8 = 512x voxels.  Needs a per-leaf pitch map
+   (the density round proved every crease-local scale must move
+   together).  This is the resolution story's unifying shape.
+7. Someday: higher-res zeiss (residuals are sp-units - they
+   shrink with lattice; r2 ~ 1 h), engraving smear (folds into
+   stage-D above), repair-churn budget, chain-extractor dense
+   robustness, upstream letter (doc/DELAUNAY-MESHER.md is
+   written for it).
 House rules stand: measure before productionize, on EVERY model;
 negatives get numbers; anchor against the committed baseline;
 Nate's eyeballs out-diagnose your instruments (tonight they
