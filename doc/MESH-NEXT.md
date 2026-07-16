@@ -99,18 +99,49 @@ traded away accidental kindness; the middle path is constraints
 PLUS a generous repair budget for gate-approved candidates
 (raise MAX_REPAIR / relax crowding for real models?  measure).
 
-Next tracks, in order:
-1. **Tracer coverage for tangencies** (the zeiss residual): the
-   kink-corner 3-field solve from the someday list is now the
-   front of the queue - blend creases where grad A x grad B
-   degenerates need their own marching treatment.
-2. **Flat-face decimation** (Nate's ask): oracle-certified planar
-   patch re-triangulation; sketch under "Queued rounds".  Isolated
-   output pass, like the snap pass - the pattern works.
-3. Someday: OP_ABS creases, higher-res zeiss (r2+; residuals are
-   in sp units, so they shrink with the lattice), repair-churn
-   budget for big models, chain-extractor dense robustness,
-   upstream letter (doc/DELAUNAY-MESHER.md is written for it).
+**Screenshot forensics (Nate, 2026-07-15 evening):** the focus-
+knob rims and eyepiece shoulders show MUSH WITH NO CRISP CREASE
+LINE = untraced, wearing the classic pre-constraint restricted-
+Delaunay alternation (the showcase spheres' old disease).  A
+straight edge shows the aligned-geometry sawtooth (lattice-plane
+on-surface samples, unconstrained).  Unified diagnosis: every
+photographed defect is an UNTRACED CREASE; the cure (trace ->
+constrain -> tent) is already built - only coverage is missing.
+r2 run: quilt period halved WITH the lattice (sample-placement
+conviction confirmed), defect scale halved, 30,218 constraints,
+zero cascades, ~1 h runtime (iterate at r1; r2+ for eyeballs).
+
+>>> NEXT SESSION: tracer coverage. <<<
+1. **Enumerate OP_ABS as a crease generator** (prime suspect for
+   lathed knob/eyepiece rims: 2D profile fields kink inside
+   abs()) - extend tape_pairs to abs clauses ({f_A = 0} with the
+   operand's own gradient discontinuity; the pair machinery wants
+   a second field - abs(g) creases where g = 0 AND the composite
+   is on the surface, so the SSI corrector needs the g=0 +
+   full-oracle 2-field variant).  Check zeiss's tape first:
+   count OP_ABS clauses vs OP_MIN/MAX (cheap instrumentation,
+   answers WHICH suspect owns the rims).
+2. **Tangency marching** (kink 3-field solve): where
+   grad A x grad B degenerates the corrector dies - fillet-runout
+   creases need arc-length continuation or a constrained 3-field
+   Newton.
+3. **Repair-budget experiment** (Nate's v1-kindness finding):
+   constraints + raised MAX_REPAIR / relaxed crowding on real
+   models - v1's 304K brute repairs out-polished v10 in places at
+   2x the triangles; find the disciplined middle.  Measure at r1.
+4. **Flat-face decimation** (Nate's ask): oracle-certified planar
+   patch re-triangulation; sketch under "Queued rounds".
+5. Someday: higher-res zeiss (residuals are sp-units - they
+   shrink with lattice; r2 ~ 1 h), engraving smear (sub-lattice
+   detail; relates to hidden_candidates drill-down), repair-churn
+   budget, chain-extractor dense robustness, upstream letter
+   (doc/DELAUNAY-MESHER.md is written for it).
+House rules stand: measure before productionize, on EVERY model;
+negatives get numbers; anchor against the committed baseline;
+Nate's eyeballs out-diagnose your instruments (tonight they
+unified three defect species into one missing-coverage story).
+Iterate zeiss at r1 (~10 min); the STL lineage lives in
+build/zeiss_dmesh/ - keep it.
 
 House rules that saved this campaign, do not forget: measure
 before productionize (and on EVERY model, not just the showcase
