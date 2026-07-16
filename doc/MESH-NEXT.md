@@ -1,6 +1,24 @@
 # The meshing campaign: adaptive Delaunay on sound intervals
 
-## >>> NEXT SESSION OPENS HERE (note to self, 2026-07-16) <<<
+## >>> NEXT SESSION OPENS HERE (note to self, 2026-07-17 dawn) <<<
+
+Two marathon nights compounded.  As of 510f61ca: zeiss r1 =
+worst 0.212 sp / 124 nm / 0 open / 1.04M tris / ~7 min, all
+knobs at defaults, and Nate calls the visual state "a noteworthy
+step forward" with fringe remaining at the bino rings.  The
+product bar is now written at the top: ~0.1 mm features BY
+DEFAULT.  Its single gate: the TRUE-PINCH class (census above -
+sheets connected one ring away; local topology exhausted).  Open
+the next campaign there: geometric sheet separation.  Second
+front: perf (repair now does 123K inserts on zeiss - incremental
+re-detection is overdue).  The bino model
+(examples/torture/zeiss_id02_bino.sb) is the fast referee; my
+renders live in build/zeiss_dmesh/renders/; stlview.py +
+roughness.py rebuild from the ledger if the scratchpad is gone.
+Instruments beat theories: this session refuted five beautiful
+mechanisms by changing one variable at a time and LOOKING.
+
+## >>> (previous note, 2026-07-16) <<<
 
 Read this block, then the campaign-state sections below it.  As of
 de3544fc everything is GREEN: suite 627,666; showcase all 0.000 sp;
