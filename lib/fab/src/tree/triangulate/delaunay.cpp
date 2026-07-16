@@ -2330,6 +2330,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     else
         dt.insert(pts.begin(), pts.end());
 
+    pt.mark("insert samples");
     /*  Surface points go in one by one with a coincidence guard: on
      *  grid-aligned geometry a bisected point can converge exactly
      *  onto a lattice sample, and overwriting that vertex's inside/

@@ -827,3 +827,10 @@ AWAITING Nate's eyeball on v2fast vs the reviewed d1 (v1-kindness
 caveat: 17.5K repairs vs 333K).  Next perf target: insert points
 (84 s, now 52% of the pipeline) - CGAL single-threaded insertion;
 then threading the eval side.
+
+**Perf round 3 (sub-profile, night's end):** insert = 69 s of
+lattice samples (CGAL sequential, spatially sorted, hinted -
+honest price) + 15 s surface/weld (suspicion wrong, weld is
+fine).  No waste remains in the pipeline; further speed means
+machinery: CCDT bulk-insert research or parallel triangulation,
+plus threading the eval side.  Zeiss d1 rests at ~2.4 min.
