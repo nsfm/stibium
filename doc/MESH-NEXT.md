@@ -803,3 +803,16 @@ instead of the global env knob), (2) churn suppression when a
 feature stays unresolvable (stall detection, stop early).
 Repair-budget theory also refuted same night (48 rounds = 12x
 topology damage, zero depth gain - 16 is a safety rail).
+
+**Performance round 1 (2026-07-15 night): profile then aim.**
+STIBIUM_DMESH_TIME profile of zeiss d1 convicted the TRACER (957 s
+of 1387 s - 69%; the last suspect on the intuition list, which is
+why the house rule applies to speed).  The seed gate
+(tape_eval_f_pairs: one recording walk per seed captures every
+pair's operand values in flight; Newton only where both fields
+< 8 sp) cut it to 9.57 s - 100x - with byte-identical output
+(12,235 constraints, same tris/nm/tents).  Zeiss d1: 23 min ->
+7 min.  Remaining pie: extract+repair 272 s (64%; early-exit +
+incremental re-extraction is the designed next round), insert
+85 s, snap 26 s.  Gate prunes 16M exhaustive (pair, seed) Newton
+attempts to 257K candidates (1.6%).
