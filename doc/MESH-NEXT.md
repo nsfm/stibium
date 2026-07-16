@@ -60,13 +60,43 @@ Refereed negatives (full numbers in "Density round" below):
   grew a phantom second component).  When aligned-model numbers
   swing wildly, check spacing-derived radii for tie flips FIRST.
 
+**Zeiss torture round (same day, commits 57ce776f/b9ac240c/
+c934d714): first real-model contact.**  STIBIUM_EXPORT_DMESH=1
+routes headless export through the pipeline.  The merged zeiss at
+r1 (1 vox/mm!) surfaced SEVEN failure classes the showcase never
+could, each fixed with its number attached: gradient-garbage chip
+readings (credibility gate: 2x edge); lattice vertices exactly on
+straight creases (through-vertex pre-split); femtometer twin
+corners from twice-traced junctions (1e-3 sp insertion weld);
+814 duplicate-coverage segments from repeated CSG surfaces
+(coverage dedupe); mid-segment constraint crossings at t=0.046
+(shared-VERTEX corner rules - parameter proximity is not
+consent); T-junctions where one crease dead-ends on another
+(pre-split eps = 5e-3 sp, sized to the corner-bisection
+tolerance); and repair-churn exhausting MAX_REPAIR before the
+snap pass could run (self-feeding stash + depth-proportional
+tent attribution, floor at the corridor radius).  Plus the
+self-healing dispatcher: CGAL's error text is captured, the
+cascade site parsed (both dialects), local constraints
+quarantined, rebuild - up to 8 sites instead of losing every
+constraint to one corner.  End state: 12,338 constrained edges,
+ZERO cascades, 325K tris, 0 open, 39 non-manifold, whole
+recognizable microscope, 35MB raw STL.  Residual: ~22K shallow
+chips at UNTRACED creases (blend tangencies the det guard
+correctly refuses) - tracer-coverage work.
+
 Next tracks, in order:
-1. **Flat-face decimation** (Nate's ask): oracle-certified planar
+1. **Tracer coverage for tangencies** (the zeiss residual): the
+   kink-corner 3-field solve from the someday list is now the
+   front of the queue - blend creases where grad A x grad B
+   degenerates need their own marching treatment.
+2. **Flat-face decimation** (Nate's ask): oracle-certified planar
    patch re-triangulation; sketch under "Queued rounds".  Isolated
    output pass, like the snap pass - the pattern works.
-2. Someday: kink-corner 3-field solve, OP_ABS creases, zeiss-scale
-   run, chain-extractor dense robustness, upstream letter
-   (doc/DELAUNAY-MESHER.md is written for it).
+3. Someday: OP_ABS creases, higher-res zeiss (r2+; residuals are
+   in sp units, so they shrink with the lattice), repair-churn
+   budget for big models, chain-extractor dense robustness,
+   upstream letter (doc/DELAUNAY-MESHER.md is written for it).
 
 House rules that saved this campaign, do not forget: measure
 before productionize (and on EVERY model, not just the showcase
