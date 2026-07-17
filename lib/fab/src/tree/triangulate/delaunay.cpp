@@ -4568,7 +4568,35 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 {
                     const double d2 = CGAL::squared_distance(
                             nv->point(), pt);
-                    const double r = 0.25 * kc[i];
+                    /*  Law-blindness dial (plinth autopsy,
+                     *  2026-07-18): the guard counted constraint
+                     *  and Steiner vertices as crowding and
+                     *  vetoed every repair beside the junction it
+                     *  had just been given law for (blocked
+                     *  26->61 across rounds while detected chips
+                     *  ROSE).  When the nearest vertex is LAW,
+                     *  its crowding radius scales by
+                     *  STIBIUM_DMESH_CROWD_LAW; default 1 =
+                     *  unchanged (the fossil at the keep-out
+                     *  comment warns a naive exemption plateaued
+                     *  in the sparse-law era - re-refereed now on
+                     *  the plinth before any default moves).  */
+                    static const char* cl_env =
+                            getenv("STIBIUM_DMESH_CROWD_LAW");
+                    const double cls = cl_env ? atof(cl_env) : 1.0;
+                    double r = 0.25 * kc[i];
+                    if (cls != 1.0)
+                    {
+                        const auto pit = prov.find(&*nv);
+                        bool law = pit != prov.end() &&
+                                pit->second == 1;
+                        if constexpr (CCDT_MODE)
+                            if (!law && nv->ccdt_3_data()
+                                        .is_Steiner_vertex_on_edge())
+                                law = true;
+                        if (law)
+                            r *= cls;
+                    }
                     if (d2 < r * r)
                     {
                         ++blk_crowd;
