@@ -9,6 +9,7 @@
 
 #include <array>
 #include <chrono>
+#include <climits>
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -523,6 +524,19 @@ float autod_sep_bar()
     return env ? float(atof(env)) : 0.7f;
 }
 
+/*  Crowding trigger bar (STIBIUM_DMESH_LIVE, live min/max pairs
+ *  per leaf; 0 disables): leaves at or above it take level 2 from
+ *  the survey directly - the signal for crowded sub-lattice
+ *  geometry that the QEF residual cannot see.  Default 16: bench
+ *  referees max 4-5 live, screw/eyepiece fuzz reads 51-75, a 10x
+ *  gap.  */
+int autod_live_bar()
+{
+    const char* env = getenv("STIBIUM_DMESH_LIVE");
+    const int v = env ? atoi(env) : 16;
+    return v <= 0 ? INT_MAX : v;
+}
+
 /*  Shallow-seed channel (STIBIUM_DMESH_SHALLOW, a normal dot;
  *  default 0.97 ~ 14 degrees, 0 disables): cells whose normal
  *  spread falls between feature grade (~25 degrees) and this bar
@@ -838,6 +852,24 @@ void descend(Collector& c, const Region& r, Tape* tape)
                         0.5f * (r.Z[0] + r.Z[r.nk]),
                         live, mindot,
                         sep == HUGE_VALF ? -1.f : sep);
+            /*  Crowding trigger (density campaign, 2026-07-18):
+             *  the QEF residual is BLIND to crowded sub-lattice
+             *  geometry - each cell's crossings self-explain
+             *  (screw census: 284/292 cells silent below .005
+             *  while the leaves carry live 51-75; bench referees
+             *  max 4-5).  Live-pair count is the loudest
+             *  separable signal the survey already computes.
+             *  Level 2, same tangle demotion as every flag (the
+             *  old live-count fear predates law + graduated
+             *  retreat + geometric holes; the screws densify to
+             *  0 open / 0 nm at r2 - measured).  */
+            if (autodense() && live >= autod_live_bar())
+            {
+                const bool tangle =
+                        sep < autod_sep_bar() * c.spacing;
+                int& lv = c.want_dense[key];
+                lv = std::max(lv, tangle ? 1 : 2);
+            }
         }
 
         /*  Crease-band density: the push rewrites every DECIDED
