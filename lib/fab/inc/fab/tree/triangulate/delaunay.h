@@ -21,6 +21,7 @@
 
 #include <array>
 #include <cstdint>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -109,7 +110,9 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
                       const std::unordered_set<uint64_t>* demote
                               = nullptr,
                       const std::vector<std::array<float, 3>>*
-                              noweld = nullptr);
+                              noweld = nullptr,
+                      const std::unordered_map<uint64_t, int>*
+                              promote = nullptr);
 
 /*  The crease tracer: marches every min/max clause's crease
  *  {f_A = 0, f_B = 0} with an SSI predictor-corrector on the tape's
