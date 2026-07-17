@@ -82,6 +82,29 @@ geometry, ASK THEM (the knob was never knurled).  Referee models:
 examples/mesh_bench/*.sb (m0), examples/torture/zeiss (m20,
 --resolution 1, ~2.4 min, STIBIUM_DMESH_TIME=1 for heartbeats).
 
+## >>> NEXT CAMPAIGN QUEUE (2026-07-17 evening, Nate-ranked) <<<
+
+autod19 = cleanest yet (Nate: ~97% vs ~90%), at 2.5x tris.  The
+verdict on the trade: keep the quality, then make it cheap -
+overshoot-and-simplify is the sanctioned strategy and the bloat
+is recoverable.  Queue:
+1. SLICER HYGIENE (PrusaSlicer auto-repairs 3,612 "errors" on
+   autod19; printability IS the product bar).  We manufacture
+   two classes deliberately: manifold-pass coincident duplicate
+   vertices (5,395 - admesh re-welds them) and 640 sub-visual nm
+   edges; plus occasional near-degenerate snap-tent slivers.
+   Fix: epsilon-separate duplicate pairs along their sheet
+   normals (true shells, the classic MDC finish) + degenerate-
+   tri cull.  REFEREE: prusa-slicer CLI "0 errors on import" as
+   a harness check - external referee, formal.
+2. STRIP LEVEL-FROM-GAP: strips blanket level 3; rims 0.6 sp
+   apart need only 2.  level = from measured pair gap.  Cheap
+   30-40% of the 2.5x back, zero quality loss expected.
+3. SHALLOW-SEED CHANNEL (design in the entry below).
+4. Weld tear (one vertex, coordinates ledgered).
+5. Flat-face decimation - the big cost lever, own campaign,
+   Nate's eyes as referee.
+
 ## >>> STRIPS DEFAULT ON: THE v15 VERDICT (2026-07-17, 4d304658) <<<
 
 Nate's A/B of bino v15 (dedupe + strip cores) vs v16 (dedupe
