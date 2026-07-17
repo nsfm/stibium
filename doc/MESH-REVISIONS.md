@@ -24,7 +24,8 @@ referee.  Update this table with EVERY rev handed over for review.
 | autod25 | fa454dc0 | strip gap bar 0.5 sp | 2.83M | 0 | 985 | 15.7K | 0.638* | *renders identical; dial kept, default 0 |
 | autod26 | (A/B) | strip gap bar 0.25 sp | 2.78M | 0 | 991 | 15.7K | 0.576 | -10% size but fuzz at fine features; autod23 still best |
 | autod27 | da10e554 | kink-law referee fix (grid-aligned creases keep law) | 1.14M | 0 | 191 | 16.0K | 0.211 | best numbers ever BUT spikier rims, ultrafine detail loss - churn was subsidizing detail density (densdiff: the 2M delta sits ON detail areas) |
-| autod28 | c0f0aa4f | DC bias suppressed in crease band (air-chord fix) | 1.13M | 0 | 175 | 16.0K | 0.294 | splits 2906 -> 1041; plinth referee: "solved the air chords... perfect" (Nate); full-model slicer verdict pending |
+| autod28 | c0f0aa4f | DC bias suppressed in crease band (air-chord fix) | 1.13M | 0 | 175 | 16.0K | 0.294 | "cleaned up a huge swathe of open-air chords... NEW BASELINE" (Nate); autod23 keeps narrow edge on fine detail + close geometry |
+| autod29 | 8eb34437 | live-pair crowding trigger (density campaign 1/3) | 1.45M | 0 | 156 | 16.0K | 0.277 | screws-class density model-wide; screws extract: "MUCH cleaner" (r2-grade awaits law delivery); tangle armor held at 7,194 level-2 leaves |
 
 ## Bino referee (examples/torture/zeiss_id02_bino.sb, fast loop)
 
@@ -39,6 +40,7 @@ referee.  Update this table with EVERY rev handed over for review.
 | v21 | strip gap bar 0.5 | 761K | 0 | 690 | 3244 | 0.351 | marginal refund; default stayed 0 |
 | v22 | kink-law referee fix | 275K | 0 | 199 | 3224 | 0.167 | best numbers ever BUT rims spikier (churn subsidy withdrawn) |
 | v23 | DC crease-band suppression | 267K | 0 | 183 | 3224 | 0.238 | splits HALVED (1511 -> 653); worst up - phantom roofs were hiding real divots |
+| v24 | live-pair trigger | 285K | 0 | 183 | 3169 | 0.238 | no regression, +6%; trigger mostly overlaps existing coverage here |
 
 ## Open questions the next rev must answer
 
