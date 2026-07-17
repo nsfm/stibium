@@ -24,6 +24,7 @@ referee.  Update this table with EVERY rev handed over for review.
 | autod25 | fa454dc0 | strip gap bar 0.5 sp | 2.83M | 0 | 985 | 15.7K | 0.638* | *renders identical; dial kept, default 0 |
 | autod26 | (A/B) | strip gap bar 0.25 sp | 2.78M | 0 | 991 | 15.7K | 0.576 | -10% size but fuzz at fine features; autod23 still best |
 | autod27 | da10e554 | kink-law referee fix (grid-aligned creases keep law) | 1.14M | 0 | 191 | 16.0K | 0.211 | best numbers ever BUT spikier rims, ultrafine detail loss - churn was subsidizing detail density (densdiff: the 2M delta sits ON detail areas) |
+| autod28 | c0f0aa4f | DC bias suppressed in crease band (air-chord fix) | 1.13M | 0 | 175 | 16.0K | 0.294 | splits 2906 -> 1041; plinth referee: "solved the air chords... perfect" (Nate); full-model slicer verdict pending |
 
 ## Bino referee (examples/torture/zeiss_id02_bino.sb, fast loop)
 
@@ -37,6 +38,7 @@ referee.  Update this table with EVERY rev handed over for review.
 | v20 | graduated rollback (no-op on bino) | 783K | 0 | 684 | 3210 | 0.287 | = v18 |
 | v21 | strip gap bar 0.5 | 761K | 0 | 690 | 3244 | 0.351 | marginal refund; default stayed 0 |
 | v22 | kink-law referee fix | 275K | 0 | 199 | 3224 | 0.167 | best numbers ever BUT rims spikier (churn subsidy withdrawn) |
+| v23 | DC crease-band suppression | 267K | 0 | 183 | 3224 | 0.238 | splits HALVED (1511 -> 653); worst up - phantom roofs were hiding real divots |
 
 ## Open questions the next rev must answer
 
@@ -47,15 +49,27 @@ referee.  Update this table with EVERY rev handed over for review.
   signal (Nate's design seed, 2026-07-18).
 - Thin cone caps (knob model): thin-geometry tangle class.
 
-## Plinth verdict (2026-07-18, f5ec53db) - case CLOSED, lever named
+## Plinth verdict (2026-07-18, c0f0aa4f) - AIR CHORDS SOLVED
 
-The foot teeth are REAL GEOMETRY: FPROBE reads |f|/|grad| <= 5e-4
-at every suspect vertex - a genuine ~0.25 mm transition feature
-along the column base's back arc, aliased at r1 (r2: 88 tilted
-facets -> 4 clean).  Extraction, repair, snap, refinement all
-exonerated (each was suspected first).  Along the way: kink-law
-referee fix (real, model-wide), law-blind crowding dial (refuted,
-parked at 1.0), repair post-projection oracle (armor, 0 drops),
-FPROBE instrument.  ALL remaining quality classes now converge on
-ONE lever: smarter stage-D density triggers for real sub-lattice
-geometry (detail crowding + chainless curvature + this).
+(An earlier version of this entry declared the teeth "real
+geometry" - REFUTED by Nate's model reading + the z=9.5 wall
+probe.  The record stands corrected:)
+
+The air-chords were the DC all-surface-cell bias (built the same
+morning the tracer landed, for UNCONSTRAINED corners) roofing
+over the junction's AIR WEDGE beside a now-constrained crease -
+volume-adding facets wall-to-face across the crease fence,
+labeled "visually benign" in its own comment.  Convicted by
+elimination: repair oracle (0 drops), snap (nosnap identical),
+density (hidden + level 3: nothing), real geometry (FPROBE: all
+vertices on-surface AND no ledge exists - Nate's "simple
+cylinder on cube" reading correct).  DC=0 test: 88 teeth -> 0.
+FIX: bias suppressed within STIBIUM_DMESH_DC_BAND (default 0.75
+cells) of constrained segments; centroid-only there.  NATE'S
+EYES on the plinth: "solved the air chords... perfect."
+Along the way: kink-law referee fix (model-wide), law-blind
+crowding dial (refuted, parked), repair post-projection oracle
+(armor), FPROBE point instrument (the closer).
+Still open from this arc: detail-density for the autod23/27
+tradeoff (chain crowding), cone quilting (chainless curvature),
+thin cone caps (knob model).
