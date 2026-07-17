@@ -41,6 +41,8 @@ referee.  Update this table with EVERY rev handed over for review.
 | v22 | kink-law referee fix | 275K | 0 | 199 | 3224 | 0.167 | best numbers ever BUT rims spikier (churn subsidy withdrawn) |
 | v23 | DC crease-band suppression | 267K | 0 | 183 | 3224 | 0.238 | splits HALVED (1511 -> 653); worst up - phantom roofs were hiding real divots |
 | v24 | live-pair trigger | 285K | 0 | 183 | 3169 | 0.238 | no regression, +6%; trigger mostly overlaps existing coverage here |
+| v25 | + trace local step (pre snap fix) | 281K | 0 | 148 | 12042 | 0.577 | REGRESSION: 4x law feeding global snap tents = folds |
+| v26 | + snap tents at local pitch | 278K | 0 | 148 | 12042 | **0.092** | BEST EVER by 2x - at the 0.1mm product bar; the fix pair is load-bearing together |
 
 ## Open questions the next rev must answer
 
