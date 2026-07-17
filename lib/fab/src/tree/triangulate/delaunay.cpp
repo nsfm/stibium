@@ -5650,9 +5650,14 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
          *  level 3 and re-run stage A - tens of leaves, not the
          *  blanket-level-3 disaster; the retreat loop demotes any
          *  that tear.  */
+        /*  DEFAULT ON (2026-07-17, Nate's verdict): bino v15
+         *  (dedupe + strips) is "by FAR the cleanest
+         *  representation we've had" - the 588 nm that benched
+         *  this to opt-in are the sub-visual pinch species, and
+         *  count is a lying metric in BOTH directions.  */
         static const char* strips_env =
                 getenv("STIBIUM_DMESH_STRIPS");
-        if (strips_env && atoi(strips_env) != 0 &&
+        if ((!strips_env || atoi(strips_env) != 0) &&
             attempt == 0 && promote.empty() && autodense() &&
             !soup.tchains.empty())
         {
