@@ -1,5 +1,37 @@
 # The meshing campaign: adaptive Delaunay on sound intervals
 
+## >>> MORNING VERDICT + STRIPS DIAL (2026-07-17/18, fa454dc0) <<<
+
+NATE'S EYES on autod23 (the shallow-channel reference): "cleanest
+ever... another big jump forward."  Shallow engravings now SHARP;
+stepped edges around the bino eyepieces clean; flush sub-mm screws
+sharp where they used to smear.  Quote for the wall: "honestly at
+a grade where I'd consider it printable for my own purposes."
+Remaining visual list (all three named by Nate, this is the
+campaign map now):
+1. CHORDS-THROUGH-AIR: a few sites still large enough to survive
+   slicing; the widespread ones have gone tiny.
+2. SPARKLE at fine detail edges: dense-tri shimmer in Prusa -
+   overshoot doing its job; the cure is the DECIMATION campaign.
+3. QUILTING on cones/angled cylinders (the lamphouse "knurl" that
+   fooled me AGAIN - there are NO knurled parts, all smooth):
+   groups of tris dipping sub-surface, REGULAR on cones, blotchy
+   on cylinders.  r2 resolves it (measured days ago) = a
+   resolution/aliasing class.  Nate's signal idea, queue it:
+   quilted regions are FAR FROM ANY POLYLINE (curved surfaces
+   never chain) - chainless curvature could drive adaptive
+   density.  Strips DON'T affect it (measured, autod24).
+STRIPS A/B (Nate-requested, full zeiss): strips are LOAD-BEARING
+- OFF = 979K tris / 0 open / 128 nm but RATTY joint bands; ON =
+3.04M, clean joints.  Rings carry structure, cores carry finish.
+LEVEL-FROM-GAP (queue item 2) built + measured + defaulted OFF:
+895/1077 strip gaps < QUARTER cell (the near-tangent assembly
+contacts) - bar 0.25 refunds only 9%.  The 2.5x is the honest
+price of sub-quarter-cell fits.  STIBIUM_DMESH_STRIP_GAP is the
+dial (cells, 0 = blanket 3).  Tri-count lever = decimation.
+Nate is CUTTING EXTRACT MODELS for the quilted cone + surviving
+chord sites (bino-style referees) - open next session there.
+
 ## >>> WAKE UP HERE (note to self, 2026-07-17 end-of-day) <<<
 
 Three-session arc complete, ~15 commits, suite green at 627,666
