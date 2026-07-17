@@ -82,6 +82,37 @@ geometry, ASK THEM (the knob was never knurled).  Referee models:
 examples/mesh_bench/*.sb (m0), examples/torture/zeiss (m20,
 --resolution 1, ~2.4 min, STIBIUM_DMESH_TIME=1 for heartbeats).
 
+## >>> RING-EATING DEDUPE FIXED (2026-07-17, Nate-diagnosed) <<<
+
+Nate read the new chains render and called the mechanism in
+three words: "averaged, merged, or skipped."  Exact.  The tracer
+consumed seeds within a FULL CELL of a traced curve
+(point-to-vertex - it had to be that fat to bridge 0.5 sp chord
+spacing) and the coverage dedupe dropped segments within 0.2 sp
+- both identity-blind, both eating REAL neighbour rings that
+start at 0.22 sp in the additive joints.  True duplicates agree
+to Newton noise (~1e-3 sp): consumption now measures
+point-to-SEGMENT at 0.05 sp, coverage at 0.05 sp (20d0fee9).
+- engrave_0_5's ETERNAL churn was this bug: 11,906 repairs -> 3,
+  worst 0.000 sp, 35% lighter.  emboss same family.
+- Bino: +15 chains, nm 178 -> 140, 0 open, joint cleanest ever.
+- Zeiss autod18: +2,000 constraint segments, nm 116, rings
+  visibly crisped - BUT **12 open edges**, outside level-2 boxes
+  so the retreat can't claim them.  NEXT SESSION'S FIRST TASK:
+  locate them (NM_DEBUG count-1 lines + stlview), likely
+  crowded-constraint interactions the old dedupe was
+  accidentally suppressing; extend the retreat's rollback
+  channels or fix at the referee.  Watertight is the law -
+  autod17 remains the reference export until this is 0.
+- STIBIUM_DMESH_STRIPS=1 (close-ring level-3 promotion via the
+  retreat plumbing) stays opt-in: 588 nm as built, and the
+  dedupe fix stole most of its purpose - the rings didn't need
+  resolving, they needed to stop being eaten.
+- Observability pack (3e6af7e5): STIBIUM_DMESH_DUMP_CHAINS=x.stl
+  (polylines as slicer-viewable tubes - the instrument that
+  cracked this), STIBIUM_DMESH_STAGES=prefix (formation film:
+  Nate confirmed defects are born at stage 1 and never move).
+
 ## >>> THE ADDITIVE-JOINT DIAGNOSIS (2026-07-17, campaign-defining) <<<
 
 Nate's modeling note cracked it: the stubborn joints are
