@@ -1779,6 +1779,53 @@ static void sample_pass(Collector& c, const Deck* deck, Region r,
     tape_ctx_free(c.ctx);
 }
 
+/*  Field probe (STIBIUM_DMESH_FPROBE="x,y,z;x,y,z;..."): print f
+ *  and |f|/|grad| at listed points and continue.  The instrument
+ *  that settles is-it-really-air arguments with the oracle
+ *  instead of a fitted surface model (plinth teeth, 2026-07-18).  */
+static void field_probe(const Deck* deck)
+{
+    const char* pe = getenv("STIBIUM_DMESH_FPROBE");
+    if (!pe || !*pe)
+        return;
+    TapeCtx* ctx = tape_ctx_new(deck);
+    std::vector<float> px, py, pz;
+    float x, y, z;
+    const char* s = pe;
+    while (sscanf(s, "%f,%f,%f", &x, &y, &z) == 3)
+    {
+        px.push_back(x);
+        py.push_back(y);
+        pz.push_back(z);
+        const char* n = strchr(s, ';');
+        if (!n)
+            break;
+        s = n + 1;
+    }
+    const float h = 0.001f;
+    std::vector<float> qx, qy, qz, qv;
+    for (size_t i = 0; i < px.size(); ++i)
+        for (int q = 0; q < 7; ++q)
+        {
+            qx.push_back(px[i] + (q==1 ? h : q==2 ? -h : 0));
+            qy.push_back(py[i] + (q==3 ? h : q==4 ? -h : 0));
+            qz.push_back(pz[i] + (q==5 ? h : q==6 ? -h : 0));
+        }
+    eval_points(deck_base(deck), ctx, qx, qy, qz, qv);
+    for (size_t i = 0; i < px.size(); ++i)
+    {
+        const float f = qv[i*7];
+        const float gx = qv[i*7+1] - qv[i*7+2];
+        const float gy = qv[i*7+3] - qv[i*7+4];
+        const float gz = qv[i*7+5] - qv[i*7+6];
+        const float gl = sqrtf(gx*gx + gy*gy + gz*gz) / (2 * h);
+        fprintf(stderr, "FPROBE (%.4f, %.4f, %.4f): f=%.6g "
+                "|f|/|g|=%.6g\n", px[i], py[i], pz[i], f,
+                gl > 1e-12f ? fabsf(f) / gl : -1.f);
+    }
+    tape_ctx_free(ctx);
+}
+
 DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
                       const std::unordered_map<uint64_t, int>* demote,
                       const std::vector<std::array<float, 3>>*
@@ -1796,6 +1843,7 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
     }
 
     Collector c;
+    field_probe(deck);
     sample_pass(c, deck, r, halt, nullptr,
                 census.on ? &census : nullptr, noweld);
     if (census.on)
@@ -4486,10 +4534,62 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             }
         }
         project_points_impl(deck, ctx, kx, ky, kz, kh, kc);
+        /*  Post-projection oracle (plinth tooth autopsy,
+         *  2026-07-18): Newton projection OSCILLATES at concave
+         *  creases (the gradient flips across the kink) and a
+         *  stalled projection parks in the corner's AIR wedge -
+         *  measured on the plinth junction: repair vertices at
+         *  quarter-cell heights 0.1-0.7 mm outside the wall,
+         *  minting the tilted "foot teeth" (88 at r1, gone at
+         *  r2 - they scale with the lattice, not the model).
+         *  Same question stage-A's phantom oracle asks of QEF
+         *  minimizers, one stage downstream: is the projected
+         *  point ON the surface?  A miss is dropped, not
+         *  inserted - the chip it wanted to press is bounded
+         *  (3%-of-edge species) while an air vertex is
+         *  unbounded damage.  */
+        std::vector<uint8_t> offsurf(kx.size(), 0);
+        if (!kx.empty())
+        {
+            const float vh2 = 0.01f * soup.spacing;
+            std::vector<float> vx(kx.size() * 7), vy(kx.size() * 7),
+                    vz(kx.size() * 7), vv;
+            for (size_t i = 0; i < kx.size(); ++i)
+            {
+                for (int q = 0; q < 7; ++q)
+                {
+                    vx[i*7 + q] = kx[i];
+                    vy[i*7 + q] = ky[i];
+                    vz[i*7 + q] = kz[i];
+                }
+                vx[i*7 + 1] += vh2;   vx[i*7 + 2] -= vh2;
+                vy[i*7 + 3] += vh2;   vy[i*7 + 4] -= vh2;
+                vz[i*7 + 5] += vh2;   vz[i*7 + 6] -= vh2;
+            }
+            eval_points(deck_base(deck), ctx, vx, vy, vz, vv);
+            for (size_t i = 0; i < kx.size(); ++i)
+            {
+                const float f = vv[i*7];
+                const float gx = vv[i*7 + 1] - vv[i*7 + 2];
+                const float gy = vv[i*7 + 3] - vv[i*7 + 4];
+                const float gz = vv[i*7 + 5] - vv[i*7 + 6];
+                const float gl = sqrtf(gx*gx + gy*gy + gz*gz) /
+                        (2 * vh2);
+                if (!std::isfinite(f) ||
+                    (gl > 1e-12f &&
+                     fabsf(f) / gl > 0.05f * soup.spacing))
+                    offsurf[i] = 1;
+            }
+        }
         uint64_t added = 0;
-        uint64_t blk_keepout = 0, blk_crowd = 0;
+        uint64_t blk_keepout = 0, blk_crowd = 0, blk_air = 0;
         for (size_t i = 0; i < kx.size(); ++i)
         {
+            if (offsurf[i])
+            {
+                ++blk_air;
+                continue;
+            }
             /*  Repair keep-out: the constrained crease repairs
              *  itself; only the smooth field is ours to press (an
              *  insert on a constrained edge destroys it and the
@@ -4616,10 +4716,12 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         if (chip_env)
             fprintf(stderr, "REPAIR round %d: inserted %llu, "
                     "keep-out blocked %llu, crowding blocked "
-                    "%llu\n", repair_round,
+                    "%llu, off-surface dropped %llu\n",
+                    repair_round,
                     (unsigned long long)added,
                     (unsigned long long)blk_keepout,
-                    (unsigned long long)blk_crowd);
+                    (unsigned long long)blk_crowd,
+                    (unsigned long long)blk_air);
         if (!added)
             break;
         repaired_total += added;
