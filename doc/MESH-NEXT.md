@@ -82,6 +82,27 @@ geometry, ASK THEM (the knob was never knurled).  Referee models:
 examples/mesh_bench/*.sb (m0), examples/torture/zeiss (m20,
 --resolution 1, ~2.4 min, STIBIUM_DMESH_TIME=1 for heartbeats).
 
+## >>> STRIPS DEFAULT ON: THE v15 VERDICT (2026-07-17, 4d304658) <<<
+
+Nate's A/B of bino v15 (dedupe + strip cores) vs v16 (dedupe
+only): v15 is "by FAR the cleanest representation we've had" -
+and I had benched strips to opt-in on their 588 nm, hours after
+Nate said the metrics aren't the visual ones.  COUNT LIES IN
+BOTH DIRECTIONS; the eyeball referee is formal and OVERRULES nm
+counts (nm = the sub-visual pinch species, never once seen).
+Strips now default ON.  Zeiss autod19 (dedupe + strips): 666
+strip leaves at level 3, **0 open** - the strips heal autod18's
+12 holes - nm 640 (sub-visual), worst 0.324 sp, 2.6M tris
+(2.5x, inside Nate's sanctioned budget; simplification is the
+someday-lever).  Bench: byte-stable, all green.
+CHAINLESS SHALLOW EDGES (Nate's next eyeball find): sharp edges
+below the QEF spread bar (~25 deg) never seed the tracer =
+the fluttery residual defects.  SPREAD_DOT 0.95/0.97 both break
+the fallback radius graph on csg ([.dchain]) - the fix is a
+SEPARATE tracer-only seed channel from shallow-spread cells
+(never entering the feature array that suppression and the
+fallback graph consume).  Front of queue with the weld tear.
+
 ## >>> RING-EATING DEDUPE FIXED (2026-07-17, Nate-diagnosed) <<<
 
 Nate read the new chains render and called the mechanism in
