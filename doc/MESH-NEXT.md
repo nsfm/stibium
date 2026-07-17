@@ -1,5 +1,40 @@
 # The meshing campaign: adaptive Delaunay on sound intervals
 
+## >>> WAKE UP HERE (note to self, 2026-07-17 end-of-day) <<<
+
+Three-session arc complete, ~15 commits, suite green at 627,666
+throughout.  As of 5c31a6a5 the reference export is
+build/zeiss_dmesh/zeiss_autod19.stl: Nate's eyes score it ~97%,
+"cleanest yet", watertight, 2.6M tris (sanctioned overshoot).
+Nate's words, keep them where you can see them: "possibly the
+finest open-source f-rep mesher available in the world at the
+moment" - IF we pull it off.  We are pulling it off.
+
+Open with the NEXT CAMPAIGN QUEUE entry below (Nate-ranked):
+slicer hygiene first (prusa CLI zero-repair referee), then strip
+level-from-gap, seed channel, weld tear, decimation.
+
+The day's hard-won rules, additions to the house set:
+- The eyeball referee is FORMAL and overrules any count - and it
+  must be in the loop BEFORE a default is picked, not after (I
+  benched the strips on nm the same morning Nate told me metrics
+  aren't the visual ones.  v15 A/B caught it.  Never again.)
+- Distance-based dedupe/consumption needs an IDENTITY story:
+  measure the true-duplicate population's spread before choosing
+  any radius (the ring-eater hid for days at 200x too loose).
+- Build instruments Nate can look through (chains tube STL,
+  stage dumps, renders/).  Every major bug this arc was found by
+  their eyes through a tool I built the same day.
+- Damage is measured, not predicted (retreat loop); "couldn't
+  judge" is not "guilty" (trust gate); when the mesh looks
+  wrong, first ask what the model actually IS (additive joints).
+
+Fast referee: examples/torture/zeiss_id02_bino.sb (~2-4 min).
+Instruments: STIBIUM_DMESH_DUMP_CHAINS/_STAGES/_CENSUS/_PROBE;
+scratchpad stlview.py + roughness.py (rebuild from ledger if
+lost - ~100 lines numpy).  STL lineage + renders in
+build/zeiss_dmesh/ - KEEP, Nate reviews rev-by-rev.
+
 ## >>> NEXT SESSION OPENS HERE (note to self, 2026-07-17 dawn) <<<
 
 Two marathon nights compounded.  As of 510f61ca: zeiss r1 =
