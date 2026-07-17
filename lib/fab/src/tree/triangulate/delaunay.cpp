@@ -3986,7 +3986,28 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                          y = p[0][1]+p[1][1]+p[2][1]+p[3][1],
                          z = p[0][2]+p[1][2]+p[2][2]+p[3][2];
             oracle_cells.push_back(c);
-            const bool allsurf = dc_cells && !mixed && !sign;
+            /*  DC bias is suppressed INSIDE the crease band
+             *  (plinth conviction, 2026-07-18): the bias was
+             *  built the morning the tracer landed, for corner
+             *  tets at UNCONSTRAINED creases.  Beside a
+             *  constrained crease the corner is already
+             *  articulated by law, and the barycenter probe
+             *  swallows the junction's AIR wedge instead -
+             *  facets roof from wall to face over the crease
+             *  fence (88 tilted "teeth" on the plinth, 0 with
+             *  the band suppression; chips unchanged - law+snap
+             *  already cover the band).  The volume-ADDING
+             *  species Nate convicted by eye days ago.
+             *  STIBIUM_DMESH_DC_BAND, cells; 0 = old blanket
+             *  bias.  */
+            static const char* dcb_env =
+                    getenv("STIBIUM_DMESH_DC_BAND");
+            const float dcb = (dcb_env ? float(atof(dcb_env))
+                                       : 0.75f) * soup.spacing;
+            const bool allsurf = dc_cells && !mixed && !sign &&
+                    !(dcb > 0 && !cseg.empty() &&
+                      near_crease(float(x / 4), float(y / 4),
+                                  float(z / 4), dcb));
             oracle_allsurf.push_back(allsurf ? 1 : 0);
             cxs.push_back(float(x / 4));
             cys.push_back(float(y / 4));
