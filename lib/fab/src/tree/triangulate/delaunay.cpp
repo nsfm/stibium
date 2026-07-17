@@ -1722,7 +1722,9 @@ static void sample_pass(Collector& c, const Deck* deck, Region r,
 DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
                       const std::unordered_set<uint64_t>* demote,
                       const std::vector<std::array<float, 3>>*
-                              noweld)
+                              noweld,
+                      const std::unordered_map<uint64_t, int>*
+                              promote)
 {
     Census census;
     const char* cenv = getenv("STIBIUM_DMESH_CENSUS");
@@ -1826,6 +1828,15 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
                 l2 = std::max(l2, lvl);
             }
         }
+        /*  Close-ring strip promotion (level 3 between paired
+         *  rims) lands before the demote cap so retreat can still
+         *  roll a torn strip back.  */
+        if (promote)
+            for (const auto& [k, v] : *promote)
+            {
+                int& lv = dilated[k];
+                lv = std::max(lv, v);
+            }
         /*  Retreat rollback: leaves whose cores MEASURABLY opened
          *  the mesh on a previous attempt drop to flood level.  */
         if (demote)
@@ -2396,17 +2407,36 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
                 poly.push_back(q);
 
             /*  Consume every feature near the traced curve so the
-             *  next unconsumed seed is a NEW component.  */
-            const float cr2 = sp * sp;
+             *  next unconsumed seed is a NEW component.  Identity
+             *  by DISTANCE-TO-SEGMENT at a tight radius (0.05 sp):
+             *  own-curve seeds sit at Newton noise (~1e-3 sp) from
+             *  the polyline SEGMENTS, while the closest real
+             *  neighbour rings measured 0.22 sp away (the additive-
+             *  joint autopsy).  The old point-to-vertex test needed
+             *  a FULL-CELL radius to cover the chord spacing - and
+             *  ate entire neighbouring rings in crowded bands
+             *  (Nate's eyeball read: "averaged, merged, or
+             *  skipped").  */
+            const float cr2 = 0.05f * sp * 0.05f * sp;
             for (size_t s2 = 0; s2 < consumed.size(); ++s2)
             {
                 if (consumed[s2])
                     continue;
                 const DSurfPoint& F = soup->surface[f0 + s2];
-                for (const DSurfPoint& q : poly)
+                for (size_t qi = 0; qi + 1 < poly.size(); ++qi)
                 {
-                    const float dx = q.x - F.x, dy = q.y - F.y,
-                                dz = q.z - F.z;
+                    const DSurfPoint& A = poly[qi];
+                    const DSurfPoint& B = poly[qi + 1];
+                    const float bx = B.x - A.x, by = B.y - A.y,
+                                bz = B.z - A.z;
+                    const float px = F.x - A.x, py = F.y - A.y,
+                                pz = F.z - A.z;
+                    const float bb = bx*bx + by*by + bz*bz;
+                    float t = bb > 0
+                            ? (px*bx + py*by + pz*bz) / bb : 0;
+                    t = t < 0 ? 0 : t > 1 ? 1 : t;
+                    const float dx = px - t*bx, dy = py - t*by,
+                                dz = pz - t*bz;
                     if (dx*dx + dy*dy + dz*dz < cr2)
                     {
                         consumed[s2] = 1;
@@ -2989,7 +3019,12 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             {
                 const DSurfPoint& A = soup.surface[cand[i].first];
                 const DSurfPoint& B = soup.surface[cand[i].second];
-                const float rr = 0.2f * soup.spacing;
+                /*  0.2 sp grazed REAL neighbour rings (they start
+                 *  at 0.22 sp in the additive joints); true
+                 *  re-traces of the same crease agree to Newton
+                 *  noise, so 0.05 sp still catches every genuine
+                 *  duplicate.  */
+                const float rr = 0.05f * soup.spacing;
                 if (covered(A.x, A.y, A.z, rr) &&
                     covered(B.x, B.y, B.z, rr) &&
                     covered((A.x + B.x) * 0.5f,
@@ -5589,12 +5624,14 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
      *  not predicted; models that produce no holes never pay.  */
     std::unordered_set<uint64_t> demote;
     std::vector<std::array<float, 3>> noweld;
-    for (int attempt = 0; attempt < 3; ++attempt)
+    std::unordered_map<uint64_t, int> promote;
+    for (int attempt = 0; attempt < 4; ++attempt)
     {
         PhaseTimer pt;
         DSoup soup = delaunay_sample(deck, r, halt,
                 demote.empty() ? nullptr : &demote,
-                noweld.empty() ? nullptr : &noweld);
+                noweld.empty() ? nullptr : &noweld,
+                promote.empty() ? nullptr : &promote);
         pt.mark("sample+bisect+QEF");
         if (*halt)
             return false;
@@ -5603,6 +5640,66 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
             delaunay_trace(deck, r, &soup, halt);
         if (const char* cp = getenv("STIBIUM_DMESH_DUMP_CHAINS"))
             dump_chains_stl(cp, soup);
+        /*  Close-ring strip cores (the additive-joint diagnosis):
+         *  chain pairs closer than ~3 dense pitches bound a strip
+         *  of REAL sub-articulation geometry (two parts' rims at
+         *  slightly different heights - 6-8 rings in a 1.5 mm band
+         *  at the bino collar).  The strip between them has no
+         *  witnesses and chords ring-to-ring: the visible
+         *  interference.  Promote exactly the strip leaves to
+         *  level 3 and re-run stage A - tens of leaves, not the
+         *  blanket-level-3 disaster; the retreat loop demotes any
+         *  that tear.  */
+        static const char* strips_env =
+                getenv("STIBIUM_DMESH_STRIPS");
+        if (strips_env && atoi(strips_env) != 0 &&
+            attempt == 0 && promote.empty() && autodense() &&
+            !soup.tchains.empty())
+        {
+            const float strip_r = 0.75f * soup.spacing;
+            std::vector<std::array<float, 4>> pts;  // x,y,z,chain
+            for (size_t c = 0; c < soup.tchains.size(); ++c)
+                for (const uint32_t ix : soup.tchains[c])
+                {
+                    const DSurfPoint& p = soup.surface[ix];
+                    pts.push_back({ p.x, p.y, p.z, float(c) });
+                }
+            for (size_t i = 0; i < pts.size(); ++i)
+                for (size_t j = i + 1; j < pts.size(); ++j)
+                {
+                    if (pts[i][3] == pts[j][3])
+                        continue;
+                    const float dx = pts[i][0] - pts[j][0];
+                    const float dy = pts[i][1] - pts[j][1];
+                    const float dz = pts[i][2] - pts[j][2];
+                    if (dx*dx + dy*dy + dz*dz >=
+                        strip_r * strip_r)
+                        continue;
+                    const float mx = 0.5f * (pts[i][0] +
+                                             pts[j][0]);
+                    const float my = 0.5f * (pts[i][1] +
+                                             pts[j][1]);
+                    const float mz = 0.5f * (pts[i][2] +
+                                             pts[j][2]);
+                    for (const auto& db : soup.dense_boxes)
+                        if (mx >= db.lo[0] && mx <= db.hi[0] &&
+                            my >= db.lo[1] && my <= db.hi[1] &&
+                            mz >= db.lo[2] && mz <= db.hi[2])
+                        {
+                            int& lv = promote[db.key];
+                            lv = std::max(lv, 3);
+                        }
+                }
+            if (!promote.empty())
+            {
+                if (getenv("STIBIUM_DMESH_TIME") ||
+                    getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+                    fprintf(stderr, "STRIPS: %zu close-ring strip "
+                            "leaves promoted to level 3\n",
+                            promote.size());
+                continue;   // re-run stage A before paying for B+C
+            }
+        }
         pt.mark("crease tracer");
         if (*halt)
             return false;
