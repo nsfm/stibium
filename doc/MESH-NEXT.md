@@ -117,6 +117,80 @@ geometry, ASK THEM (the knob was never knurled).  Referee models:
 examples/mesh_bench/*.sb (m0), examples/torture/zeiss (m20,
 --resolution 1, ~2.4 min, STIBIUM_DMESH_TIME=1 for heartbeats).
 
+## >>> SHALLOW CHANNEL + THIRD RING-EATER (2026-07-18, b152a810) <<<
+
+Nate re-prioritized on waking: the chords-through-air flutter
+beats slicer hygiene, and their chain-overlay observation (worst
+flutter = regions NOT fully polylined; sharp edges with no
+chains; always where features crowd - small gaps, shallow steps)
+scoped the whole campaign.  Two limiters found and fixed:
+
+1. SECOND RING-EATER: the duplicate-trace guard measured 0.5 sp
+   point-to-VERTEX against same-clause polylines - every seed of
+   a real neighbour loop in a sub-half-cell gap read "duplicate".
+   Same disease as 20d0fee9, same identity story (corrected seeds
+   sit ON the crease: true dupes within chord sag <= ~0.06 sp of
+   the polyline, real neighbours at 0.22 sp), same cure:
+   point-to-SEGMENT, 0.1 sp.  THE LAW, second conviction:
+   distance-based dedupe needs an identity story.
+2. SHALLOW-SEED CHANNEL (queue item 3, landed): cells in crease
+   leaves with normal spread between SPREAD_DOT (~25 deg) and
+   STIBIUM_DMESH_SHALLOW (default 0.97 ~ 14 deg, 0 off) mint
+   TRACER-ONLY seeds (DSoup::tseeds) - never the feature tail,
+   never suppression, never fallback chains ([.dchain] safe by
+   construction, not by radius).  Tracer seed pool = tail+tseeds.
+3. Enabling gotcha worth remembering: stage-D pass 2 judged
+   cells against an EMPTY crease-leaf map (survey runs pass 1
+   only; the SHIPPED soup is pass 2's).  Zero shallow seeds until
+   the survey was handed over (c2.crease_leaves = move(...)).
+   If a per-leaf gate ever reads dead again, look here first.
+
+Bino referee (HEAD -> dup fix -> full stack), suite 627,666:
+  chains 123 -> 176 -> 183;  constrained 2836 -> 3042 -> 3210
+  open 4(!) -> 0 -> 0;  worst 0.334 -> 0.310 -> 0.287 sp
+  tris 716K -> 711K -> 783K;  nm 588 -> 693 -> 684 (sub-visual
+  class; count lies, depth + watertight + Nate's eyes rule).
+  NOTE: committed HEAD had gone 4-open on the bino - the dup
+  guard was starving crowded bands of constraints and retreat
+  couldn't reach it.  Watertight restored by COVERAGE, not
+  rollback.
+Zeiss autod20: STLs + chains dump in build/zeiss_dmesh/,
+renders in renders/.  Tracer 18 -> 68 s (dup guard is
+O(polys x points) - fold into the seed gate if it ever hurts).
+Bino gift model committed: examples/torture/zeiss_id02_bino.sb.
+
+THE CASCADE THE COVERAGE TRIGGERED (same night, 112b11a1 +
+8730c4e8) - three referee bugs the new chains flushed out, each
+measured before fixed:
+1. TRUST GATE IS FALLBACK-ONLY.  The recovered coverage pushed
+   zeiss over the model-global 10% cliff: 1,784 local chord-sag
+   rejects torched ALL ~15K constraints (autod20: 4 open, 965
+   nm, DT semantics; the model had lived just under the bar
+   since autod19).  Per-chain conviction tried first and REFUTED
+   (bino 0 -> 14 open: it strips oracle-verified segments).
+   Traced chains cannot mislink - judgment stays individual;
+   the 10% gate only guards the fallback radius-graph extractor.
+2. HOLES ARE GEOMETRIC FACTS.  The manifold pass mints
+   index-distinct coincident vertices; seams between split
+   sites read "open" while the surface is sealed.  autod22's
+   "4 open" = 0 geometric (verified independently on the STL) -
+   and retreat DEMOTED A HEALTHY STRIP LEAF over the phantoms,
+   minting 26 real opens from 0.  open_edges + retreat now
+   count on exact-coordinate-welded ids; nm stays index-space
+   (that's what the splits provide).
+3. Rollback is GRADUATED (demote = conviction count, one level
+   per conviction; straight-to-flood = 8x cliff mid-band) and
+   the loop ships the LEAST-DAMAGED attempt, not the last.
+ZEISS AUTOD23 (new reference export): 0 open GEOMETRIC in ONE
+attempt (~22 min, no retreats), 16,085 constraints (was ~13K),
+967 nm (sub-visual), worst 0.576 sp, 3.04M tris.  The worst
+site moved to a knob band at (-7.0, 5.4, 92.2) where autod23
+resolves a REGULAR rib texture autod19 smoothed over -
+possibly REAL knurling this time; old-mesher ref is too noisy
+to adjudicate.  NATE'S EYES QUEUED: renders/zeiss_worst_
+autod19/23/ref.png + collar pair + bino_v16/17/18 joint pngs.
+Chains overlay: zeiss_chains_autod23.stl on zeiss_autod23.stl.
+
 ## >>> NEXT CAMPAIGN QUEUE (2026-07-17 evening, Nate-ranked) <<<
 
 autod19 = cleanest yet (Nate: ~97% vs ~90%), at 2.5x tris.  The
