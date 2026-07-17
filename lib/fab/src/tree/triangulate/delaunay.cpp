@@ -2062,6 +2062,41 @@ struct CreaseTracer
     float step;                      // march step (0.5 sp / dense)
     float bmin[3], bmax[3];          // region bounds + margin
 
+    /*  Law delivery (density campaign, 2026-07-18): the march
+     *  step was GLOBAL, so lattice density outran constraint
+     *  density inside stage-D bands - a level-2 screw bore
+     *  walks in six half-cell strides while its lattice is
+     *  quarter-cell, and the chain dies where r2's survives
+     *  (screws: 339 constraints at r1+level2 vs 681 at r2;
+     *  churn triples to fill the law gap).  The 2026-07-15
+     *  "step scaling refuted" verdict was GLOBAL halving on
+     *  at-scale features; local band scaling is a new claim,
+     *  re-refereed.  Dense leaves quantized on the uniform leaf
+     *  grid; lookup is O(1) per march step.
+     *  STIBIUM_DMESH_TRACE_LOCAL=0 disables.  */
+    std::unordered_map<uint64_t, int> band;
+    float leaf_edge = 0;
+    float borigin[3] = { 0, 0, 0 };
+
+    static uint64_t band_key(int qx, int qy, int qz)
+    {
+        return (uint64_t(uint32_t(qx + (1 << 20))) << 42) |
+               (uint64_t(uint32_t(qy + (1 << 20))) << 21) |
+                uint64_t(uint32_t(qz + (1 << 20)));
+    }
+
+    float local_step(const float p[3]) const
+    {
+        if (band.empty() || !(leaf_edge > 0))
+            return step;
+        const auto it = band.find(band_key(
+                int(std::floor((p[0] - borigin[0]) / leaf_edge)),
+                int(std::floor((p[1] - borigin[1]) / leaf_edge)),
+                int(std::floor((p[2] - borigin[2]) / leaf_edge))));
+        return it == band.end()
+                ? step : step / float(1 << it->second);
+    }
+
     /*  7-tap probe at p: pair values/gradients (prefix eval) and
      *  full-surface distance |f|/|grad f| (full eval).  */
     struct Probe
@@ -2289,12 +2324,21 @@ struct CreaseTracer
                std::vector<DSurfPoint>& out_pts,
                volatile int* halt) const
     {
-        const float step = this->step;
-        const float trim = 0.05f * sp;
         float p[3] = { p0[0], p0[1], p0[2] };
         float tprev[3] = { dir * t0[0], dir * t0[1], dir * t0[2] };
-        for (int steps = 0; steps < 4096 && !*halt; ++steps)
+        for (int steps = 0; steps < 16384 && !*halt; ++steps)
         {
+            const float step = local_step(p);
+            /*  The trim is per-STRIDE sensitivity: a coarse
+             *  stride leaps past a junction's lift-off zone and
+             *  bisects cleanly, but a fine stride CRAWLS through
+             *  it - with a fixed trim it emits points with fdist
+             *  just under the bar and never fires the bisect
+             *  ([.dtrace] csg: worst |f| 1.9e-3, the same number
+             *  the 2026-07-15 global experiment measured).  Scale
+             *  the trim with the stride and fine bands tighten
+             *  their own tolerance.  */
+            const float trim = 0.1f * step;
             float pt[3] = { p[0] + step * tprev[0],
                             p[1] + step * tprev[1],
                             p[2] + step * tprev[2] };
@@ -2442,6 +2486,36 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
     tr.bmax[1] = r.Y[r.nj] + sp;
     tr.bmin[2] = r.Z[0] - sp;
     tr.bmax[2] = r.Z[r.nk] + sp;
+    /*  Law delivery: march at the LOCAL pitch inside stage-D
+     *  bands (see the CreaseTracer comment).  */
+    static const char* tl_env = getenv("STIBIUM_DMESH_TRACE_LOCAL");
+    if ((!tl_env || atoi(tl_env) != 0) && !soup->dense_boxes.empty())
+    {
+        tr.leaf_edge = soup->dense_boxes[0].hi[0] -
+                       soup->dense_boxes[0].lo[0];
+        tr.borigin[0] = r.X[0];
+        tr.borigin[1] = r.Y[0];
+        tr.borigin[2] = r.Z[0];
+        if (tr.leaf_edge > 0)
+            for (const auto& b : soup->dense_boxes)
+            {
+                if (b.level < 1)
+                    continue;
+                const uint64_t k = CreaseTracer::band_key(
+                        int(std::floor((b.lo[0] - r.X[0]) /
+                                       tr.leaf_edge + 0.5f)),
+                        int(std::floor((b.lo[1] - r.Y[0]) /
+                                       tr.leaf_edge + 0.5f)),
+                        int(std::floor((b.lo[2] - r.Z[0]) /
+                                       tr.leaf_edge + 0.5f)));
+                int& lv = tr.band[k];
+                lv = std::max(lv, b.level);
+            }
+        if (getenv("STIBIUM_DMESH_TRACE_DEBUG"))
+            fprintf(stderr, "TRACE local-step band: %zu dense "
+                    "leaves, edge %.3f\n", tr.band.size(),
+                    tr.leaf_edge);
+    }
 
     std::vector<std::vector<DSurfPoint>> polys;
     std::vector<uint8_t> closed;
@@ -5374,9 +5448,21 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                      *  attribution there is never wrong (csg's
                      *  shallow chips sit at ~0.2 sp with ~0.06 sp
                      *  depth and must still tent).  */
-                    const float acap = std::min(soup.spacing,
+                    /*  ALL radii at the LOCAL pitch (screws fold
+                     *  autopsy, 2026-07-18): inside a level-2
+                     *  band the global floor builds tents three
+                     *  sizes too wide for quarter-cell chips -
+                     *  overlapping tents FOLD (4,621 rough edges
+                     *  with 180.0-degree dihedrals; snap-off
+                     *  reads 2,855 at 161).  The corridor made
+                     *  this move on 2026-07-16; snap missed it.  */
+                    const float lsp = soup.spacing /
+                            std::max(dense_factor(),
+                                     box_dense_factor(soup, mx,
+                                                      my, mz));
+                    const float acap = std::min(lsp,
                             std::max(2.5f * snap_d[s],
-                                     0.35f * soup.spacing));
+                                     0.35f * lsp));
                     if (best > acap * acap)
                     {
                         /*  No polyline owns this chip: a divot in
