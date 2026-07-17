@@ -43,9 +43,19 @@ referee.  Update this table with EVERY rev handed over for review.
 - Selective detail density to replace the churn subsidy: per-leaf
   CHAIN-SEGMENT CROWDING as a stage-D driver (fine detail = dense
   polylines; the densdiff hotspots are all chain-crowded regions).
-- Plinth foot teeth: extraction-born, snap-immune, sub-repair-bar
-  (0.031 sp at the 3%-of-edge dial) - what vetoes the repair
-  insert there?  (crowding guard is the suspect.)
 - Quilting on cones (lamp model): chainless-curvature density
   signal (Nate's design seed, 2026-07-18).
 - Thin cone caps (knob model): thin-geometry tangle class.
+
+## Plinth verdict (2026-07-18, f5ec53db) - case CLOSED, lever named
+
+The foot teeth are REAL GEOMETRY: FPROBE reads |f|/|grad| <= 5e-4
+at every suspect vertex - a genuine ~0.25 mm transition feature
+along the column base's back arc, aliased at r1 (r2: 88 tilted
+facets -> 4 clean).  Extraction, repair, snap, refinement all
+exonerated (each was suspected first).  Along the way: kink-law
+referee fix (real, model-wide), law-blind crowding dial (refuted,
+parked at 1.0), repair post-projection oracle (armor, 0 drops),
+FPROBE instrument.  ALL remaining quality classes now converge on
+ONE lever: smarter stage-D density triggers for real sub-lattice
+geometry (detail crowding + chainless curvature + this).
