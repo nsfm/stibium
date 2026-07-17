@@ -5822,6 +5822,26 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
             !soup.tchains.empty())
         {
             const float strip_r = 0.75f * soup.spacing;
+            /*  Level from the MEASURED rim gap (A/B 2026-07-18:
+             *  blanket level 3 = clean joints at 3.04M tris,
+             *  strips off = ratty joints at 979K - the dial
+             *  between them is the gap the detector already
+             *  measures).  A strip articulates with ~2 lattice
+             *  rows between its rims: gaps of half a cell and up
+             *  get quarter-cell pitch (level 2); only tighter
+             *  pairs pay for eighth-cells.  STIBIUM_DMESH_
+             *  STRIP_GAP sets the threshold (cells); DEFAULT 0 =
+             *  blanket level 3, because the dial was measured
+             *  nearly moot: 895/1077 zeiss strip gaps sit under a
+             *  QUARTER cell (they are the near-tangent assembly
+             *  contacts of the pinch census) - bar 0.25 refunds
+             *  only 9% of the tris.  The 2.5x is the honest price
+             *  of sub-quarter-cell fits; the tri-count lever is
+             *  decimation, not strip starvation.  */
+            static const char* sg2_env =
+                    getenv("STIBIUM_DMESH_STRIP_GAP");
+            const float gap2 = (sg2_env ? float(atof(sg2_env))
+                                        : 0.f) * soup.spacing;
             std::vector<std::array<float, 4>> pts;  // x,y,z,chain
             for (size_t c = 0; c < soup.tchains.size(); ++c)
                 for (const uint32_t ix : soup.tchains[c])
@@ -5837,9 +5857,10 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                     const float dx = pts[i][0] - pts[j][0];
                     const float dy = pts[i][1] - pts[j][1];
                     const float dz = pts[i][2] - pts[j][2];
-                    if (dx*dx + dy*dy + dz*dz >=
-                        strip_r * strip_r)
+                    const float d2 = dx*dx + dy*dy + dz*dz;
+                    if (d2 >= strip_r * strip_r)
                         continue;
+                    const int lvl = d2 >= gap2 * gap2 ? 2 : 3;
                     const float mx = 0.5f * (pts[i][0] +
                                              pts[j][0]);
                     const float my = 0.5f * (pts[i][1] +
@@ -5852,16 +5873,23 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                             mz >= db.lo[2] && mz <= db.hi[2])
                         {
                             int& lv = promote[db.key];
-                            lv = std::max(lv, 3);
+                            lv = std::max(lv, lvl);
                         }
                 }
             if (!promote.empty())
             {
                 if (getenv("STIBIUM_DMESH_TIME") ||
                     getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+                {
+                    size_t p2 = 0, p3 = 0;
+                    for (const auto& [k, l] : promote)
+                        ++(l >= 3 ? p3 : p2);
                     fprintf(stderr, "STRIPS: %zu close-ring strip "
-                            "leaves promoted to level 3\n",
-                            promote.size());
+                            "leaves promoted (%zu @2, %zu @3, "
+                            "gap bar %.2f sp)\n",
+                            promote.size(), p2, p3,
+                            gap2 / soup.spacing);
+                }
                 continue;   // re-run stage A before paying for B+C
             }
         }
