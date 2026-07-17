@@ -85,6 +85,13 @@ struct DSoup
 
     /*  QEF-placed sharp-feature points appended to `surface`.  */
     uint64_t feature_points = 0;
+    /*  Shallow-channel tracer seeds (STIBIUM_DMESH_SHALLOW): QEF
+     *  minimizers from crease-leaf cells whose normal spread is
+     *  below feature grade (~25 deg) but above the shallow bar
+     *  (~14 deg).  Seed pool ONLY - never surface vertices, never
+     *  crossing suppression, never fallback chains (that path is
+     *  measured broken: [.dchain]).  */
+    std::vector<DSurfPoint> tseeds;
     /*  Crossings replaced by their cell's feature point.  */
     uint64_t suppressed = 0;
     /*  Outlier feature points mediated back onto their chain.  */

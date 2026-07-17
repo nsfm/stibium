@@ -502,6 +502,23 @@ float autod_sep_bar()
     return env ? float(atof(env)) : 0.7f;
 }
 
+/*  Shallow-seed channel (STIBIUM_DMESH_SHALLOW, a normal dot;
+ *  default 0.97 ~ 14 degrees, 0 disables): cells whose normal
+ *  spread falls between feature grade (~25 degrees) and this bar
+ *  mint TRACER-ONLY seeds.  The tracer verifies every seed
+ *  against the oracle before tracing, so shallow candidates are
+ *  free to offer - but they must never enter the feature tail:
+ *  widening SPREAD_DOT itself to 0.95/0.97 poisons crossing
+ *  suppression and the fallback radius graph ([.dchain] csg loop
+ *  breaks; measured twice, 2026-07-17).  Below ~14 degrees the
+ *  SSI corrector is chasing near-tangent intersections the det
+ *  gate rejects anyway.  */
+float shallow_seed_dot()
+{
+    const char* env = getenv("STIBIUM_DMESH_SHALLOW");
+    return env ? float(atof(env)) : 0.97f;
+}
+
 bool autodense()
 {
     const char* env = getenv("STIBIUM_DMESH_AUTODENSE");
@@ -1050,6 +1067,7 @@ void feature_points(Collector& c)
     {
         const FeatCell* fc;
         float x[3];
+        bool shallow;   // tracer-only seed: no tail, no suppression
     };
     std::vector<FeatCand> cands;
     uint64_t added = 0;
@@ -1072,7 +1090,18 @@ void feature_points(Collector& c)
                     min_dot = d;
             }
         const bool feat = min_dot <= SPREAD_DOT;
-        if (!feat && !c.census && !autodense())
+        /*  Shallow channel: too flat for feature status, but a
+         *  live crease pair runs through this leaf - the crease
+         *  may simply be shallower than the 25-degree gate (the
+         *  under-polylined crowded bands in Nate's chain overlay,
+         *  2026-07-17).  Offer the tracer a seed; it verifies
+         *  everything.  The crease-leaf test keeps smooth curved
+         *  shells (whose spread is pure curvature) out of the
+         *  pool.  */
+        const bool shallow = !feat &&
+                min_dot <= shallow_seed_dot() &&
+                c.crease_leaves.count(fc.leaf_key) != 0;
+        if (!feat && !shallow && !c.census && !autodense())
             continue;
 
         Eigen::MatrixXf A(fc.n, 3);
@@ -1133,7 +1162,7 @@ void feature_points(Collector& c)
                         0.5f * (fc.lo[2] + fc.hi[2]),
                         unsigned(fc.n), min_dot, nr, int(feat));
         }
-        if (!feat)
+        if (!feat && !shallow)
             continue;
 
         /*  Reject escapes (with a small margin): a QEF that leaves
@@ -1146,7 +1175,7 @@ void feature_points(Collector& c)
         if (!ok)
             continue;
 
-        cands.push_back({ &fc, { x(0), x(1), x(2) } });
+        cands.push_back({ &fc, { x(0), x(1), x(2) }, shallow });
     }
 
     /*  Phantom oracle (2026-07-16, the zeiss "knurled collar"
@@ -1267,6 +1296,16 @@ void feature_points(Collector& c)
                             "PHANTOM %.6g %.6g %.6g fdist=%.5f\n",
                             cands[i].x[0], cands[i].x[1],
                             cands[i].x[2], fdist / cell);
+                continue;
+            }
+            if (cands[i].shallow)
+            {
+                /*  Tracer-only: the seed pool sees it; the
+                 *  feature tail, crossing suppression, and the
+                 *  fallback chain graph never do.  */
+                c.soup.tseeds.push_back({ cands[i].x[0],
+                                          cands[i].x[1],
+                                          cands[i].x[2] });
                 continue;
             }
             c.soup.surface.push_back({ cands[i].x[0],
@@ -1860,6 +1899,14 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
         Census census2;
         census2.on = census.on;
         Collector c2;
+        /*  Pass 2 skips the leaf gradient survey (dense_map set),
+         *  but the cell judges - the shallow-seed gate and the
+         *  tangle flag - read the crease-leaf map, and the soup
+         *  that SHIPS is pass 2's.  Same leaf boxes, same keys:
+         *  hand pass 1's survey over (without this the shallow
+         *  channel judged against an empty map and minted zero
+         *  seeds - measured, bino 2026-07-17).  */
+        c2.crease_leaves = std::move(c.crease_leaves);
         sample_pass(c2, deck, r, halt, &dilated,
                     census2.on ? &census2 : nullptr, noweld);
         if (census2.on)
@@ -2241,7 +2288,8 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
     const unsigned nmm = tape_pairs(base, nullptr, 0);
     const unsigned nabs = tape_abs_pairs(base, nullptr, 0);
     const unsigned npairs = nmm + nabs;
-    if (!npairs || soup->feature_points == 0)
+    if (!npairs ||
+        (soup->feature_points == 0 && soup->tseeds.empty()))
         return false;
     std::vector<TapePair> pairs(npairs);
     tape_pairs(base, pairs.data(), nmm);
@@ -2254,6 +2302,18 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
     const float sp = soup->spacing;
     const size_t f0 = soup->surface.size() -
             size_t(soup->feature_points);
+
+    /*  Seed pool: the feature tail plus the shallow channel's
+     *  tracer-only seeds (sub-25-degree creases in crease leaves;
+     *  they exist nowhere else in the soup).  */
+    std::vector<DSurfPoint> seeds(soup->surface.begin() + f0,
+                                  soup->surface.end());
+    seeds.insert(seeds.end(), soup->tseeds.begin(),
+                 soup->tseeds.end());
+    if (getenv("STIBIUM_DMESH_TRACE_DEBUG"))
+        fprintf(stderr, "TRACE seeds: %llu feature + %zu shallow\n",
+                (unsigned long long)soup->feature_points,
+                soup->tseeds.size());
 
     CreaseTracer tr;
     tr.deck = deck;
@@ -2304,9 +2364,9 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
             sorted[i] = pairs[order[i]];
         std::vector<float> fa(npairs), fb(npairs);
         const float gate = 8.f * sp;
-        for (size_t s = 0; s < size_t(soup->feature_points); ++s)
+        for (size_t s = 0; s < seeds.size(); ++s)
         {
-            const DSurfPoint& seed = soup->surface[f0 + s];
+            const DSurfPoint& seed = seeds[s];
             tape_eval_f_pairs(base, ctx, seed.x, seed.y, seed.z,
                               sorted.data(), npairs,
                               fa.data(), fb.data());
@@ -2322,12 +2382,11 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
                 total += v.size();
             fprintf(stderr, "TRACE seed gate: %zu candidate "
                     "(pair, seed) matches of %zu exhaustive\n",
-                    total,
-                    size_t(npairs) * size_t(soup->feature_points));
+                    total, size_t(npairs) * seeds.size());
         }
     }
 
-    std::vector<uint8_t> consumed(soup->feature_points, 0);
+    std::vector<uint8_t> consumed(seeds.size(), 0);
     for (unsigned pi = 0; pi < npairs; ++pi)
     {
         const TapePair& tp = pairs[pi];
@@ -2342,7 +2401,7 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
                                       : si;
             if (consumed[s] || *halt)
                 continue;
-            const DSurfPoint& seed = soup->surface[f0 + s];
+            const DSurfPoint& seed = seeds[s];
             float p0[3] = { seed.x, seed.y, seed.z };
             CreaseTracer::Probe pr;
             if (!tr.correct(p0, &pr))
@@ -2360,22 +2419,44 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
             if (tp.is_max == 2 && !tr.kinked(p0, pr))
                 continue;
             /*  Duplicate-trace guard: a seed can converge onto a
-             *  curve this pair already traced from further away
-             *  than the consumption radius (Newton moves seeds up
-             *  to 1.5 cells).  Near-coincident duplicate curves
-             *  are poison as constraints - drop the seed.  */
+             *  curve this pair already traced.  Identity by
+             *  DISTANCE-TO-SEGMENT: p0 is post-correct, ON the
+             *  crease, so a true duplicate sits within chord sag
+             *  of the existing polyline (<= ~0.06 sp at the
+             *  tightest traceable curvature; Newton noise 1e-3),
+             *  while the closest real neighbour rings measured
+             *  0.22 sp (the additive-joint autopsy).  0.1 sp
+             *  splits the populations with 2x margin both ways.
+             *  The old 0.5 sp point-to-VERTEX radius was a second
+             *  ring-eater: same-clause loops in sub-half-cell
+             *  gaps lost every seed (Nate's overlay read,
+             *  2026-07-17: crowded bands under-polylined).  */
             {
                 bool dup = false;
-                const float dr2 = 0.25f * sp * sp;
+                const float dr2 = 0.1f * sp * 0.1f * sp;
                 for (size_t c = 0; c < polys.size() && !dup; ++c)
                 {
                     if (poly_pair[c] != tp.clause)
                         continue;
-                    for (const DSurfPoint& q : polys[c])
+                    const std::vector<DSurfPoint>& pl = polys[c];
+                    for (size_t qi = 0; qi + 1 < pl.size(); ++qi)
                     {
-                        const float dx = q.x - p0[0],
-                                    dy = q.y - p0[1],
-                                    dz = q.z - p0[2];
+                        const DSurfPoint& A = pl[qi];
+                        const DSurfPoint& B = pl[qi + 1];
+                        const float bx = B.x - A.x,
+                                    by = B.y - A.y,
+                                    bz = B.z - A.z;
+                        const float px = p0[0] - A.x,
+                                    py = p0[1] - A.y,
+                                    pz = p0[2] - A.z;
+                        const float bb = bx*bx + by*by + bz*bz;
+                        float t = bb > 0
+                                ? (px*bx + py*by + pz*bz) / bb
+                                : 0;
+                        t = t < 0 ? 0 : t > 1 ? 1 : t;
+                        const float dx = px - t*bx,
+                                    dy = py - t*by,
+                                    dz = pz - t*bz;
                         if (dx*dx + dy*dy + dz*dz < dr2)
                         {
                             dup = true;
@@ -2422,7 +2503,7 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
             {
                 if (consumed[s2])
                     continue;
-                const DSurfPoint& F = soup->surface[f0 + s2];
+                const DSurfPoint& F = seeds[s2];
                 for (size_t qi = 0; qi + 1 < poly.size(); ++qi)
                 {
                     const DSurfPoint& A = poly[qi];
