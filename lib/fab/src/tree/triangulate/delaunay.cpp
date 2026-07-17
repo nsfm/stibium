@@ -2218,6 +2218,11 @@ struct CreaseTracer
 
 }  // namespace
 
+static void write_stl_raw(const char* path,
+                          const std::vector<float>& V,
+                          const std::vector<uint32_t>& T);
+static void dump_chains_stl(const char* path, const DSoup& soup);
+
 bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
                     volatile int* halt)
 {
@@ -4425,6 +4430,14 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     }
     }   // repair loop
     pt.mark("extract+repair");
+    /*  Stage dumps (STIBIUM_DMESH_STAGES=prefix): the formation
+     *  film - drop each stage into a slicer and watch where a
+     *  defect is born instead of inferring it from deltas.  */
+    static const char* stages_env = getenv("STIBIUM_DMESH_STAGES");
+    if (stages_env)
+        write_stl_raw((std::string(stages_env) +
+                       "_1_extract_repair.stl").c_str(),
+                      out->verts, out->tris);
 
     /*  Manifold pass (Manifold-DC after Schaefer/Ju/Warren 2007;
      *  see doc/research/2026-07-15-pinch-manifoldness.md): our
@@ -4784,6 +4797,10 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     }
 
     pt.mark("manifold pass");
+    if (stages_env)
+        write_stl_raw((std::string(stages_env) +
+                       "_2_manifold.stl").c_str(),
+                      out->verts, out->tris);
     /*  Crease-snap pass (STIBIUM_DMESH_SNAP=0 disables): the
      *  residual chips are chords of MOSTLY-AIR tets whose bottom
      *  facet dips under a concave crease - a facet-level defect no
@@ -5459,6 +5476,106 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
 
 }  // namespace
 
+/*  Observability pack (Nate's ask, 2026-07-17): binary STL
+ *  writers so every intermediate product can be dropped into a
+ *  normal slicer next to the export.  */
+static void write_stl_raw(const char* path,
+                          const std::vector<float>& V,
+                          const std::vector<uint32_t>& T)
+{
+    FILE* f = fopen(path, "wb");
+    if (!f)
+        return;
+    char hdr[80] = "stibium stage dump";
+    fwrite(hdr, 1, 80, f);
+    const uint32_t nt = uint32_t(T.size() / 3);
+    fwrite(&nt, 4, 1, f);
+    for (uint32_t t = 0; t < nt; ++t)
+    {
+        float rec[12] = { 0, 0, 0 };
+        for (int e = 0; e < 3; ++e)
+            for (int q = 0; q < 3; ++q)
+                rec[3 + 3*e + q] = V[3 * T[3*t + e] + q];
+        const float ux = rec[6]-rec[3], uy = rec[7]-rec[4],
+                    uz = rec[8]-rec[5];
+        const float vx = rec[9]-rec[3], vy = rec[10]-rec[4],
+                    vz = rec[11]-rec[5];
+        rec[0] = uy*vz - uz*vy;
+        rec[1] = uz*vx - ux*vz;
+        rec[2] = ux*vy - uy*vx;
+        fwrite(rec, 4, 12, f);
+        const uint16_t attr = 0;
+        fwrite(&attr, 2, 1, f);
+    }
+    fclose(f);
+}
+
+/*  Traced polylines as thin triangular tubes - visible in any
+ *  STL viewer next to the mesh (STIBIUM_DMESH_DUMP_CHAINS).  */
+static void dump_chains_stl(const char* path, const DSoup& soup)
+{
+    std::vector<float> V;
+    std::vector<uint32_t> T;
+    const float rr = 0.06f * soup.spacing;
+    for (size_t c = 0; c < soup.tchains.size(); ++c)
+    {
+        const auto& ch = soup.tchains[c];
+        const size_t nseg = ch.size() - (soup.tclosed[c] ? 0 : 1);
+        for (size_t j = 0; j < nseg && ch.size() >= 2; ++j)
+        {
+            const DSurfPoint& A = soup.surface[ch[j]];
+            const DSurfPoint& B =
+                    soup.surface[ch[(j + 1) % ch.size()]];
+            float d[3] = { B.x-A.x, B.y-A.y, B.z-A.z };
+            const float l = sqrtf(d[0]*d[0] + d[1]*d[1] +
+                                  d[2]*d[2]);
+            if (!(l > 0))
+                continue;
+            for (int q = 0; q < 3; ++q)
+                d[q] /= l;
+            float u[3] = { fabsf(d[0]) < 0.9f ? 1.f : 0.f,
+                           fabsf(d[0]) < 0.9f ? 0.f : 1.f, 0 };
+            float w[3] = { d[1]*u[2]-d[2]*u[1],
+                           d[2]*u[0]-d[0]*u[2],
+                           d[0]*u[1]-d[1]*u[0] };
+            const float wl = sqrtf(w[0]*w[0] + w[1]*w[1] +
+                                   w[2]*w[2]);
+            for (int q = 0; q < 3; ++q)
+                w[q] /= wl > 0 ? wl : 1;
+            float v2[3] = { d[1]*w[2]-d[2]*w[1],
+                            d[2]*w[0]-d[0]*w[2],
+                            d[0]*w[1]-d[1]*w[0] };
+            const uint32_t base = uint32_t(V.size() / 3);
+            for (int end = 0; end < 2; ++end)
+                for (int k = 0; k < 3; ++k)
+                {
+                    const float ang = float(k) * 2.0944f;
+                    const float cx2 = cosf(ang), sx2 = sinf(ang);
+                    V.push_back((end ? B.x : A.x) +
+                            rr * (cx2*w[0] + sx2*v2[0]));
+                    V.push_back((end ? B.y : A.y) +
+                            rr * (cx2*w[1] + sx2*v2[1]));
+                    V.push_back((end ? B.z : A.z) +
+                            rr * (cx2*w[2] + sx2*v2[2]));
+                }
+            for (int k = 0; k < 3; ++k)
+            {
+                const uint32_t a0 = base + k;
+                const uint32_t a1 = base + (k + 1) % 3;
+                const uint32_t b0 = base + 3 + k;
+                const uint32_t b1 = base + 3 + (k + 1) % 3;
+                T.insert(T.end(), { a0, b0, a1 });
+                T.insert(T.end(), { a1, b0, b1 });
+            }
+            T.insert(T.end(), { base, base + 1, base + 2 });
+            T.insert(T.end(), { base + 3, base + 5, base + 4 });
+        }
+    }
+    write_stl_raw(path, V, T);
+    fprintf(stderr, "CHAINS dump: %zu chains, %zu tris -> %s\n",
+            soup.tchains.size(), T.size() / 3, path);
+}
+
 bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                    DMesh* out)
 {
@@ -5484,6 +5601,8 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
         static const char* tr_env = getenv("STIBIUM_DMESH_TRACE");
         if (!tr_env || atoi(tr_env) != 0)
             delaunay_trace(deck, r, &soup, halt);
+        if (const char* cp = getenv("STIBIUM_DMESH_DUMP_CHAINS"))
+            dump_chains_stl(cp, soup);
         pt.mark("crease tracer");
         if (*halt)
             return false;
