@@ -47,6 +47,27 @@ uint64_t coord_hash(float x, float y, float z)
     return h ? h : 1;
 }
 
+/*  Canonical vertex ids under EXACT coordinate identity: the
+ *  manifold pass deliberately mints index-distinct coincident
+ *  vertices (one per sheet), and edges between two split sites
+ *  read "open" in index space while the surface is sealed.  A
+ *  hole is a geometric fact - count it on these welded ids.
+ *  (Zeiss autod22 taught this the expensive way: "4 open" = 0
+ *  geometric, and the retreat loop vandalized a healthy strip
+ *  band chasing them - 26 real opens minted from 0.)  */
+static std::vector<uint32_t> weld_ids(const std::vector<float>& V)
+{
+    const size_t nv = V.size() / 3;
+    std::vector<uint32_t> remap(nv);
+    std::unordered_map<uint64_t, uint32_t> canon;
+    canon.reserve(nv);
+    for (size_t v = 0; v < nv; ++v)
+        remap[v] = canon.emplace(
+                coord_hash(V[3*v], V[3*v + 1], V[3*v + 2]),
+                uint32_t(v)).first->second;
+    return remap;
+}
+
 struct PendingEdge
 {
     /*  Bracket endpoints: a is strictly inside (f < 0), b is not  */
@@ -1759,7 +1780,7 @@ static void sample_pass(Collector& c, const Deck* deck, Region r,
 }
 
 DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
-                      const std::unordered_set<uint64_t>* demote,
+                      const std::unordered_map<uint64_t, int>* demote,
                       const std::vector<std::array<float, 3>>*
                               noweld,
                       const std::unordered_map<uint64_t, int>*
@@ -1876,12 +1897,19 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
                 int& lv = dilated[k];
                 lv = std::max(lv, v);
             }
-        /*  Retreat rollback: leaves whose cores MEASURABLY opened
-         *  the mesh on a previous attempt drop to flood level.  */
+        /*  Retreat rollback, GRADUATED (2026-07-18): each
+         *  conviction steps the leaf down ONE level, not to the
+         *  floor - a level-3 strip leaf dropped straight to flood
+         *  put an 8x pitch cliff mid-band and turned 4 opens into
+         *  12 (zeiss autod21 attempt 3).  Contiguity is law for
+         *  rollback too; repeat convictions keep stepping.  */
         if (demote)
             for (auto& [k, l] : dilated)
-                if (l >= 2 && demote->count(k))
-                    l = 1;
+            {
+                const auto it = demote->find(k);
+                if (it != demote->end() && l >= 2)
+                    l = std::max(1, l - it->second);
+            }
         if (dbg)
         {
             size_t l1 = 0, l2 = 0, l3 = 0;
@@ -5431,7 +5459,13 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     }
 
     /*  Quality accounting: closed 2-manifold means every edge is
-     *  shared by exactly two triangles.  */
+     *  shared by exactly two triangles.  OPEN edges are counted
+     *  on GEOMETRIC (welded) ids - a hole is a geometric fact,
+     *  and index-space seams between manifold-pass split sheets
+     *  are not holes.  Non-manifoldness stays counted on INDEX
+     *  ids: index-manifold structure is exactly what the split
+     *  vertices provide, and re-welding them would un-measure
+     *  the pass's own work.  */
     std::unordered_map<uint64_t, uint32_t> edge_count;
     for (size_t t = 0; t < out->tris.size(); t += 3)
         for (int e = 0; e < 3; ++e)
@@ -5442,15 +5476,34 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 std::swap(a, b);
             ++edge_count[(a << 32) | b];
         }
-    out->open_edges = 0;
     out->nonmanifold_edges = 0;
     for (const auto& [k, n2] : edge_count)
     {
         (void)k;
-        if (n2 < 2)
-            ++out->open_edges;
-        else if (n2 > 2)
+        if (n2 > 2)
             ++out->nonmanifold_edges;
+    }
+    {
+        const std::vector<uint32_t> wid = weld_ids(out->verts);
+        std::unordered_map<uint64_t, uint32_t> gec;
+        for (size_t t = 0; t < out->tris.size(); t += 3)
+            for (int e = 0; e < 3; ++e)
+            {
+                uint64_t a = wid[out->tris[t + e]];
+                uint64_t b = wid[out->tris[t + (e + 1) % 3]];
+                if (a == b)
+                    continue;   // degenerate under weld
+                if (a > b)
+                    std::swap(a, b);
+                ++gec[(a << 32) | b];
+            }
+        out->open_edges = 0;
+        for (const auto& [k, n2] : gec)
+        {
+            (void)k;
+            if (n2 < 2)
+                ++out->open_edges;
+        }
     }
     /*  Pinch-site anatomy (sheet-separation campaign, opening
      *  instrument): at every non-manifold edge midpoint, march the
@@ -5718,9 +5771,20 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
      *  the guilty leaves (open-edge midpoints inside level-2 dense
      *  boxes) are demoted and stage A re-runs.  Damage is measured,
      *  not predicted; models that produce no holes never pay.  */
-    std::unordered_set<uint64_t> demote;
+    std::unordered_map<uint64_t, int> demote;
     std::vector<std::array<float, 3>> noweld;
     std::unordered_map<uint64_t, int> promote;
+    /*  Ship the LEAST-DAMAGED attempt (2026-07-18): the loop used
+     *  to ship whatever the final attempt produced, and a rollback
+     *  that backfired shipped 12 opens when attempt 2 had 4.
+     *  Damage is measured - use the measurement at the exit.  */
+    DMesh best;
+    bool have_best = false;
+    const auto better = [](const DMesh& a, const DMesh& b) {
+        return a.open_edges != b.open_edges
+                ? a.open_edges < b.open_edges
+                : a.nonmanifold_edges < b.nonmanifold_edges;
+    };
     for (int attempt = 0; attempt < 4; ++attempt)
     {
         PhaseTimer pt;
@@ -5809,19 +5873,33 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
         pt.mark("mesh (B+C total)");
         if (!ok || out->open_edges == 0 || *halt)
             return ok;
+        if (!have_best || better(*out, best))
+        {
+            best = *out;
+            have_best = true;
+        }
 
-        /*  Map open edges back to their level-2 leaves.  */
+        /*  Map open edges back to their level-2 leaves - on
+         *  GEOMETRIC ids, matching the referee: demotion may only
+         *  be driven by real holes, never by split-sheet seams
+         *  (the phantom-hole vandalism of zeiss autod22).  */
+        const std::vector<uint32_t> wid = weld_ids(out->verts);
         std::unordered_map<uint64_t, uint32_t> ec;
         for (size_t t = 0; t < out->tris.size(); t += 3)
             for (int e = 0; e < 3; ++e)
             {
-                uint64_t a = out->tris[t + e];
-                uint64_t b = out->tris[t + (e + 1) % 3];
+                uint64_t a = wid[out->tris[t + e]];
+                uint64_t b = wid[out->tris[t + (e + 1) % 3]];
+                if (a == b)
+                    continue;
                 if (a > b)
                     std::swap(a, b);
                 ++ec[(a << 32) | b];
             }
         size_t newly = 0, newly_weld = 0;
+        /*  One conviction per leaf per ATTEMPT (a leaf with many
+         *  open edges is one failure, not many rollback steps).  */
+        std::unordered_set<uint64_t> hit;
         for (const auto& [k, n2] : ec)
         {
             if (n2 >= 2)
@@ -5846,7 +5924,12 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                     mz < db.lo[2] - be || mz > db.hi[2] + be)
                     continue;
                 claimed = true;
-                if (demote.insert(db.key).second)
+                /*  A repeat conviction of a still-dense leaf is
+                 *  progress too (it steps down one more level) -
+                 *  but a leaf already at flood cannot retreat
+                 *  further and must not count as new work.  */
+                if (hit.insert(db.key).second &&
+                    demote[db.key] < db.level)
                     ++newly;
             }
             /*  Unclaimed holes near welded samples are weld-seam
@@ -5857,6 +5940,8 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                 ++newly_weld;
             }
         }
+        for (const uint64_t k : hit)
+            ++demote[k];
         if (getenv("STIBIUM_DMESH_TIME") ||
             getenv("STIBIUM_DMESH_CHIP_DEBUG"))
             fprintf(stderr, "AUTOD retreat %d: %llu open edges, "
@@ -5867,8 +5952,10 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
         /*  Holes neither core- nor weld-attributable cannot be
          *  fixed by retreating.  */
         if (newly == 0 && newly_weld == 0)
-            return ok;
+            break;
     }
+    if (have_best && better(best, *out))
+        *out = std::move(best);
     return true;
 }
 

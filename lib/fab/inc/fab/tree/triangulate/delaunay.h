@@ -108,13 +108,17 @@ struct DSoup
     uint64_t traced = 0;
 };
 
-/*  Stage A: collect the point soup for a region.  demote lists
- *  leaf addresses whose level-2 cores are rolled back to the
- *  flood level; noweld lists sites where a previous attempt's
- *  clearance weld minted an open edge (both are the retreat
- *  loop's measured-damage feedback).  */
+/*  Stage A: collect the point soup for a region.  demote maps
+ *  leaf addresses to CONVICTION counts: each retreat attempt
+ *  that measures an open edge in the leaf steps its density
+ *  down ONE level (a straight drop to flood level put an 8x
+ *  pitch cliff mid-band and turned 4 opens into 12 - the
+ *  contiguity law applies to rollback too).  noweld lists sites
+ *  where a previous attempt's clearance weld minted an open
+ *  edge (both are the retreat loop's measured-damage
+ *  feedback).  */
 DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
-                      const std::unordered_set<uint64_t>* demote
+                      const std::unordered_map<uint64_t, int>* demote
                               = nullptr,
                       const std::vector<std::array<float, 3>>*
                               noweld = nullptr,
