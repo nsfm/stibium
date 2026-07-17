@@ -3196,9 +3196,24 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         /*  Duplicate-coverage drops are not rejections - the crease
          *  is constrained, just by its first copy - so they leave
          *  the gate arithmetic entirely.  */
+        /*  The gate is FALLBACK-ONLY (zeiss shallow round,
+         *  2026-07-18).  It exists because the radius-graph
+         *  extractor can MISLINK - a high rejection rate means
+         *  even its accepted segments connect the wrong points
+         *  (csg's 35%-shortcut era; half-trusted polylines
+         *  measured 7 pinches vs 3).  Traced chains cannot
+         *  mislink (ordered by the marcher), every accepted
+         *  segment passed the oracle individually, and their
+         *  rejects are local chord-sag over tight curvature -
+         *  already dropped one by one.  Collective punishment on
+         *  traced chains was measured harmful BOTH ways: the
+         *  model-global nuke cost zeiss all ~15K constraints over
+         *  1,784 local rejects (4 open, 965 nm), and per-chain
+         *  conviction cost the bino 163 verified segments
+         *  (14 open vs 0).  Judgment stays individual.  */
         const size_t judged = cand.size() -
                 size_t(dup_dropped + cross_dropped + quar_dropped);
-        if (judged > 0 &&
+        if (soup.tchains.empty() && judged > 0 &&
             float(judged - accepted.size()) > 0.10f * float(judged))
         {
             accepted.clear();
