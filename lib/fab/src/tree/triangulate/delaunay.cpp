@@ -3081,6 +3081,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         {
             bool good = slen[i] > 0;
             int judged_samples = 0;
+            int kink_samples = 0;
             for (int u = 0; good && u < NS; ++u)
             {
                 const size_t o = (i * NS + u) * 7;
@@ -3112,6 +3113,8 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 {
                     if (fabsf(f) > 1e-6f)
                         good = false;
+                    else
+                        ++kink_samples;
                     continue;
                 }
                 ++judged_samples;
@@ -3121,8 +3124,15 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             }
             /*  A segment with NO judgeable sample could hide a
              *  shortcut through a NaN void - demand at least one
-             *  real reading.  */
-            if (judged_samples == 0)
+             *  real reading.  A segment whose EVERY sample sits
+             *  exactly on the kink (finite, f ~ 0, cancelled
+             *  gradient) is the opposite of a void: a crease
+             *  lying IN a grid-aligned face reads this way along
+             *  its whole length, and convicting it stripped the
+             *  plinth junction of all law - ten rounds of
+             *  air-chords at a circle the tracer had chained
+             *  perfectly (2026-07-18, every reject 0.0% len).  */
+            if (judged_samples == 0 && kink_samples == 0)
                 good = false;
             if (good)
             {
