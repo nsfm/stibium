@@ -262,6 +262,112 @@ void eval_points(const Tape* tape, TapeCtx* ctx,
 
 int mesh_threads();
 
+}  // namespace
+
+/*  Progress sink (see delaunay.h).  Stage weights are the
+ *  measured r1/r2 bino phase ratios (2026-07-18 TIME=2 map),
+ *  normalized - an estimate by design; the app may also derive
+ *  its own from the stable stage ids.  */
+namespace {
+struct ProgStage
+{
+    const char* name;
+    float weight;
+};
+constexpr ProgStage PROG_STAGES[] = {
+    { "idle",            0.00f },
+    { "sample pass 1",   0.08f },
+    { "sample pass 2",   0.10f },
+    { "crease tracer",   0.09f },
+    { "segment referee", 0.04f },
+    { "insert samples",  0.09f },
+    { "insert points",   0.17f },
+    { "constraints",     0.01f },
+    { "refinement",      0.07f },
+    { "extract+repair",  0.24f },
+    { "manifold",        0.01f },
+    { "snap",            0.03f },
+    { "fix stages",      0.03f },
+    { "done",            0.04f },
+};
+constexpr int PROG_N =
+        int(sizeof(PROG_STAGES) / sizeof(PROG_STAGES[0]));
+}  // namespace
+
+DMeshProgress* dmesh_progress()
+{
+    static DMeshProgress p;
+    return &p;
+}
+
+const char* dmesh_stage_name(int stage)
+{
+    return (stage >= 0 && stage < PROG_N)
+            ? PROG_STAGES[stage].name : "?";
+}
+
+int dmesh_stage_count()
+{
+    return PROG_N;
+}
+
+namespace {
+
+/*  Cumulative weight below a stage.  */
+static float prog_base(int s)
+{
+    float b = 0;
+    for (int i = 0; i < s && i < PROG_N; ++i)
+        b += PROG_STAGES[i].weight;
+    return b;
+}
+
+static void prog_emit()
+{
+    static const char* env = getenv("STIBIUM_DMESH_PROGRESS");
+    if (!env || atoi(env) == 0)
+        return;
+    /*  Throttle to ~1 Hz; racy last-time is fine (worst case an
+     *  extra line).  */
+    static std::atomic<int64_t> last{ 0 };
+    const int64_t now = std::chrono::duration_cast<
+            std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    const int64_t prev = last.load(std::memory_order_relaxed);
+    if (now - prev < 1000)
+        return;
+    last.store(now, std::memory_order_relaxed);
+    DMeshProgress* p = dmesh_progress();
+    fprintf(stderr, "PROGRESS %s %.1f%% %.0f%%\n",
+            dmesh_stage_name(p->stage.load()),
+            100.f * p->overall.load(),
+            100.f * p->in_stage.load());
+}
+
+static void prog_stage(int s)
+{
+    DMeshProgress* p = dmesh_progress();
+    p->stage.store(s, std::memory_order_relaxed);
+    p->in_stage.store(0, std::memory_order_relaxed);
+    p->overall.store(s >= PROG_N - 1 ? 1.f : prog_base(s),
+                     std::memory_order_relaxed);
+    prog_emit();
+}
+
+static void prog_frac(float f)
+{
+    DMeshProgress* p = dmesh_progress();
+    const int s = p->stage.load(std::memory_order_relaxed);
+    f = f < 0 ? 0 : f > 1 ? 1 : f;
+    p->in_stage.store(f, std::memory_order_relaxed);
+    if (s < PROG_N)
+        p->overall.store(prog_base(s) +
+                         PROG_STAGES[s].weight * f,
+                         std::memory_order_relaxed);
+    prog_emit();
+}
+
 /*  Threaded batch eval on the BASE tape (perf round 2 increment
  *  2): the repair oracle, chip detection, segment referee, snap
  *  stash and Newton projection all push 100K+ point batches
@@ -2169,6 +2275,8 @@ static void sample_pass(Collector& c, const Deck* deck, Region r,
                 for (;;)
                 {
                     const size_t i = next.fetch_add(1);
+                    prog_frac(float(next.load()) /
+                              float(tasks.size()));
                     if (i >= tasks.size() || *halt)
                         break;
                     Collector& wc = ws[i];
@@ -2269,6 +2377,7 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
 
     Collector c;
     field_probe(deck);
+    prog_stage(1);
     sample_pass(c, deck, r, halt, nullptr,
                 census.on ? &census : nullptr, noweld);
     if (census.on)
@@ -2431,6 +2540,7 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
          *  channel judged against an empty map and minted zero
          *  seeds - measured, bino 2026-07-17).  */
         c2.crease_leaves = std::move(c.crease_leaves);
+        prog_stage(2);
         sample_pass(c2, deck, r, halt, &dilated,
                     census2.on ? &census2 : nullptr, noweld);
         if (census2.on)
@@ -3413,6 +3523,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
 {
     using TPoint = typename Tri::Point;
     PhaseTimer pt;
+    prog_stage(4);
     using VH     = typename Tri::Vertex_handle;
     using CH     = typename Tri::Cell_handle;
 
@@ -3934,6 +4045,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         }
     }
     pt.mark("segment referee");
+    prog_stage(5);
     const auto near_crease = [&](float x, float y, float z,
                                  float r) {
         for (const auto& s : cseg)
@@ -4080,8 +4192,11 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         CGAL::spatial_sort(pts.begin(), pts.end(),
                 CGAL::Spatial_sort_traits_adapter_3<K, PMap>());
         CH hint{};
+        size_t wpn = 0;
         for (const auto& pr : pts)
         {
+            if ((++wpn & 4095) == 0)
+                prog_frac(float(wpn) / float(pts.size()));
             const auto before = dt.number_of_vertices();
             VH vh = dt.insert(pr.first, hint, false);
             hint = vh->cell();
@@ -4098,6 +4213,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         dt.insert(pts.begin(), pts.end());
 
     pt.mark("insert samples");
+    prog_stage(6);
     /*  Surface points go in one by one with a coincidence guard: on
      *  grid-aligned geometry a bisected point can converge exactly
      *  onto a lattice sample, and overwriting that vertex's inside/
@@ -4137,8 +4253,11 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 CGAL::Spatial_sort_traits_adapter_3<K, PMap>());
     }
     CH shint{};
+    size_t spn = 0;
     for (const auto& [sp3, si] : sorder)
     {
+        if ((++spn & 1023) == 0)
+            prog_frac(float(spn) / float(sorder.size()));
         /*  Near-coincidence weld (zeiss run, 2026-07-15): traced
          *  corners from different chains Newton-converge onto the
          *  same machined corner within double noise (measured
@@ -4206,6 +4325,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 (unsigned long long)witness_overwrites);
 
     pt.mark("insert points");
+    prog_stage(7);
     /*  Insert the refereed chain segments as constrained edges,
      *  batched with one Delaunay restoration at the end (each
      *  insert_constrained_edge(…, true) would restore
@@ -4335,11 +4455,13 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     }
 
     pt.mark("constraints+restore");
+    prog_stage(8);
     constexpr int MAX_ROUNDS = 48;
     uint64_t inserted = 0;
     int round = 0;
     for (; round < MAX_ROUNDS; ++round)
     {
+        prog_frac(std::min(0.95f, float(round) / 8.f));
         if (*halt)
             break;
         std::vector<PendingEdge> pending;
@@ -4502,6 +4624,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 : leftover ? " (STALLED)" : "");
     }
     pt.mark("refinement");
+    prog_stage(9);
 
     /*  Stage C runs inside the repair loop: extract, then hunt WARTS
      *  - fold edges (adjacent-triangle normals disagreeing) whose
@@ -4540,6 +4663,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     std::vector<float> snap_d;   // chip depth at detection
     for (;; ++repair_round)
     {
+    prog_frac(std::min(0.95f, float(repair_round) / 5.f));
     /*  Stage C: cell signs.  After convergence a finite cell cannot
      *  contain both signs (except in the crease band, where i/o
      *  edges are deliberately shadowed), so a non-surface vertex
@@ -5658,6 +5782,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     }
     }   // repair loop
     pt.mark("extract+repair");
+    prog_stage(10);
     /*  Stage dumps (STIBIUM_DMESH_STAGES=prefix): the formation
      *  film - drop each stage into a slicer and watch where a
      *  defect is born instead of inferring it from deltas.  */
@@ -6041,6 +6166,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     }
 
     pt.mark("manifold pass");
+    prog_stage(11);
     if (stages_env)
         write_stl_raw((std::string(stages_env) +
                        "_2_manifold.stl").c_str(),
@@ -6197,6 +6323,9 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             bool progress = true;
             while (progress)
             {
+                prog_frac(snap_va.empty() ? 0.f :
+                        float(snapped + snap_skipped) /
+                        float(snap_va.size()));
                 progress = false;
                 std::unordered_map<uint64_t,
                         std::vector<std::pair<uint32_t, int>>> pem;
@@ -6596,6 +6725,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         pt.sub("snap: waves+referees");
     }
     pt.mark("snap pass");
+    prog_stage(12);
     if (pt.level >= 2)
         fprintf(stderr, "TIME2   %-24s %8.2f s  (%llu pts, "
                 "%llu calls)\n", "EVAL total so far",
@@ -7571,6 +7701,7 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
             return false;
         static const char* tr_env = getenv("STIBIUM_DMESH_TRACE");
         if (!tr_env || atoi(tr_env) != 0)
+            prog_stage(3);
             delaunay_trace(deck, r, &soup, halt);
         if (const char* cp = getenv("STIBIUM_DMESH_DUMP_CHAINS"))
             dump_chains_stl(cp, soup);
@@ -7700,6 +7831,7 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                 recount_quality(out);
                 pt.sub("recount_quality");
                 pt.mark("fix stages");
+                prog_stage(13);
                 if (pt.level >= 2)
                     fprintf(stderr, "TIME2   %-24s %8.2f s  "
                             "(%llu pts, %llu calls)\n",
@@ -7815,6 +7947,7 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
             recount_quality(out);
             fixpt.sub("recount_quality");
             fixpt.mark("fix stages");
+            prog_stage(13);
         }
     }
     return true;
