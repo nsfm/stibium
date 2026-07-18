@@ -8,13 +8,16 @@
  */
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <climits>
 #include <cmath>
 #include <cstring>
 #include <functional>
 #include <iostream>
+#include <mutex>
 #include <sstream>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -197,6 +200,22 @@ struct EvalStats
     uint64_t pts = 0, calls = 0;
 };
 static EvalStats g_eval;
+static std::mutex g_eval_mx;
+
+/*  Eval-side threading (P5, perf round 2, 2026-07-18): the
+ *  TIME=2 map read 73 s of 221 s - one third of the r2 bino wall
+ *  - as single-threaded field evaluation.  Octree subtrees are
+ *  independent; tape_ctx-per-thread is designed-for.  Default
+ *  hardware-2 (leave the OS and the renderer a lane);
+ *  STIBIUM_DMESH_THREADS=1 reverts to serial.  */
+int mesh_threads()
+{
+    static const char* env = getenv("STIBIUM_DMESH_THREADS");
+    if (env)
+        return std::max(1, atoi(env));
+    const unsigned hw = std::thread::hardware_concurrency();
+    return hw > 2 ? int(hw - 2) : 1;
+}
 
 /*  Evaluate an arbitrary point list in MIN_VOLUME-sized batches on
  *  the given tape (same dummy-Region pattern as get_normals).  */
@@ -221,10 +240,13 @@ void eval_points(const Tape* tape, TapeCtx* ctx,
         const float* v = tape_eval_r(tape, ctx, dummy);
         memcpy(out.data() + at, v, count * sizeof(float));
     }
-    g_eval.secs += std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - e0).count();
-    g_eval.pts += n;
-    ++g_eval.calls;
+    {
+        std::lock_guard<std::mutex> lk(g_eval_mx);
+        g_eval.secs += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - e0).count();
+        g_eval.pts += n;
+        ++g_eval.calls;
+    }
 }
 
 /*  Leaf block: evaluate the corner lattice, tag signs, and queue
@@ -1091,27 +1113,29 @@ void descend(Collector& c, const Region& r, Tape* tape)
  *  round: f(a) < 0 <= f(b).  */
 constexpr int BISECT_ROUNDS = 16;
 
-void bisect_edges(Collector& c)
+static void bisect_range(const Deck* deck, TapeCtx* ctx,
+                         volatile int* halt,
+                         std::vector<PendingEdge>& edges,
+                         size_t lo, size_t hi)
 {
-    const size_t n = c.edges.size();
-    if (n == 0)
-        return;
-    Tape* base = deck_base(c.deck);
+    const size_t n = hi - lo;
+    Tape* base = deck_base(deck);
     std::vector<float> xs(n), ys(n), zs(n), vals;
     for (int round = 0; round < BISECT_ROUNDS; ++round)
     {
-        if (*c.halt)
+        if (*halt)
             return;
         for (size_t e = 0; e < n; ++e)
         {
-            xs[e] = (c.edges[e].ax + c.edges[e].bx) * 0.5f;
-            ys[e] = (c.edges[e].ay + c.edges[e].by) * 0.5f;
-            zs[e] = (c.edges[e].az + c.edges[e].bz) * 0.5f;
+            const PendingEdge& ed = edges[lo + e];
+            xs[e] = (ed.ax + ed.bx) * 0.5f;
+            ys[e] = (ed.ay + ed.by) * 0.5f;
+            zs[e] = (ed.az + ed.bz) * 0.5f;
         }
-        eval_points(base, c.ctx, xs, ys, zs, vals);
+        eval_points(base, ctx, xs, ys, zs, vals);
         for (size_t e = 0; e < n; ++e)
         {
-            PendingEdge& ed = c.edges[e];
+            PendingEdge& ed = edges[lo + e];
             if (vals[e] < 0)
             {
                 ed.ax = xs[e];
@@ -1126,6 +1150,34 @@ void bisect_edges(Collector& c)
             }
         }
     }
+}
+
+void bisect_edges(Collector& c)
+{
+    const size_t n = c.edges.size();
+    if (n == 0)
+        return;
+    /*  Disjoint ranges, own ctx each, byte-identical to serial
+     *  (each edge's bisection depends on nothing but itself).  */
+    const size_t nt = std::min<size_t>(
+            size_t(mesh_threads()), std::max<size_t>(1, n / 4096));
+    if (nt > 1)
+    {
+        std::vector<std::thread> pool;
+        for (size_t t = 0; t < nt; ++t)
+            pool.emplace_back([&, t]() {
+                TapeCtx* ctx = tape_ctx_new(c.deck);
+                bisect_range(c.deck, ctx, c.halt, c.edges,
+                             n * t / nt, n * (t + 1) / nt);
+                tape_ctx_free(ctx);
+            });
+        for (auto& th : pool)
+            th.join();
+    }
+    else
+        bisect_range(c.deck, c.ctx, c.halt, c.edges, 0, n);
+    if (*c.halt)
+        return;
     c.soup.surface.reserve(n);
     for (const PendingEdge& ed : c.edges)
         c.soup.surface.push_back({ (ed.ax + ed.bx) * 0.5f,
@@ -1950,6 +2002,80 @@ static void census_print(const Census& census, const DSoup& soup,
 /*  One stage-A pass: descend + bisect + QEF.  dense_map is the
  *  drill-down input (null on pass 1); the pass's own drill-down
  *  requests land in c.want_dense.  */
+/*  Depth-limited geometric split for the parallel descend: up to
+ *  8^depth task regions whose X/Y/Z pointers alias the ROOT
+ *  coordinate arrays (octsect preserves storage), so tasks are
+ *  copies-by-value with shared read-only backing.  No interval
+ *  culling here - each worker culls from the root tape itself
+ *  (two extra interval evals per task; the leaf tapes are
+ *  box-idempotent so leaf state matches the serial chain).  */
+static void collect_tasks(const Region& r, int depth,
+                          std::vector<Region>& out)
+{
+    if (depth <= 0 || r.voxels <= LEAF_VOXELS)
+    {
+        out.push_back(r);
+        return;
+    }
+    Region oct[8];
+    const uint8_t split = octsect(r, oct);
+    for (int i = 0; i < 8; ++i)
+        if (split & (1 << i))
+            collect_tasks(oct[i], depth - 1, out);
+}
+
+/*  Merge a worker's Collector into the shared one, in FIXED task
+ *  order (determinism: results must not depend on thread
+ *  scheduling).  Samples and edges dedup through the shared
+ *  hash indices exactly as add_sample/add_edge would; feature
+ *  cells remap their crossing indices through the edge merge.  */
+static void merge_collector(Collector& c, Collector& w)
+{
+    for (const DSample& s : w.soup.samples)
+        c.add_sample(s.x, s.y, s.z, s.inside, s.on_surface);
+    std::vector<uint64_t> h_of(w.edges.size());
+    for (const auto& [h, i] : w.edge_index)
+        h_of[i] = h;
+    std::vector<uint32_t> remap(w.edges.size());
+    for (size_t i = 0; i < w.edges.size(); ++i)
+    {
+        const auto it = c.edge_index.find(h_of[i]);
+        if (it != c.edge_index.end())
+            remap[i] = it->second;
+        else
+        {
+            remap[i] = uint32_t(c.edges.size());
+            c.edge_index.emplace(h_of[i], remap[i]);
+            c.edges.push_back(w.edges[i]);
+        }
+    }
+    for (FeatCell fc : w.cells)
+    {
+        for (uint8_t q = 0; q < fc.n; ++q)
+            fc.pts[q] = remap[fc.pts[q]];
+        c.cells.push_back(fc);
+    }
+    for (auto& [k, v] : w.crease_leaves)
+        c.crease_leaves.emplace(k, v);
+    for (const auto& [k, v] : w.want_dense)
+    {
+        int& lv = c.want_dense[k];
+        lv = std::max(lv, v);
+    }
+    for (const auto& b : w.soup.dense_boxes)
+        c.soup.dense_boxes.push_back(b);
+    c.soup.leaf_blocks += w.soup.leaf_blocks;
+    c.soup.culled_empty += w.soup.culled_empty;
+    c.soup.culled_full += w.soup.culled_full;
+    c.soup.hidden_candidates += w.soup.hidden_candidates;
+    c.soup.dense_blocks += w.soup.dense_blocks;
+    c.soup.welded += w.soup.welded;
+    c.soup.thinned += w.soup.thinned;
+    c.tangle_suppressed += w.tangle_suppressed;
+    if (c.spacing == 0)
+        c.spacing = w.spacing;
+}
+
 static void sample_pass(Collector& c, const Deck* deck, Region r,
                         volatile int* halt,
                         const std::unordered_map<uint64_t, int>* map,
@@ -1958,12 +2084,57 @@ static void sample_pass(Collector& c, const Deck* deck, Region r,
                                 noweld = nullptr)
 {
     c.deck = deck;
-    c.ctx = tape_ctx_new(deck);
     c.halt = halt;
     c.dense_map = map;
     c.census = census;
     c.noweld = noweld;
-    descend(c, r, deck_base(deck));
+    /*  Parallel descend: census (and the THIN_DEBUG autopsy) are
+     *  single-threaded instruments - they force the serial path.  */
+    const int nt = mesh_threads();
+    if (nt > 1 && !census && !getenv("STIBIUM_DMESH_THIN_DEBUG"))
+    {
+        std::vector<Region> tasks;
+        collect_tasks(r, 2, tasks);
+        std::vector<Collector> ws(tasks.size());
+        std::atomic<size_t> next{ 0 };
+        std::vector<std::thread> pool;
+        const size_t use = std::min<size_t>(size_t(nt),
+                                            tasks.size());
+        for (size_t t = 0; t < use; ++t)
+            pool.emplace_back([&]() {
+                TapeCtx* ctx = tape_ctx_new(deck);
+                for (;;)
+                {
+                    const size_t i = next.fetch_add(1);
+                    if (i >= tasks.size() || *halt)
+                        break;
+                    Collector& wc = ws[i];
+                    wc.deck = deck;
+                    wc.ctx = ctx;
+                    wc.halt = halt;
+                    wc.dense_map = map;
+                    wc.census = nullptr;
+                    wc.noweld = noweld;
+                    descend(wc, tasks[i], deck_base(deck));
+                }
+                tape_ctx_free(ctx);
+            });
+        for (auto& th : pool)
+            th.join();
+        for (size_t i = 0; i < ws.size(); ++i)
+        {
+            merge_collector(c, ws[i]);
+            ws[i] = Collector();   // release per-worker soup early
+        }
+    }
+    else
+    {
+        c.ctx = tape_ctx_new(deck);
+        descend(c, r, deck_base(deck));
+        tape_ctx_free(c.ctx);
+        c.ctx = nullptr;
+    }
+    c.ctx = tape_ctx_new(deck);
     bisect_edges(c);
     feature_points(c);
     c.soup.spacing = c.spacing;
@@ -3871,10 +4042,19 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
      *  are recorded because chain entries (indices into
      *  soup.surface) become constrained-edge endpoints.  */
     uint64_t witness_overwrites = 0;
-    std::vector<VH> surf_vh;
-    surf_vh.reserve(soup.surface.size());
+    std::vector<VH> surf_vh(soup.surface.size(), VH());
     const size_t feat_base =
             soup.surface.size() - size_t(soup.feature_points);
+    /*  Insert in SPATIAL order with a walk hint (perf round 2,
+     *  2026-07-18: this loop was 51 s of the r2 bino wall - every
+     *  insert AND its nearest_vertex guard did a cold full-tree
+     *  point location; the witness path two screens up has used
+     *  spatial_sort + hints since day one).  surf_vh stays in
+     *  soup order via the index map - chain constraints depend on
+     *  it.  The corridor drop touches no DT state and decides
+     *  first.  */
+    std::vector<std::pair<TPoint, size_t>> sorder;
+    sorder.reserve(soup.surface.size());
     for (size_t si = 0; si < soup.surface.size(); ++si)
     {
         const DSurfPoint& s = soup.surface[si];
@@ -3884,10 +4064,18 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
          *  themselves.  */
         if (!cseg.empty() && !chain_used.count(uint32_t(si)) &&
             in_corridor(s.x, s.y, s.z))
-        {
-            surf_vh.push_back(VH());
             continue;
-        }
+        sorder.push_back({ TPoint(s.x, s.y, s.z), si });
+    }
+    {
+        using PMap = CGAL::First_of_pair_property_map<
+                std::pair<TPoint, size_t>>;
+        CGAL::spatial_sort(sorder.begin(), sorder.end(),
+                CGAL::Spatial_sort_traits_adapter_3<K, PMap>());
+    }
+    CH shint{};
+    for (const auto& [sp3, si] : sorder)
+    {
         /*  Near-coincidence weld (zeiss run, 2026-07-15): traced
          *  corners from different chains Newton-converge onto the
          *  same machined corner within double noise (measured
@@ -3899,12 +4087,13 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
          *  1e-3 sp everything is the same point: reuse the
          *  existing vertex, and the micro-segment collapses into
          *  the va == vb guard below.  */
-        const TPoint sp3(s.x, s.y, s.z);
         if constexpr (CCDT_MODE)
         {
             if (dt.number_of_vertices() > 0)
             {
-                const auto nv = dt.nearest_vertex(sp3);
+                const auto nv = shint != CH()
+                        ? dt.nearest_vertex(sp3, shint)
+                        : dt.nearest_vertex(sp3);
                 if (nv != VH())
                 {
                     const double w = 1e-3 * soup.spacing;
@@ -3921,7 +4110,8 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                         if (nv->info() != 0)
                             ++witness_overwrites;
                         nv->info() = 0;
-                        surf_vh.push_back(nv);
+                        surf_vh[si] = nv;
+                        shint = nv->cell();
                         continue;
                     }
                 }
@@ -3931,18 +4121,19 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         VH vh;
         if constexpr (CCDT_MODE)
         {
-            vh = dt.insert(sp3, CH{}, false);
+            vh = dt.insert(sp3, shint, false);
             vh->ccdt_3_data().set_vertex_type(
                     CGAL::CDT_3_vertex_type::CORNER);
         }
         else
-            vh = dt.insert(TPoint(s.x, s.y, s.z));
+            vh = dt.insert(sp3);
         if (dt.number_of_vertices() > before)
         {
             vh->info() = 0;
             prov.emplace(&*vh, si < feat_base ? 2 : 3);
         }
-        surf_vh.push_back(vh);
+        surf_vh[si] = vh;
+        shint = vh->cell();
     }
     if (witness_overwrites &&
         (getenv("STIBIUM_DMESH_TIME") ||
@@ -4965,7 +5156,17 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             break;
         if (worst_chip >= stall_prev * 0.98f)
         {
-            if (++stall_rounds >= 2 && repair_round >= 3)
+            /*  Stall tolerance (STIBIUM_DMESH_STALL, rounds of
+             *  non-improvement to forgive; default 1, old
+             *  behavior = 2).  TIME=2 anatomy, r2 bino: depth
+             *  plateaus by round 2 and rounds 3-4 cost ~20 s
+             *  each for zero depth gain.  The round >= 2 floor
+             *  protects the measured stall-then-improve at
+             *  rounds 1 -> 2 (bino 0.339 -> 0.242).  */
+            static const char* st_env =
+                    getenv("STIBIUM_DMESH_STALL");
+            const int st_bar = st_env ? atoi(st_env) : 1;
+            if (++stall_rounds >= st_bar && repair_round >= 2)
             {
                 if (chip_env)
                     fprintf(stderr, "REPAIR: depth stalled at "
