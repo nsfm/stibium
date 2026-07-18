@@ -36,7 +36,7 @@ protected:
      *  deviation, replacing verts / indices with the (much smaller)
      *  result.
      */
-    void simplifyMesh(std::vector<float>& verts,
+    void simplifyMesh(float deviation, std::vector<float>& verts,
                       std::vector<uint32_t>& indices) const;
 
     /*
