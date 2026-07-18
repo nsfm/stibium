@@ -66,6 +66,17 @@ referee.  Update this table with EVERY rev handed over for review.
 
 ## Open questions the next rev must answer
 
+- RAZOR CLUSTERS on flat-face interiors (bino, Nate-sighted):
+  weld's link condition + flip's improvement test both refuse
+  clustered razors mutually.  Needs refusal-counter
+  instrumentation, not theory - two theories spent 2026-07-17.
+  They radiate through QEM as visible artifacts; nipping them
+  helps every metric (Nate's read, shared).
+- Post-QEM cleanup in the EXPORT path: meshopt legally tiles
+  flats with edge-to-edge skinny tris (the "scratch" chords) -
+  downstream of all mesher cleanup.
+- QEM phase 2: vertex_lock on constrained creases (the octagon
+  insurance) - designed in doc/reviews/, ~3-5h.
 - Selective detail density to replace the churn subsidy: per-leaf
   CHAIN-SEGMENT CROWDING as a stage-D driver (fine detail = dense
   polylines; the densdiff hotspots are all chain-crowded regions).
