@@ -2421,7 +2421,23 @@ struct CreaseTracer
                     float pe[3] = { p[0] + lo * (pt[0] - p[0]),
                                     p[1] + lo * (pt[1] - p[1]),
                                     p[2] + lo * (pt[2] - p[2]) };
-                    if (correct(pe))
+                    /*  Femto-segment guard (cascade autopsy,
+                     *  2026-07-17): when the march has already
+                     *  reached the corner, the bisected endpoint
+                     *  lands within float noise of the previous
+                     *  point - the chain ends in a ~1e-14
+                     *  segment, and the CCDT throws 'constraint
+                     *  passes through a vertex' on it.  ONE such
+                     *  segment cost a full 660 s rebuild on the
+                     *  zeiss (twice - its mirror twin too).  The
+                     *  corner must still be reached, but never as
+                     *  a degenerate hop.  */
+                    const float ddx = pe[0] - p[0],
+                                ddy = pe[1] - p[1],
+                                ddz = pe[2] - p[2];
+                    if (correct(pe) &&
+                        ddx*ddx + ddy*ddy + ddz*ddz >
+                                1e-10f * sp * sp)
                         out_pts.push_back({ pe[0], pe[1], pe[2] });
                 }
                 break;
@@ -3260,7 +3276,11 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         };
         for (size_t i = 0; i < cand.size(); ++i)
         {
-            bool good = slen[i] > 0;
+            /*  Degenerate segments carry no law (belt to the
+             *  march guard's braces): a float-noise-length
+             *  constraint can only feed the conforming machinery
+             *  pathologies.  */
+            bool good = slen[i] > 1e-5f * soup.spacing;
             int judged_samples = 0;
             int kink_samples = 0;
             for (int u = 0; good && u < NS; ++u)
