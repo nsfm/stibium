@@ -172,6 +172,62 @@ Battle plan (each is A/B-able on bino in minutes, referee-gated):
   Parallel_tag plain DT + CCDT only for crease law.  The only
   route to parallel insert - CCDT TDS is not thread-safe.
 
+## MARATHON 2 QUEUE (2026-07-18, five-agent fleet synthesis)
+
+Reports: doc/reviews/2026-07-18-{quality-research, correctness-
+round2, bino-hygiene-autopsy, perf-round3-design, guarantees-
+research}.md.  Fleet's own fixes already landed: TRACE=0 unbraced-
+if bug, fresh dialog-knob reads, weld_slivers fan-claim.
+
+TIER A - cheap certain wins (each <= half-day):
+1. Decimation ORIENTATION-VETO on collapse (autopsy: reversed
+   150 -> ~6; DECIMATE=0 proves decimation mints them).
+2. NON-MANIFOLD EDGE-SPLIT at the tail (autopsy: bino's 336
+   prusa-opens are 318 real pinch seams, net-winding 0, ZERO
+   geometric holes; split -> manifold=yes, +~600 verts, geometry
+   byte-identical).  The "0 auto-repairs" finish line.
+3. STRIPS RE-RUN KILL (perf 1a: reuse soup.tchains - creases are
+   density-invariant; ~28 s/run hidden tax, log swallows it).
+4. HASH-GRID coincidence guard for surface inserts (perf 2a:
+   10-18 s at r2, bit-identical).
+5. Minors: cancelled export writes partial file; SEAL/WINDING
+   decouple from the DECIMATE master switch.
+
+TIER B - quality marathon core (1-2 days each):
+6. HESSIAN CURVATURE-VALLEY SEEDS as SOFT snap targets (quality
+   P1): the 993 FAR untraced-blend divots march as min-curvature
+   valleys [Ohtake-Belyaev-Seidel] where the clause system has
+   its double root.  Build the Hessian stencil once; then
+7. chainless-curvature density trigger (cone quilting) + per-
+   curvature churn-gate recalibration (quality P2/P3).
+8. OPEN-EDGE PREDICTOR for retreat (perf 1b, gate on a stability
+   instrument first): doomed attempts skip the repair tail,
+   ~3 min off the full assembly.
+9. CHAIN-PARALLEL TRACER (perf 3a: consumed[] is an optimization
+   not correctness; per-thread tracers + post-merge dedup).
+
+TIER C - the guarantees ladder (the differentiator):
+10. RUNG 2 FIRST (prerequisite-free): tri-tri sweep via the
+    in-tree MeshQuery AABB + guards on mutating passes ->
+    "0 self-intersections, VERIFIED" per export.
+11. P0a outward-rounded intervals + P0b interval-AD evaluator ->
+    RUNG 1: per-facet certified deviation (max|f|/min|grad f|
+    over facet boxes) -> "every facet proven within X mm" - the
+    claim NOBODY ships (nTop/TetWeave: by-construction only;
+    metrology: sampled scan-vs-CAD only).  NOTE: kernel
+    intervals are decision-sound (NaN taint, fuzzer-proven) but
+    NOT outward-rounded enclosures - P0a is real work.
+12. RUNG 3 topology audit ("no missing feature above scale h,
+    interval-swept") - the honest cheap cousin of certified
+    isotopy (full P-V is research-grade, dies on creases).
+
+PARKED/DOA (fleet-verified, do not revisit blind): DT-reuse
+across retreat attempts (CCDT bookkeeping risk), SEAL epsilon
+raise (fuses REAL 0.012-0.5 mm walls), WINDING gate loosening
+(mints backwards edges, measured), "r2 will dilute razors"
+(counts triple, resolution-immune), sliver exudation (no tets in
+the output).
+
 ## OPEN DEFECT CLASSES (quality queue, post-perf)
 
 - RAZOR/Z-FIGHT SCARS - ***SOLVED*** (2026-07-18, three rounds,

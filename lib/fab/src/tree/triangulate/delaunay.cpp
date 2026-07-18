@@ -5355,7 +5355,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
              *  each for zero depth gain.  The round >= 2 floor
              *  protects the measured stall-then-improve at
              *  rounds 1 -> 2 (bino 0.339 -> 0.242).  */
-            static const char* st_env =
+            const char* st_env =
                     getenv("STIBIUM_DMESH_STALL");
             const int st_bar = st_env ? atoi(st_env) : 1;
             if (++stall_rounds >= st_bar && repair_round >= 2)
@@ -6191,7 +6191,10 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
      *  construction (the tent's new edges each get exactly two
      *  triangles, the apex fan is closed).  */
     {
-        static const char* snap_env = getenv("STIBIUM_DMESH_SNAP");
+        /*  FRESH reads (correctness r2 #1): the app dialog
+         *  setenvs these per export; a static here silently
+         *  reuses the FIRST export's values.  */
+        const char* snap_env = getenv("STIBIUM_DMESH_SNAP");
         const bool snap_on = !snap_env || atoi(snap_env) != 0;
         uint64_t snapped = 0, snap_skipped = 0;
         uint64_t skip_far = 0, skip_hits = 0, snap_surf = 0;
@@ -7360,6 +7363,13 @@ static void weld_slivers(DMesh* out, float sp)
             remap[drop] = keep;
             touched[drop] = 1;
             touched[keep] = 1;
+            /*  Claim the whole fan (correctness r2 #3: same
+             *  decide-on-original/apply-at-pass-end double-remap
+             *  hazard decimate_flats was convicted of - weld read
+             *  clean empirically, but structural beats lucky).  */
+            for (const uint32_t t2 : inc[drop])
+                for (int e = 0; e < 3; ++e)
+                    touched[T[t2 + e]] = 1;
             ++welded;
         }
         if (!welded)
@@ -8027,8 +8037,10 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
             return false;
         static const char* tr_env = getenv("STIBIUM_DMESH_TRACE");
         if (!tr_env || atoi(tr_env) != 0)
+        {
             prog_stage(3);
             delaunay_trace(deck, r, &soup, halt);
+        }
         if (const char* cp = getenv("STIBIUM_DMESH_DUMP_CHAINS"))
             dump_chains_stl(cp, soup);
         /*  Close-ring strip cores (the additive-joint diagnosis):
@@ -8132,18 +8144,18 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
         pt.mark("mesh (B+C total)");
         if (!ok || out->open_edges == 0 || *halt)
         {
-            static const char* de =
+            const char* de =
                     getenv("STIBIUM_DMESH_DECIMATE");
             if (ok && !*halt && (!de || atoi(de) != 0))
             {
                 /*  Individual gates for fold bisection (the
                  *  z-fight hunt): the trio shares the DECIMATE
                  *  master switch; each stage can be soloed off.  */
-                static const char* ws_env =
+                const char* ws_env =
                         getenv("STIBIUM_DMESH_WELDSLIV");
-                static const char* fs_env =
+                const char* fs_env =
                         getenv("STIBIUM_DMESH_FLIPSLIV");
-                static const char* df_env =
+                const char* df_env =
                         getenv("STIBIUM_DMESH_DECFLATS");
                 if (!ws_env || atoi(ws_env) != 0)
                     weld_slivers(out, soup.spacing);
@@ -8254,15 +8266,15 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
     if (have_best && better(best, *out))
         *out = std::move(best);
     {
-        static const char* de = getenv("STIBIUM_DMESH_DECIMATE");
+        const char* de = getenv("STIBIUM_DMESH_DECIMATE");
         if (!de || atoi(de) != 0)
         {
             PhaseTimer fixpt;
-            static const char* ws_env =
+            const char* ws_env =
                     getenv("STIBIUM_DMESH_WELDSLIV");
-            static const char* fs_env =
+            const char* fs_env =
                     getenv("STIBIUM_DMESH_FLIPSLIV");
-            static const char* df_env =
+            const char* df_env =
                     getenv("STIBIUM_DMESH_DECFLATS");
             if (!ws_env || atoi(ws_env) != 0)
                 weld_slivers(out, r.X[1] - r.X[0]);
