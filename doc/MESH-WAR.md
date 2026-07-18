@@ -95,6 +95,24 @@ What cursed us (in cost order):
 QEM/decimation shrink the OUTPUT, not the runtime - the curse is
 upstream point count.
 
+TIME=2 PROFILE, r2 bino (2026-07-18, the perf-war map; TIME=2 =
+sub-stage lines + per-repair-round anatomy + EVAL tally):
+- EVAL grand total 73 s / 105M pts / 36.5K calls = ONE THIRD of
+  the 221 s wall is single-threaded field evaluation.  The P5
+  threading prize in one line.
+- extract+repair 97 s = 5 rounds x ~20 s (signs+extract 7->12 s
+  growing, detect+insert ~10 s each); depth plateaus by round 2
+  - rounds 3-4 are ~40 s of heat.  Stall-exit tuning + P4
+  incremental detection both aim here.
+- insert points 51 s (one-by-one CCDT surface/Steiner inserts -
+  the batching investigation).
+- fix stages 5.3 s total (weld 1.3 / flip 0.9 / decimate 2.6 /
+  recount 0.6) - the specialized stages are CHEAP; suspicion of
+  them was misplaced.
+- Instruments: STIBIUM_DMESH_TIME=2, WITNESS counter (review #3:
+  173 sign-witness overwrites per bino - real, consequence
+  unknown, fix waits for a correlated defect).
+
 Battle plan (each is A/B-able on bino in minutes, referee-gated):
 - P1 LIVE-BAR CALIBRATION - RUN 2026-07-17 night.  Census: bino
   live median 91 (bench 4-5; live is partly CSG-clause count, not
@@ -171,8 +189,18 @@ Battle plan (each is A/B-able on bino in minutes, referee-gated):
   (Nate's design seed).  Density campaign trigger 2 of 3.
 - THIN TAPERED CONES (knob): missing material at sub-lattice
   caps; hidden-thin trigger (density campaign 3 of 3).
-- SLICER HYGIENE: prusa CLI "0 auto-repairs" as formal harness
-  referee; split-vertex epsilon-separation.
+- SLICER HYGIENE - MEASURED 2026-07-18, next correctness design
+  item.  Referee command: prusa-slicer --info X.stl (manifold /
+  open_edges / facets_reversed).  Baselines on the crowned
+  meshes: bino 528 open + 14 reversed; screws 56 open + 228
+  reversed.  Anatomy: manifold-pass pinch SPLITS leave twin
+  vertices at IDENTICAL positions - geometric weld reads closed,
+  a slicer's exact matcher reads every split seam open; the
+  reversed facets are winding noise on leftover sub-razor
+  slivers (render-invisible).  Prusa auto-repairs silently -
+  prints fine - but "0 auto-repairs" is the primetime bar.
+  Design task: split-seam reconciliation + winding repair in
+  the EXPORT path.
 - Regression tests for the eyeball-only bug classes (architecture
   review #6: two-pass liveness, ship-best, geometric-vs-index
   opens, spacing tie-flip, trust-gate cliff).

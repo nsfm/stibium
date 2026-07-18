@@ -187,6 +187,17 @@ void add_box_corners(Collector& c, const Region& r, bool inside)
                              r.Z[k ? r.nk : 0], inside);
 }
 
+/*  Field-eval accounting (TIME=2): eval_points is the inner
+ *  currency of every stage - sampling, oracle, referees, snap,
+ *  repair.  One global tally answers "how much of the wall is
+ *  the FIELD" in a single line.  */
+struct EvalStats
+{
+    double secs = 0;
+    uint64_t pts = 0, calls = 0;
+};
+static EvalStats g_eval;
+
 /*  Evaluate an arbitrary point list in MIN_VOLUME-sized batches on
  *  the given tape (same dummy-Region pattern as get_normals).  */
 void eval_points(const Tape* tape, TapeCtx* ctx,
@@ -195,6 +206,7 @@ void eval_points(const Tape* tape, TapeCtx* ctx,
                  const std::vector<float>& zs,
                  std::vector<float>& out)
 {
+    const auto e0 = std::chrono::steady_clock::now();
     const size_t n = xs.size();
     out.resize(n);
     for (size_t at = 0; at < n; at += MIN_VOLUME)
@@ -209,6 +221,10 @@ void eval_points(const Tape* tape, TapeCtx* ctx,
         const float* v = tape_eval_r(tape, ctx, dummy);
         memcpy(out.data() + at, v, count * sizeof(float));
     }
+    g_eval.secs += std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - e0).count();
+    g_eval.pts += n;
+    ++g_eval.calls;
 }
 
 /*  Leaf block: evaluate the corner lattice, tag signs, and queue
@@ -533,22 +549,39 @@ void sample_block(Collector& c, const Region& r, Tape* tape,
 
 /*  Phase wall-clock under STIBIUM_DMESH_TIME=1: the profile that
  *  aims the performance pass (measure before optimizing - the
- *  house rule applies to speed too).  */
+ *  house rule applies to speed too).  TIME=2 adds sub-stage
+ *  lines (indented TIME2) - repair-round anatomy, snap
+ *  internals, the fix-stage trio - without disturbing the
+ *  level-1 phase deltas.  */
 struct PhaseTimer
 {
-    const bool on = getenv("STIBIUM_DMESH_TIME") != nullptr;
+    const int level = [] {
+        const char* e = getenv("STIBIUM_DMESH_TIME");
+        return e ? std::max(1, atoi(e)) : 0;
+    }();
     std::chrono::steady_clock::time_point t0 =
             std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point s0 = t0;
     void mark(const char* name)
     {
-        if (!on)
+        if (!level)
             return;
         const auto t1 = std::chrono::steady_clock::now();
         fprintf(stderr, "TIME %-20s %8.2f s\n", name,
                 std::chrono::duration<double>(t1 - t0).count());
-        t0 = t1;
+        t0 = s0 = t1;
+    }
+    void sub(const char* name)
+    {
+        if (level < 2)
+            return;
+        const auto t1 = std::chrono::steady_clock::now();
+        fprintf(stderr, "TIME2   %-24s %8.2f s\n", name,
+                std::chrono::duration<double>(t1 - s0).count());
+        s0 = t1;
     }
 };
+
 
 /*  Crease-band density (MESH-NEXT density round, measured
  *  2026-07-15): extra midpoint-refinement levels applied to
@@ -569,7 +602,9 @@ int dense_levels()
      *  a density with setenv.  */
     const char* env = getenv("STIBIUM_DMESH_DENSE");
     const int lv = env ? atoi(env) : 0;
-    return lv > 0 ? lv : 0;
+    /*  Cap 8 (256x): correctness review #6 - the level feeds
+     *  1 << lv, and an extreme knob value is UB, not density.  */
+    return lv > 0 ? std::min(lv, 8) : 0;
 }
 
 float dense_factor()
@@ -601,7 +636,8 @@ int autod_max_level()
      *  detail justifies it (e.g. ~0.2 mm emboss at 1 vox/mm).  */
     const char* env = getenv("STIBIUM_DMESH_AUTODENSE_MAX");
     const int lv = env ? atoi(env) : 2;
-    return lv < 1 ? 1 : lv;
+    /*  Same 1 << lv foot-gun cap as dense_levels (review #6).  */
+    return lv < 1 ? 1 : std::min(lv, 8);
 }
 
 /*  Tangle gate (zeiss autopsy, 2026-07-16): every open/non-manifold
@@ -1751,8 +1787,12 @@ DChains delaunay_chains(const DSoup& soup)
         {
             if (cand == UINT32_MAX || cand == prev || used[cand])
                 continue;
-            if (linked(cand, uint32_t(cur)) || true)
-                return cand;
+            /*  One-sided links are accepted (correctness review
+             *  #4: the symmetric-link test here was dead code via
+             *  "|| true" through every refereed rev - kept
+             *  one-sided EXPLICITLY; curved spacing is uneven and
+             *  the walk caps degree at 2 regardless).  */
+            return cand;
         }
         return UINT32_MAX;
     };
@@ -3432,7 +3472,13 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     continue;
                 if (!(gl > 0))
                 {
-                    if (fabsf(f) > 1e-6f)
+                    /*  Spacing-relative with the old absolute as
+                     *  floor (correctness review #5: a bare 1e-6
+                     *  is scale-dependent - 100x model, 100x
+                     *  stricter).  The on-kink population reads
+                     *  <= ~1e-3, so the zone is wide.  */
+                    if (fabsf(f) > std::max(1e-6f,
+                                1e-5f * soup.spacing))
                         good = false;
                     else
                         ++kink_samples;
@@ -3824,6 +3870,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
      *  outside witness with 'surface' corrupts extraction.  Handles
      *  are recorded because chain entries (indices into
      *  soup.surface) become constrained-edge endpoints.  */
+    uint64_t witness_overwrites = 0;
     std::vector<VH> surf_vh;
     surf_vh.reserve(soup.surface.size());
     const size_t feat_base =
@@ -3864,6 +3911,15 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     if (CGAL::squared_distance(nv->point(), sp3) <
                         w * w)
                     {
+                        /*  Correctness review #3: this reuse path
+                         *  overwrites an existing vertex's info
+                         *  unconditionally - if nv is a +-1 sign
+                         *  witness its vote dies silently.  The
+                         *  siblings only stamp NEW vertices.
+                         *  INSTRUMENT (fix waits on data): count
+                         *  the actual witness kills.  */
+                        if (nv->info() != 0)
+                            ++witness_overwrites;
                         nv->info() = 0;
                         surf_vh.push_back(nv);
                         continue;
@@ -3888,6 +3944,12 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         }
         surf_vh.push_back(vh);
     }
+    if (witness_overwrites &&
+        (getenv("STIBIUM_DMESH_TIME") ||
+         getenv("STIBIUM_DMESH_CHIP_DEBUG")))
+        fprintf(stderr, "WITNESS: %llu sign witnesses overwritten "
+                "to surface by the reuse path (review #3)\n",
+                (unsigned long long)witness_overwrites);
 
     pt.mark("insert points");
     /*  Insert the refereed chain segments as constrained edges,
@@ -4713,6 +4775,12 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     snap_t1.clear();
     snap_t2.clear();
     snap_d.clear();
+    {
+        char nb[32];
+        snprintf(nb, sizeof(nb), "r%d signs+extract",
+                 repair_round);
+        pt.sub(nb);
+    }
     if (repair_round >= MAX_REPAIR || *halt)
         break;
 
@@ -5313,6 +5381,12 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     (unsigned long long)blk_keepout,
                     (unsigned long long)blk_crowd,
                     (unsigned long long)blk_air);
+        {
+            char nb[32];
+            snprintf(nb, sizeof(nb), "r%d detect+insert",
+                     repair_round);
+            pt.sub(nb);
+        }
         if (!added)
             break;
         repaired_total += added;
@@ -5814,6 +5888,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 snap_t2.push_back(fem[keys[i]].second);
                 snap_d.push_back(dist);
             }
+            pt.sub("snap: stash sweep");
         }
         if (snap_on && !snap_va.empty() && !soup.tchains.empty())
         {
@@ -5854,6 +5929,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
              *  already touched this wave.  */
             std::vector<uint8_t> done(snap_va.size(), 0);
             std::vector<std::array<float, 3>> far_pts;
+            pt.sub("snap: seg build");
             bool progress = true;
             while (progress)
             {
@@ -6253,8 +6329,14 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             }
         }
         out->snapped = snapped;
+        pt.sub("snap: waves+referees");
     }
     pt.mark("snap pass");
+    if (pt.level >= 2)
+        fprintf(stderr, "TIME2   %-24s %8.2f s  (%llu pts, "
+                "%llu calls)\n", "EVAL total so far",
+                g_eval.secs, (unsigned long long)g_eval.pts,
+                (unsigned long long)g_eval.calls);
 
     /*  End-of-pipeline chip referee (diagnostic): the repair-loop
      *  metric measures the raw extraction, so the snap pass needs
@@ -7344,11 +7426,22 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                         getenv("STIBIUM_DMESH_DECFLATS");
                 if (!ws_env || atoi(ws_env) != 0)
                     weld_slivers(out, soup.spacing);
+                pt.sub("weld_slivers");
                 if (!fs_env || atoi(fs_env) != 0)
                     flip_slivers(out, soup.spacing);
+                pt.sub("flip_slivers");
                 if (!df_env || atoi(df_env) != 0)
                     decimate_flats(out);
+                pt.sub("decimate_flats");
                 recount_quality(out);
+                pt.sub("recount_quality");
+                pt.mark("fix stages");
+                if (pt.level >= 2)
+                    fprintf(stderr, "TIME2   %-24s %8.2f s  "
+                            "(%llu pts, %llu calls)\n",
+                            "EVAL grand total", g_eval.secs,
+                            (unsigned long long)g_eval.pts,
+                            (unsigned long long)g_eval.calls);
             }
             return ok;
         }
@@ -7439,6 +7532,7 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
         static const char* de = getenv("STIBIUM_DMESH_DECIMATE");
         if (!de || atoi(de) != 0)
         {
+            PhaseTimer fixpt;
             static const char* ws_env =
                     getenv("STIBIUM_DMESH_WELDSLIV");
             static const char* fs_env =
@@ -7447,11 +7541,16 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                     getenv("STIBIUM_DMESH_DECFLATS");
             if (!ws_env || atoi(ws_env) != 0)
                 weld_slivers(out, r.X[1] - r.X[0]);
+            fixpt.sub("weld_slivers");
             if (!fs_env || atoi(fs_env) != 0)
                 flip_slivers(out, r.X[1] - r.X[0]);
+            fixpt.sub("flip_slivers");
             if (!df_env || atoi(df_env) != 0)
                 decimate_flats(out);
+            fixpt.sub("decimate_flats");
             recount_quality(out);
+            fixpt.sub("recount_quality");
+            fixpt.mark("fix stages");
         }
     }
     return true;
