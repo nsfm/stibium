@@ -2015,6 +2015,24 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
 
         Census census2;
         census2.on = census.on;
+        /*  Perf review, the cheap first win: pass 1's soup and
+         *  index structures are DEAD once the drill-down map is
+         *  built (pass 2 re-samples everything), but they stayed
+         *  resident through pass 2 - a full duplicate of the
+         *  biggest transients at peak.  Release before c2
+         *  samples.  */
+        c.soup.samples.clear();
+        c.soup.samples.shrink_to_fit();
+        c.soup.surface.clear();
+        c.soup.surface.shrink_to_fit();
+        c.seen_samples.clear();
+        c.seen_samples.rehash(0);
+        c.edge_index.clear();
+        c.edge_index.rehash(0);
+        c.edges.clear();
+        c.edges.shrink_to_fit();
+        c.cells.clear();
+        c.cells.shrink_to_fit();
         Collector c2;
         /*  Pass 2 skips the leaf gradient survey (dense_map set),
          *  but the cell judges - the shallow-seed gate and the
@@ -5959,6 +5977,38 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
  *  guards against fold-overs; boundary-of-plane vertices keep
  *  themselves (their fans contain off-plane triangles).
  *  STIBIUM_DMESH_DECIMATE=0 disables.  */
+/*  Edge-collapse link condition (correctness review finding 1 +
+ *  Nate's z-fighting sighting, 2026-07-17): collapsing (drop ->
+ *  keep) is topologically safe only when their one-rings share
+ *  EXACTLY the two vertices opposite the shared edge(s).  A
+ *  third shared neighbour means the collapse mints a doubled
+ *  coplanar facet - both normals point up, the orientation
+ *  guard is blind to it, and it renders as z-fighting.  */
+static bool link_ok(const std::vector<uint32_t>& T,
+                    const std::vector<std::vector<uint32_t>>& inc,
+                    uint32_t drop, uint32_t keep)
+{
+    std::unordered_set<uint32_t> ring;
+    for (const uint32_t t : inc[drop])
+        for (int e = 0; e < 3; ++e)
+        {
+            const uint32_t w = T[t + e];
+            if (w != drop && w != keep)
+                ring.insert(w);
+        }
+    int shared = 0;
+    std::unordered_set<uint32_t> seen;
+    for (const uint32_t t : inc[keep])
+        for (int e = 0; e < 3; ++e)
+        {
+            const uint32_t w = T[t + e];
+            if (w != drop && w != keep && ring.count(w) &&
+                seen.insert(w).second)
+                ++shared;
+        }
+    return shared <= 2;
+}
+
 static void decimate_flats(DMesh* out)
 {
     const size_t nv = out->verts.size() / 3;
@@ -6060,13 +6110,20 @@ static void decimate_flats(DMesh* out)
                             ny = uz*wx - ux*wz,
                             nz = ux*wy - uy*wx;
                 const float dot = nx*n0[0] + ny*n0[1] + nz*n0[2];
-                if (dot <= 1e-12f * scale * scale)
+                /*  Not just flips: NEAR-degenerate survivors are
+                 *  razor slivers whose normals flicker - Nate's
+                 *  "gently poked with a razorblade" hairline cuts
+                 *  across the flats (autod31, hundreds).  A
+                 *  surviving triangle keeps a real fraction of
+                 *  the reference area or the collapse is
+                 *  refused.  */
+                if (dot <= 0.01f * scale * scale)
                 {
-                    ok = false;      // flip or collapse to zero
+                    ok = false;      // flip, zero, or razor sliver
                     break;
                 }
             }
-            if (!ok)
+            if (!ok || !link_ok(T, inc, uint32_t(v), tgt))
                 continue;
             remap[v] = tgt;
             touched[v] = 1;
@@ -6087,6 +6144,219 @@ static void decimate_flats(DMesh* out)
             w2 += 3;
         }
         T.resize(w2);
+    }
+}
+
+/*  Sliver weld (the razor-gash class, 2026-07-17): the raw
+ *  extraction mints degenerate slivers along crease-adjacent
+ *  flats (screws census: 834 pre-decimation; ~90% have a
+ *  shortest edge under 0.15 sp) - invisible while buried among
+ *  small coplanar neighbours, but decimation leaves the
+ *  survivors lying alone across big clean planes where they
+ *  render as hairline cuts (Nate's "gently poked with a
+ *  razorblade").  Collapse the short edge of any razor triangle
+ *  (height < 0.02 sp), moving the FLATTER endpoint into the
+ *  more-featured one so creases and law never move; the motion
+ *  is sub-bar.  Per-triangle orientation guard against
+ *  fold-overs.  Runs before flat decimation.  */
+static void weld_slivers(DMesh* out, float sp)
+{
+    const size_t nv = out->verts.size() / 3;
+    if (!nv || !(sp > 0))
+        return;
+    std::vector<uint32_t>& T = out->tris;
+    auto vp = [&](uint32_t v, int q) {
+        return out->verts[3 * v + q];
+    };
+    const float hbar = 0.02f * sp;
+    const float ebar = 0.15f * sp;
+    for (int pass = 0; pass < 10; ++pass)
+    {
+        std::vector<std::vector<uint32_t>> inc(nv);
+        for (size_t t = 0; t < T.size(); t += 3)
+            for (int e = 0; e < 3; ++e)
+                inc[T[t + e]].push_back(uint32_t(t));
+        /*  Fan planarity per vertex: min pairwise normal dot
+         *  across incident triangles (1 = perfectly flat).  */
+        const auto tnormal = [&](uint32_t t, float n[3]) {
+            const uint32_t a = T[t], b = T[t+1], c2 = T[t+2];
+            const float ux = vp(b,0)-vp(a,0), uy = vp(b,1)-vp(a,1),
+                        uz = vp(b,2)-vp(a,2);
+            const float wx = vp(c2,0)-vp(a,0),
+                        wy = vp(c2,1)-vp(a,1),
+                        wz = vp(c2,2)-vp(a,2);
+            n[0] = uy*wz - uz*wy;
+            n[1] = uz*wx - ux*wz;
+            n[2] = ux*wy - uy*wx;
+            const float l = sqrtf(n[0]*n[0] + n[1]*n[1] +
+                                  n[2]*n[2]);
+            if (l > 0)
+            {
+                n[0] /= l; n[1] /= l; n[2] /= l;
+            }
+            return l > 0;
+        };
+        const auto planarity = [&](uint32_t v) {
+            float ref[3];
+            bool have = false;
+            float mind = 1.f;
+            for (const uint32_t t : inc[v])
+            {
+                float n[3];
+                if (!tnormal(t, n))
+                    continue;
+                if (!have)
+                {
+                    ref[0] = n[0]; ref[1] = n[1]; ref[2] = n[2];
+                    have = true;
+                    continue;
+                }
+                mind = std::min(mind, n[0]*ref[0] + n[1]*ref[1] +
+                                      n[2]*ref[2]);
+            }
+            return have ? mind : -1.f;
+        };
+        std::vector<uint32_t> remap(nv);
+        for (size_t v = 0; v < nv; ++v)
+            remap[v] = uint32_t(v);
+        std::vector<uint8_t> touched(nv, 0);
+        size_t welded = 0;
+        for (size_t t = 0; t < T.size(); t += 3)
+        {
+            const uint32_t vs[3] = { T[t], T[t+1], T[t+2] };
+            if (touched[vs[0]] || touched[vs[1]] || touched[vs[2]])
+                continue;
+            float el[3];
+            float emin = 1e30f, emax = 0;
+            int emini = 0;
+            for (int e = 0; e < 3; ++e)
+            {
+                const uint32_t a = vs[e], b = vs[(e+1)%3];
+                const float dx = vp(b,0)-vp(a,0),
+                            dy = vp(b,1)-vp(a,1),
+                            dz = vp(b,2)-vp(a,2);
+                el[e] = sqrtf(dx*dx + dy*dy + dz*dz);
+                if (el[e] < emin)
+                {
+                    emin = el[e];
+                    emini = e;
+                }
+                emax = std::max(emax, el[e]);
+            }
+            if (!(emax > 0) || emin > ebar)
+                continue;
+            float ux = vp(vs[1],0)-vp(vs[0],0),
+                  uy = vp(vs[1],1)-vp(vs[0],1),
+                  uz = vp(vs[1],2)-vp(vs[0],2);
+            float wx = vp(vs[2],0)-vp(vs[0],0),
+                  wy = vp(vs[2],1)-vp(vs[0],1),
+                  wz = vp(vs[2],2)-vp(vs[0],2);
+            const float cxn = uy*wz - uz*wy, cyn = uz*wx - ux*wz,
+                        czn = ux*wy - uy*wx;
+            const float area2 = sqrtf(cxn*cxn + cyn*cyn + czn*czn);
+            if (area2 / emax > 2 * hbar)
+                continue;            // not a razor
+            const uint32_t a = vs[emini], b = vs[(emini+1)%3];
+            /*  Flatter endpoint moves; ties move b into a.  */
+            const float pa = planarity(a), pb = planarity(b);
+            const uint32_t keep = pa < pb ? a : b;
+            const uint32_t drop = pa < pb ? b : a;
+            /*  Orientation guard: every surviving triangle of
+             *  drop's fan keeps its own normal direction.  */
+            bool ok = true;
+            for (const uint32_t t2 : inc[drop])
+            {
+                uint32_t q[3] = { T[t2], T[t2+1], T[t2+2] };
+                float n0[3];
+                if (!tnormal(t2, n0))
+                    continue;
+                for (int e = 0; e < 3; ++e)
+                    if (q[e] == drop)
+                        q[e] = keep;
+                if (q[0] == q[1] || q[1] == q[2] || q[0] == q[2])
+                    continue;
+                const float ax2 = vp(q[1],0)-vp(q[0],0),
+                            ay2 = vp(q[1],1)-vp(q[0],1),
+                            az2 = vp(q[1],2)-vp(q[0],2);
+                const float bx2 = vp(q[2],0)-vp(q[0],0),
+                            by2 = vp(q[2],1)-vp(q[0],1),
+                            bz2 = vp(q[2],2)-vp(q[0],2);
+                const float nx2 = ay2*bz2 - az2*by2,
+                            ny2 = az2*bx2 - ax2*bz2,
+                            nz2 = ax2*by2 - ay2*bx2;
+                if (nx2*n0[0] + ny2*n0[1] + nz2*n0[2] <= 0)
+                {
+                    ok = false;
+                    break;
+                }
+            }
+            if (!ok || !link_ok(T, inc, drop, keep))
+                continue;
+            remap[drop] = keep;
+            touched[drop] = 1;
+            touched[keep] = 1;
+            ++welded;
+        }
+        if (!welded)
+            break;
+        size_t w2 = 0;
+        for (size_t t = 0; t < T.size(); t += 3)
+        {
+            const uint32_t a = remap[T[t]], b = remap[T[t+1]],
+                           c2 = remap[T[t+2]];
+            if (a == b || b == c2 || a == c2)
+                continue;
+            T[w2] = a; T[w2+1] = b; T[w2+2] = c2;
+            w2 += 3;
+        }
+        T.resize(w2);
+    }
+}
+
+/*  Post-mutation quality recount (correctness review finding 1,
+ *  2026-07-17): decimation was the only mesh-mutating stage
+ *  running AFTER the quality accounting - its damage shipped
+ *  uncounted (the razor-sliver gashes reached Nate's slicer with
+ *  a clean ledger row).  Same semantics as the in-pipeline
+ *  accounting: opens on welded GEOMETRIC ids, nm on index ids.  */
+static void recount_quality(DMesh* out)
+{
+    std::unordered_map<uint64_t, uint32_t> ec;
+    for (size_t t = 0; t < out->tris.size(); t += 3)
+        for (int e = 0; e < 3; ++e)
+        {
+            uint64_t a = out->tris[t + e];
+            uint64_t b = out->tris[t + (e + 1) % 3];
+            if (a > b)
+                std::swap(a, b);
+            ++ec[(a << 32) | b];
+        }
+    out->nonmanifold_edges = 0;
+    for (const auto& [k, n2] : ec)
+    {
+        (void)k;
+        if (n2 > 2)
+            ++out->nonmanifold_edges;
+    }
+    const std::vector<uint32_t> wid = weld_ids(out->verts);
+    std::unordered_map<uint64_t, uint32_t> gec;
+    for (size_t t = 0; t < out->tris.size(); t += 3)
+        for (int e = 0; e < 3; ++e)
+        {
+            uint64_t a = wid[out->tris[t + e]];
+            uint64_t b = wid[out->tris[t + (e + 1) % 3]];
+            if (a == b)
+                continue;
+            if (a > b)
+                std::swap(a, b);
+            ++gec[(a << 32) | b];
+        }
+    out->open_edges = 0;
+    for (const auto& [k, n2] : gec)
+    {
+        (void)k;
+        if (n2 < 2)
+            ++out->open_edges;
     }
 }
 
@@ -6334,7 +6604,11 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
             static const char* de =
                     getenv("STIBIUM_DMESH_DECIMATE");
             if (ok && !*halt && (!de || atoi(de) != 0))
+            {
+                weld_slivers(out, soup.spacing);
                 decimate_flats(out);
+                recount_quality(out);
+            }
             return ok;
         }
         if (!have_best || better(*out, best))
@@ -6423,7 +6697,11 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
     {
         static const char* de = getenv("STIBIUM_DMESH_DECIMATE");
         if (!de || atoi(de) != 0)
+        {
+            weld_slivers(out, r.X[1] - r.X[0]);
             decimate_flats(out);
+            recount_quality(out);
+        }
     }
     return true;
 }
