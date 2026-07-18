@@ -222,6 +222,19 @@ Battle plan (each is A/B-able on bino in minutes, referee-gated):
 - Regression tests for the eyeball-only bug classes (architecture
   review #6: two-pass liveness, ship-best, geometric-vs-index
   opens, spacing tie-flip, trust-gate cliff).
+- INTEGRATION SPRINT (2026-07-18, Nate's go): the mesher is
+  named STIBNITE (antimony -> Stibium -> its razor-sharp crystal
+  form; env prefix stays STIBIUM_DMESH_* for compat).  UI:
+  Stibnite/Classic dropdown, quality Standard(r1)/Beautiful(r2)/
+  Extreme(r3+, untested), simplify mm spin; advanced: density
+  cap, decimation, snap, stall patience, auto-density (the
+  sparkle reveal); threads env-only (auto hw-1).  Post-export
+  STATS DIALOG from DMesh diagnostics + phase times.  Classic
+  mesher kept (low-RAM constituency + release insurance).
+- MANPAGE: ship stibnite(7) covering all five knob tiers
+  (visible/advanced/frozen/experimental/instruments) with
+  defaults, ranges, and graveyard citations - MESH-WAR is the
+  source text.
 
 ## GRAVEYARD (tried + rolled back; do NOT re-derive)
 
