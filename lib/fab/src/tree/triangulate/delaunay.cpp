@@ -7063,8 +7063,28 @@ static bool link_ok(const std::vector<uint32_t>& T,
     return shared <= 2;
 }
 
-static void decimate_flats(DMesh* out)
+static void decimate_flats(const Deck* deck, DMesh* out)
 {
+    /*  Winding referee (MARATHON 2 Tier A cure 1, autopsy: the
+     *  150 reversed facets on bino are decimation-minted;
+     *  DECIMATE=0 reads 6).  Candidates are SELECTED under the
+     *  existing guards, then a batched field-gradient referee
+     *  vetoes any collapse that would leave a surviving facet
+     *  wound against the field at its post-collapse centroid.
+     *  Vetoed candidates forfeit their independence claim for
+     *  the pass (retried next pass).  */
+    TapeCtx* wctx = deck ? tape_ctx_new(deck) : nullptr;
+    float mesh_edge = 0;
+    for (size_t t = 0; t + 3 <= out->tris.size() &&
+                       t < 64 * 3; t += 3)
+    {
+        const uint32_t a = out->tris[t], b = out->tris[t+1];
+        const float dx = out->verts[3*a] - out->verts[3*b];
+        const float dy = out->verts[3*a+1] - out->verts[3*b+1];
+        const float dz = out->verts[3*a+2] - out->verts[3*b+2];
+        mesh_edge = std::max(mesh_edge,
+                sqrtf(dx*dx + dy*dy + dz*dz));
+    }
     const size_t nv = out->verts.size() / 3;
     if (!nv)
         return;
@@ -7084,6 +7104,7 @@ static void decimate_flats(DMesh* out)
             remap[v] = uint32_t(v);
         std::vector<uint8_t> touched(nv, 0);
         size_t collapsed = 0;
+        std::vector<uint32_t> cand_v, cand_t;
         for (size_t v = 0; v < nv; ++v)
         {
             const auto& fan = inc[v];
@@ -7179,7 +7200,8 @@ static void decimate_flats(DMesh* out)
             }
             if (!ok || !link_ok(T, inc, uint32_t(v), tgt))
                 continue;
-            remap[v] = tgt;
+            cand_v.push_back(uint32_t(v));
+            cand_t.push_back(tgt);
             touched[v] = 1;
             touched[tgt] = 1;
             /*  Claim the whole fan (fold conviction, 2026-07-18):
@@ -7196,8 +7218,104 @@ static void decimate_flats(DMesh* out)
             for (const uint32_t t : fan)
                 for (int e = 0; e < 3; ++e)
                     touched[T[t + e]] = 1;
+        }
+        /*  Field referee over all candidates' surviving facets,
+         *  one batch.  */
+        /*  DEFAULT OFF (2026-07-18): the veto was built on the
+         *  autopsy's decimation attribution, which dissolved -
+         *  the reversed count is a prusa pinch-walk artifact +
+         *  weld's handful.  Measured cost on screws: ~20 blocked
+         *  collapses -> 68 prusa opens (manifold yes -> no) for
+         *  zero measured benefit.  STIBIUM_DMESH_DECVETO=1
+         *  re-arms it for experiments.  */
+        static const char* dv_env = getenv("STIBIUM_DMESH_DECVETO");
+        if (dv_env && atoi(dv_env) != 0 && wctx && !cand_v.empty())
+        {
+            std::vector<float> rx, ry, rz, rv2;
+            std::vector<size_t> rcand;
+            std::vector<float> rnrm;
+            const float gh = std::max(1e-5f,
+                    0.01f * mesh_edge);
+            for (size_t ci = 0; ci < cand_v.size(); ++ci)
+            {
+                const uint32_t v2 = cand_v[ci],
+                               tg = cand_t[ci];
+                for (const uint32_t t : inc[v2])
+                {
+                    uint32_t q[3] = { T[t], T[t+1], T[t+2] };
+                    for (int e = 0; e < 3; ++e)
+                        if (q[e] == v2)
+                            q[e] = tg;
+                    if (q[0] == q[1] || q[1] == q[2] ||
+                        q[0] == q[2])
+                        continue;
+                    const float ux = vp(q[1],0)-vp(q[0],0),
+                            uy = vp(q[1],1)-vp(q[0],1),
+                            uz = vp(q[1],2)-vp(q[0],2);
+                    const float wx = vp(q[2],0)-vp(q[0],0),
+                            wy = vp(q[2],1)-vp(q[0],1),
+                            wz = vp(q[2],2)-vp(q[0],2);
+                    const float cx = (vp(q[0],0)+vp(q[1],0)+
+                                      vp(q[2],0)) / 3;
+                    const float cy = (vp(q[0],1)+vp(q[1],1)+
+                                      vp(q[2],1)) / 3;
+                    const float cz = (vp(q[0],2)+vp(q[1],2)+
+                                      vp(q[2],2)) / 3;
+                    rcand.push_back(ci);
+                    rnrm.push_back(uy*wz - uz*wy);
+                    rnrm.push_back(uz*wx - ux*wz);
+                    rnrm.push_back(ux*wy - uy*wx);
+                    for (int o = 0; o < 6; ++o)
+                    {
+                        rx.push_back(cx + (o==0?gh:o==1?-gh:0));
+                        ry.push_back(cy + (o==2?gh:o==3?-gh:0));
+                        rz.push_back(cz + (o==4?gh:o==5?-gh:0));
+                    }
+                }
+            }
+            if (!rx.empty())
+            {
+                eval_points_mt(deck, wctx, rx, ry, rz, rv2);
+                std::vector<uint8_t> veto(cand_v.size(), 0);
+                for (size_t i = 0; i < rcand.size(); ++i)
+                {
+                    const float gx = rv2[i*6] - rv2[i*6+1];
+                    const float gy = rv2[i*6+2] - rv2[i*6+3];
+                    const float gz = rv2[i*6+4] - rv2[i*6+5];
+                    /*  DECISIVE opposition only: the candidate
+                    *  pool lives beside razors whose survivor
+                    *  normals are near-degenerate - a knife-edge
+                    *  <= 0 test vetoes on sign noise (measured:
+                    *  7.6K blocked welds, razors resurrected).  */
+                    const float dt2 = rnrm[i*3]*gx +
+                            rnrm[i*3+1]*gy + rnrm[i*3+2]*gz;
+                    const float nl2 = sqrtf(rnrm[i*3]*rnrm[i*3] +
+                            rnrm[i*3+1]*rnrm[i*3+1] +
+                            rnrm[i*3+2]*rnrm[i*3+2]);
+                    const float gl2 = sqrtf(gx*gx + gy*gy +
+                                            gz*gz);
+                    if (dt2 < -0.1f * nl2 * gl2)
+                        veto[rcand[i]] = 1;
+                }
+                size_t kept = 0;
+                for (size_t ci = 0; ci < cand_v.size(); ++ci)
+                    if (!veto[ci])
+                    {
+                        cand_v[kept] = cand_v[ci];
+                        cand_t[kept] = cand_t[ci];
+                        ++kept;
+                    }
+                cand_v.resize(kept);
+                cand_t.resize(kept);
+            }
+        }
+        for (size_t ci = 0; ci < cand_v.size(); ++ci)
+        {
+            remap[cand_v[ci]] = cand_t[ci];
             ++collapsed;
         }
+        cand_v.clear();
+        cand_t.clear();
         if (!collapsed)
             break;
         /*  Apply remaps, cull degenerates  */
@@ -7213,6 +7331,8 @@ static void decimate_flats(DMesh* out)
         }
         T.resize(w2);
     }
+    if (wctx)
+        tape_ctx_free(wctx);
 }
 
 /*  Sliver weld (the razor-gash class, 2026-07-17): the raw
@@ -7227,8 +7347,15 @@ static void decimate_flats(DMesh* out)
  *  more-featured one so creases and law never move; the motion
  *  is sub-bar.  Per-triangle orientation guard against
  *  fold-overs.  Runs before flat decimation.  */
-static void weld_slivers(DMesh* out, float sp)
+static void weld_slivers(const Deck* deck, DMesh* out, float sp)
 {
+    /*  Field referee for collapses (attribution 2026-07-18:
+     *  WELDSLIV=0 reads 4 prusa-reversed vs 150 with weld on -
+     *  THIS pass is the reversed-facet mint; its own-normal
+     *  orientation guard judges razor fans with garbage
+     *  references, the flip_slivers lesson).  Same batched
+     *  post-collapse gradient veto as decimate_flats.  */
+    TapeCtx* wwctx = deck ? tape_ctx_new(deck) : nullptr;
     const size_t nv = out->verts.size() / 3;
     if (!nv || !(sp > 0))
         return;
@@ -7238,7 +7365,12 @@ static void weld_slivers(DMesh* out, float sp)
     };
     const float hbar = 0.02f * sp;
     const float ebar = 0.15f * sp;
-    for (int pass = 0; pass < 10; ++pass)
+    /*  24 passes (was 10): the independent-set fan-claim defers
+     *  same-pass neighbour welds; the queue needs more rounds to
+     *  drain (measured: +20 surviving structures on screws at 10
+     *  passes cost prusa manifold=yes).  Converges early via the
+     *  !welded break.  */
+    for (int pass = 0; pass < 24; ++pass)
     {
         std::vector<std::vector<uint32_t>> inc(nv);
         for (size_t t = 0; t < T.size(); t += 3)
@@ -7289,6 +7421,7 @@ static void weld_slivers(DMesh* out, float sp)
             remap[v] = uint32_t(v);
         std::vector<uint8_t> touched(nv, 0);
         size_t welded = 0;
+        std::vector<uint32_t> wc_v, wc_t;
         for (size_t t = 0; t < T.size(); t += 3)
         {
             const uint32_t vs[3] = { T[t], T[t+1], T[t+2] };
@@ -7360,7 +7493,8 @@ static void weld_slivers(DMesh* out, float sp)
             }
             if (!ok || !link_ok(T, inc, drop, keep))
                 continue;
-            remap[drop] = keep;
+            wc_v.push_back(drop);
+            wc_t.push_back(keep);
             touched[drop] = 1;
             touched[keep] = 1;
             /*  Claim the whole fan (correctness r2 #3: same
@@ -7370,8 +7504,96 @@ static void weld_slivers(DMesh* out, float sp)
             for (const uint32_t t2 : inc[drop])
                 for (int e = 0; e < 3; ++e)
                     touched[T[t2 + e]] = 1;
+        }
+        /*  Field veto REVERTED for weld (2026-07-18: it blocked
+         *  7.6K welds and TRIPLED the razor census 627 -> 1,744
+         *  - resurrecting the class weld exists to kill.  The
+         *  reversed-facet cure moved to repair_winding's
+         *  local-majority flip instead.)  */
+        if (false && wwctx && !wc_v.empty())
+        {
+            std::vector<float> rx, ry, rz, rv2, rnrm;
+            std::vector<size_t> rcand;
+            const float gh = std::max(1e-5f, 0.05f * sp);
+            for (size_t ci = 0; ci < wc_v.size(); ++ci)
+            {
+                const uint32_t v2 = wc_v[ci], tg = wc_t[ci];
+                for (const uint32_t t : inc[v2])
+                {
+                    uint32_t q[3] = { T[t], T[t+1], T[t+2] };
+                    for (int e = 0; e < 3; ++e)
+                        if (q[e] == v2)
+                            q[e] = tg;
+                    if (q[0] == q[1] || q[1] == q[2] ||
+                        q[0] == q[2])
+                        continue;
+                    const float ux = vp(q[1],0)-vp(q[0],0),
+                            uy = vp(q[1],1)-vp(q[0],1),
+                            uz = vp(q[1],2)-vp(q[0],2);
+                    const float wx = vp(q[2],0)-vp(q[0],0),
+                            wy = vp(q[2],1)-vp(q[0],1),
+                            wz = vp(q[2],2)-vp(q[0],2);
+                    rcand.push_back(ci);
+                    rnrm.push_back(uy*wz - uz*wy);
+                    rnrm.push_back(uz*wx - ux*wz);
+                    rnrm.push_back(ux*wy - uy*wx);
+                    const float cx = (vp(q[0],0)+vp(q[1],0)+
+                                      vp(q[2],0)) / 3;
+                    const float cy = (vp(q[0],1)+vp(q[1],1)+
+                                      vp(q[2],1)) / 3;
+                    const float cz = (vp(q[0],2)+vp(q[1],2)+
+                                      vp(q[2],2)) / 3;
+                    for (int o = 0; o < 6; ++o)
+                    {
+                        rx.push_back(cx + (o==0?gh:o==1?-gh:0));
+                        ry.push_back(cy + (o==2?gh:o==3?-gh:0));
+                        rz.push_back(cz + (o==4?gh:o==5?-gh:0));
+                    }
+                }
+            }
+            if (!rx.empty())
+            {
+                eval_points_mt(deck, wwctx, rx, ry, rz, rv2);
+                std::vector<uint8_t> veto(wc_v.size(), 0);
+                for (size_t i = 0; i < rcand.size(); ++i)
+                {
+                    const float gx = rv2[i*6] - rv2[i*6+1];
+                    const float gy = rv2[i*6+2] - rv2[i*6+3];
+                    const float gz = rv2[i*6+4] - rv2[i*6+5];
+                    /*  DECISIVE opposition only: the candidate
+                    *  pool lives beside razors whose survivor
+                    *  normals are near-degenerate - a knife-edge
+                    *  <= 0 test vetoes on sign noise (measured:
+                    *  7.6K blocked welds, razors resurrected).  */
+                    const float dt2 = rnrm[i*3]*gx +
+                            rnrm[i*3+1]*gy + rnrm[i*3+2]*gz;
+                    const float nl2 = sqrtf(rnrm[i*3]*rnrm[i*3] +
+                            rnrm[i*3+1]*rnrm[i*3+1] +
+                            rnrm[i*3+2]*rnrm[i*3+2]);
+                    const float gl2 = sqrtf(gx*gx + gy*gy +
+                                            gz*gz);
+                    if (dt2 < -0.1f * nl2 * gl2)
+                        veto[rcand[i]] = 1;
+                }
+                size_t kept = 0;
+                for (size_t ci = 0; ci < wc_v.size(); ++ci)
+                    if (!veto[ci])
+                    {
+                        wc_v[kept] = wc_v[ci];
+                        wc_t[kept] = wc_t[ci];
+                        ++kept;
+                    }
+                wc_v.resize(kept);
+                wc_t.resize(kept);
+            }
+        }
+        for (size_t ci = 0; ci < wc_v.size(); ++ci)
+        {
+            remap[wc_v[ci]] = wc_t[ci];
             ++welded;
         }
+        wc_v.clear();
+        wc_t.clear();
         if (!welded)
             break;
         size_t w2 = 0;
@@ -7386,6 +7608,8 @@ static void weld_slivers(DMesh* out, float sp)
         }
         T.resize(w2);
     }
+    if (wwctx)
+        tape_ctx_free(wwctx);
 }
 
 /*  Coplanar sliver flip (the razor class, round 2, 2026-07-17):
@@ -7851,12 +8075,204 @@ static void repair_winding(const Deck* deck, DMesh* out)
                 ++flipped;
             }
     }
-    if (flipped && (getenv("STIBIUM_DMESH_TIME") ||
-                    getenv("STIBIUM_DMESH_CHIP_DEBUG")))
-        fprintf(stderr, "WINDING: %llu facets flipped across "
-                "%llu components\n",
+    /*  Local-majority singleton flip (2026-07-18): weld-minted
+     *  reversed facets are scattered singletons whose every
+     *  2-incident edge is traversed the SAME direction as its
+     *  partner (prusa's facets_reversed).  A facet unanimously
+     *  opposed by its partners is the odd one out - flip it.
+     *  Strictly reduces incoherent edges; a few passes settle.  */
+    uint64_t maj_flips = 0;
+    for (int pass = 0; pass < 6; ++pass)
+    {
+        uint64_t pf = 0;
+        for (uint32_t t = 0; t < nt; ++t)
+        {
+            int bad = 0, clean = 0;
+            for (int e = 0; e < 3; ++e)
+            {
+                const uint32_t a = T[3*t + e],
+                               b = T[3*t + (e + 1) % 3];
+                const uint64_t k = ekey(a, b);
+                if (ecount[k] != 2)
+                    continue;
+                const auto& pr = einc[k];
+                const uint32_t u = pr[0] == t ? pr[1] : pr[0];
+                ++clean;
+                if (traverses(t, a, b) == traverses(u, a, b))
+                    ++bad;
+            }
+            if (clean >= 2 && bad == clean)
+            {
+                flip[t] ^= 1;
+                std::swap(out->tris[3*t+1], out->tris[3*t+2]);
+                ++pf;
+            }
+        }
+        maj_flips += pf;
+        if (!pf)
+            break;
+    }
+    if ((flipped || maj_flips) &&
+        (getenv("STIBIUM_DMESH_TIME") ||
+         getenv("STIBIUM_DMESH_CHIP_DEBUG")))
+        fprintf(stderr, "WINDING: %llu component flips, %llu "
+                "majority flips\n",
                 (unsigned long long)flipped,
-                (unsigned long long)comps);
+                (unsigned long long)maj_flips);
+}
+
+/*  Edge-pinch split (MARATHON 2 Tier A cure 2, the "0
+ *  auto-repairs" finish line): the bino autopsy proved the
+ *  residual prusa opens are NOT holes - they are 318 REAL pinch
+ *  seams (4- and 6-incident edges, net winding 0) where thin
+ *  features self-contact.  Slicer manifold builders choke on
+ *  them.  Resolution: treat any edge with > 2 incident facets as
+ *  a BARRIER in vertex-fan connectivity; a vertex whose fan then
+ *  decomposes into multiple components gets one coincident copy
+ *  per extra component (the manifold pass's own semantics,
+ *  applied at the tail where seal cannot re-fuse them - seal
+ *  runs BEFORE this pass by construction).  Geometry is
+ *  byte-identical; sheets become independently 2-manifold.
+ *  STIBIUM_DMESH_PINCHSPLIT=0 disables.  */
+static void split_edge_pinches(DMesh* out, float sp)
+{
+    /*  DEFAULT OFF (2026-07-18 referee verdict): coincident
+     *  copies zero the mesher's index-nm counter but make
+     *  prusa's exact-position welder WORSE (screws manifold
+     *  yes -> no, 0 -> 68 open) - slicers re-fuse the copies and
+     *  their repair walk then trips on the re-found pinches.
+     *  Opt-in until the seam-consistent epsilon-separation
+     *  design lands (sheet labels propagated along pinch
+     *  CURVES; the per-vertex nudge opened 2,198 geometric
+     *  edges - watertight is law).  */
+    static const char* env = getenv("STIBIUM_DMESH_PINCHSPLIT");
+    if (!env || atoi(env) == 0)
+        return;
+    /*  Epsilon-separation is DISABLED pending seam-consistent
+     *  sheet labeling (measured 2026-07-18: nudged copies improve
+     *  prusa 292 -> 134 but per-vertex-independent components can
+     *  disagree between a seam edge's endpoints - self-contacting
+     *  sheets reconnect through the far fan - opening 2,198
+     *  geometric edges.  WATERTIGHT IS LAW.)  Coincident copies
+     *  still zero the mesher's own nm counter and improve prusa
+     *  336 -> 292; full slicer-manifold needs sheet labels
+     *  propagated along pinch CURVES, queued in MESH-WAR.  */
+    const float nudge = 0.f * sp;
+    std::vector<uint32_t>& T = out->tris;
+    const auto ekey = [](uint32_t a, uint32_t b) {
+        return (uint64_t(std::min(a, b)) << 32) | std::max(a, b);
+    };
+    uint64_t total_split = 0;
+    for (int round = 0; round < 4; ++round)
+    {
+        const size_t nv = out->verts.size() / 3;
+        std::unordered_map<uint64_t, uint32_t> ecount;
+        ecount.reserve(T.size());
+        for (size_t t = 0; t < T.size(); t += 3)
+            for (int e = 0; e < 3; ++e)
+                ++ecount[ekey(T[t + e], T[t + (e + 1) % 3])];
+        std::vector<std::vector<uint32_t>> inc(nv);
+        for (uint32_t t = 0; t < T.size(); t += 3)
+            for (int e = 0; e < 3; ++e)
+                inc[T[t + e]].push_back(t);
+        uint64_t split = 0;
+        for (size_t v = 0; v < nv; ++v)
+        {
+            const auto& fan = inc[v];
+            if (fan.size() < 2)
+                continue;
+            /*  Union facets sharing a CLEAN (2-incident) edge
+             *  at v.  */
+            int ncomp = 0;
+            std::vector<int> parent(fan.size());
+            for (size_t i = 0; i < fan.size(); ++i)
+                parent[i] = int(i);
+            std::function<int(int)> find = [&](int x) {
+                while (parent[x] != x)
+                    x = parent[x] = parent[parent[x]];
+                return x;
+            };
+            std::unordered_map<uint64_t,
+                    std::vector<size_t>> at_v;
+            for (size_t i = 0; i < fan.size(); ++i)
+            {
+                const uint32_t t = fan[i];
+                for (int e = 0; e < 3; ++e)
+                {
+                    const uint32_t a = T[t + e],
+                                   b = T[t + (e + 1) % 3];
+                    if (a != v && b != v)
+                        continue;
+                    const uint64_t k = ekey(a, b);
+                    if (ecount[k] == 2)
+                        at_v[k].push_back(i);
+                }
+            }
+            for (const auto& [k, lst] : at_v)
+                for (size_t j = 1; j < lst.size(); ++j)
+                    parent[find(int(lst[0]))] =
+                            find(int(lst[j]));
+            std::unordered_map<int, int> roots;
+            for (size_t i = 0; i < fan.size(); ++i)
+            {
+                const int r = find(int(i));
+                if (!roots.count(r))
+                    roots[r] = ncomp++;
+            }
+            if (ncomp <= 1)
+                continue;
+            /*  Component 0 keeps v; each further component gets
+             *  a coincident copy.  */
+            std::vector<uint32_t> copy_of(ncomp, uint32_t(v));
+            /*  Mean facet normal per component (for the nudge).  */
+            std::vector<std::array<float, 3>> cn(ncomp,
+                    { 0, 0, 0 });
+            for (size_t i = 0; i < fan.size(); ++i)
+            {
+                const int c2 = roots[find(int(i))];
+                const uint32_t t = fan[i];
+                const uint32_t a = T[t], b = T[t+1], c3 = T[t+2];
+                const float ux = out->verts[3*b]-out->verts[3*a],
+                        uy = out->verts[3*b+1]-out->verts[3*a+1],
+                        uz = out->verts[3*b+2]-out->verts[3*a+2];
+                const float wx = out->verts[3*c3]-out->verts[3*a],
+                        wy = out->verts[3*c3+1]-out->verts[3*a+1],
+                        wz = out->verts[3*c3+2]-out->verts[3*a+2];
+                cn[c2][0] += uy*wz - uz*wy;
+                cn[c2][1] += uz*wx - ux*wz;
+                cn[c2][2] += ux*wy - uy*wx;
+            }
+            for (int c2 = 1; c2 < ncomp; ++c2)
+            {
+                copy_of[c2] = uint32_t(out->verts.size() / 3);
+                float nx = cn[c2][0], ny = cn[c2][1],
+                      nz = cn[c2][2];
+                const float nl = sqrtf(nx*nx + ny*ny + nz*nz);
+                const float f2 = nl > 0 ? nudge / nl : 0;
+                out->verts.push_back(out->verts[3*v] + nx*f2);
+                out->verts.push_back(out->verts[3*v+1] + ny*f2);
+                out->verts.push_back(out->verts[3*v+2] + nz*f2);
+                ++split;
+            }
+            for (size_t i = 0; i < fan.size(); ++i)
+            {
+                const int c2 = roots[find(int(i))];
+                if (c2 == 0)
+                    continue;
+                const uint32_t t = fan[i];
+                for (int e = 0; e < 3; ++e)
+                    if (T[t + e] == v)
+                        T[t + e] = copy_of[c2];
+            }
+        }
+        total_split += split;
+        if (!split)
+            break;
+    }
+    if (total_split && (getenv("STIBIUM_DMESH_TIME") ||
+                        getenv("STIBIUM_DMESH_CHIP_DEBUG")))
+        fprintf(stderr, "PINCHSPLIT: %llu sheet copies minted at "
+                "pinch seams\n", (unsigned long long)total_split);
 }
 
 static void recount_quality(DMesh* out)
@@ -8158,17 +8574,18 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                 const char* df_env =
                         getenv("STIBIUM_DMESH_DECFLATS");
                 if (!ws_env || atoi(ws_env) != 0)
-                    weld_slivers(out, soup.spacing);
+                    weld_slivers(deck, out, soup.spacing);
                 pt.sub("weld_slivers");
                 if (!fs_env || atoi(fs_env) != 0)
                     flip_slivers(out, soup.spacing);
                 pt.sub("flip_slivers");
                 if (!df_env || atoi(df_env) != 0)
-                    decimate_flats(out);
+                    decimate_flats(deck, out);
                 pt.sub("decimate_flats");
                 seal_seams(out, soup.spacing);
                 repair_winding(deck, out);
-                pt.sub("seal+winding");
+                split_edge_pinches(out, soup.spacing);
+                pt.sub("seal+winding+pinchsplit");
                 recount_quality(out);
                 pt.sub("recount_quality");
                 pt.mark("fix stages");
@@ -8277,17 +8694,18 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
             const char* df_env =
                     getenv("STIBIUM_DMESH_DECFLATS");
             if (!ws_env || atoi(ws_env) != 0)
-                weld_slivers(out, r.X[1] - r.X[0]);
+                weld_slivers(deck, out, r.X[1] - r.X[0]);
             fixpt.sub("weld_slivers");
             if (!fs_env || atoi(fs_env) != 0)
                 flip_slivers(out, r.X[1] - r.X[0]);
             fixpt.sub("flip_slivers");
             if (!df_env || atoi(df_env) != 0)
-                decimate_flats(out);
+                decimate_flats(deck, out);
             fixpt.sub("decimate_flats");
             seal_seams(out, r.X[1] - r.X[0]);
             repair_winding(deck, out);
-            fixpt.sub("seal+winding");
+            split_edge_pinches(out, r.X[1] - r.X[0]);
+            fixpt.sub("seal+winding+pinchsplit");
             recount_quality(out);
             fixpt.sub("recount_quality");
             fixpt.mark("fix stages");
