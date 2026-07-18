@@ -44,6 +44,9 @@ referee.  Update this table with EVERY rev handed over for review.
 | v24 | live-pair trigger | 285K | 0 | 183 | 3169 | 0.238 | no regression, +6%; trigger mostly overlaps existing coverage here |
 | v25 | + trace local step (pre snap fix) | 281K | 0 | 148 | 12042 | 0.577 | REGRESSION: 4x law feeding global snap tents = folds |
 | v26 | + snap tents at local pitch | 278K | 0 | 148 | 12042 | **0.092** | BEST EVER by 2x - at the 0.1mm product bar; the fix pair is load-bearing together |
+| p1-base | HEAD 2026-07-17 night (decimation era) | 132K | 0 | 243 | 12042 | 0.092 | perf-round control; 170.6 s, insert 97.1 s (56%) |
+| p1-live128 | LIVE=128 (census: median live 91, bar 16 = blanket) | 130K | 0 | 260 | 12001 | - | 130.5 s; flood+cores rebuild 901 @2 from 374 flags - only 1.3x |
+| p2-thin1 | THIN=1 sample thinning (witness band+shell only) | 132K | 0 | 266 | 12042 | 0.309* | **56.3 s - 3x**; 93% of witnesses dropped; *one step-corner chip 0.092 -> 0.309 at (-8.31, 57.37, 74.09), cause NON-local (site witnesses all kept; shell 1/2/4 byte-identical chip; refinement converges clean, 31K chord separators vs lattice placement) |
 
 ## Perf round ledger (2026-07-17 evening, Nate's B-then-A vote)
 
@@ -63,6 +66,15 @@ referee.  Update this table with EVERY rev handed over for review.
   adjacent class) - QEM indifferent to them, next sweep's target.
 - Multicore verdict: insert is CCDT-sequential (split = research);
   eval-side threading = the day-sized item; cores wait on CGAL.
+
+## Screws referee, perf round (2026-07-17 night)
+
+v20-class quality NEEDS the level-3 grant opt-in
+(STIBIUM_DMESH_AUTODENSE_MAX=3): bare HEAD = 5.6K tris (two density
+tiers below the v15-v20 loop Nate's eyes calibrated on).  At MAX=3:
+base 9,016 tris / 12.1 s; THIN=1 9,088 / 6.2 s; both 0.177 sp worst,
+0 open, tilt identical (2.84% area).  THIN referee'd clean here.
+QUEUE: referee level-3 grant into the default (it keeps winning).
 
 ## Open questions the next rev must answer
 

@@ -83,6 +83,12 @@ struct DSoup
      *  near-tangent assembly contacts fuse instead of pinching.  */
     uint64_t welded = 0;
 
+    /*  Sample thinning (STIBIUM_DMESH_THIN, shell rings; -1 =
+     *  legacy dense lattice): lattice witnesses dropped for being
+     *  neither sign-change band, shell, block corner, nor exact
+     *  zero.  The DT never sees them.  */
+    uint64_t thinned = 0;
+
     /*  QEF-placed sharp-feature points appended to `surface`.  */
     uint64_t feature_points = 0;
     /*  Shallow-channel tracer seeds (STIBIUM_DMESH_SHALLOW): QEF

@@ -39,6 +39,8 @@ referee + repair counters), _CENSUS[=path] (leaf populations),
 _FPROBE="x,y,z;..." (field oracle at points - ends is-it-real
 arguments), _PROBE="x,y,z" (constraint forensics), _SEG_DEBUG
 (referee rejects), _NM_DEBUG (pinch anatomy), _TRACE_DEBUG,
+_THIN_DEBUG="x,y,z,r" (witness keep/drop classes near a point),
+REFINE line under _TIME (rounds/inserts/leftover i/o edges),
 _DUMP_CHAINS=x.stl (chains as tube STL), _STAGES=prefix
 (formation film).  Analysis scripts (scratchpad; rebuild from
 here if lost - all ~50-100 lines numpy): stlview.py (z-buffer
@@ -78,15 +80,26 @@ QEM/decimation shrink the OUTPUT, not the runtime - the curse is
 upstream point count.
 
 Battle plan (each is A/B-able on bino in minutes, referee-gated):
-- P1 LIVE-BAR CALIBRATION (hours, cheap, big): census the live
-  distribution per referee; try LIVE=32/48; or restrict level 2
-  to flagged-component CORES (mirror the residual trigger's
-  flood/core split).  Expect large point-count refund at held
-  quality (Nate's eyes).
-- P2 SAMPLE THINNING (day, medium risk, biggest lever): shell-
-  only sign witnesses (drop interior samples not lattice-adjacent
-  to a sign change; keep one-ring shell).  Attacks insert time
-  AND RAM.  Gate on open-edge referee everywhere.
+- P1 LIVE-BAR CALIBRATION - RUN 2026-07-17 night.  Census: bino
+  live median 91 (bench 4-5; live is partly CSG-clause count, not
+  pure crowding), so bar 16 = blanket by construction.  LIVE=96
+  DEAD (flood+cores rebuild the blanket, 0 refund).  LIVE=128:
+  1.3x only, and with THIN in place the blanket's cost mostly
+  vanishes - VERDICT: keep LIVE=16, the witnesses were the cost,
+  not the surface sampling.
+- P2 SAMPLE THINNING - LANDED 2026-07-17 night, default OFF
+  (STIBIUM_DMESH_THIN=rings, -1 off): band + shell + block
+  corners + exact-zeros enter the DT, rest dropped (bino: 93%).
+  Bino 170.6 -> 56.3 s (insert 97 -> 8 s), screws@MAX3 12.1 ->
+  6.2 s; tris/constraints/watertight/tilt all held on both.
+  ONE OPEN DEFECT gates the default: bino worst chip 0.092 ->
+  0.309 sp at ONE step corner (-8.31, 57.37, 74.09).  Cause
+  NON-local: site witnesses all KEPT (THINDBG), shell 1/2/4
+  byte-identical chip, refinement converges (1 round, 0 leftover
+  i/o edges).  Structural shift: ~31K surface separators become
+  refinement chord-placed instead of lattice-placed.  Next:
+  baseline REFINE count, then either cure the one-site class or
+  referee the tradeoff (Nate's eyes on the STL pair).
 - P3 STRIPS WITHOUT RE-RUN (half-day): promote from the pass-2
   soup incrementally instead of full stage-A round 2.
 - P4 INCREMENTAL REFINEMENT (half-day, medium): only re-scan
@@ -163,3 +176,13 @@ Battle plan (each is A/B-able on bino in minutes, referee-gated):
   graze-vs-feature oracle first.  Opt-in, parked.
 - Fitted-geometry forensics (my ellipse models): lied twice in
   one day.  The FIELD is the only geometry oracle - FPROBE first.
+- LIVE bar raise (96): flood+cores rebuild the blanket from the
+  residual trigger's own flags - raising the live bar cannot
+  shrink coverage while core dilation spreads every @2 one ring.
+  128 refunds 25% but THIN makes the point moot (witnesses, not
+  lattice coverage, were the cost).
+- Thinning-chip local theories, four buried in one night: local
+  witness drop (THINDBG: all kept), shell thickness (1/2/4
+  byte-identical), refinement stall, round cap (converges 1
+  round, 0 leftover).  The chip is a NON-local tessellation
+  shift.  Instruments, not theories.
