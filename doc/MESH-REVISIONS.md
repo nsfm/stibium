@@ -46,7 +46,10 @@ referee.  Update this table with EVERY rev handed over for review.
 | v26 | + snap tents at local pitch | 278K | 0 | 148 | 12042 | **0.092** | BEST EVER by 2x - at the 0.1mm product bar; the fix pair is load-bearing together |
 | p1-base | HEAD 2026-07-17 night (decimation era) | 132K | 0 | 243 | 12042 | 0.092 | perf-round control; 170.6 s, insert 97.1 s (56%) |
 | p1-live128 | LIVE=128 (census: median live 91, bar 16 = blanket) | 130K | 0 | 260 | 12001 | - | 130.5 s; flood+cores rebuild 901 @2 from 374 flags - only 1.3x |
-| p2-thin1 | THIN=1 sample thinning (witness band+shell only) | 132K | 0 | 266 | 12042 | 0.309* | **56.3 s - 3x**; 93% of witnesses dropped; *one step-corner chip 0.092 -> 0.309 at (-8.31, 57.37, 74.09), cause NON-local (site witnesses all kept; shell 1/2/4 byte-identical chip; refinement converges clean, 31K chord separators vs lattice placement) |
+| p2-thin1 | THIN=1 sample thinning (witness band+shell only) | 132K | 0 | 266 | 12042 | 0.309* | **56.3 s - 3x**; 93% of witnesses dropped; *chip minted by an unrefereed SNAP TENT (6 theories buried; see p3) |
+| p3-thin-gated | + snap damage/churn referees (5191c1ed) | 135K | 0 | 354 | 12042 | 0.170 | 58.7 s; 187 damage + 2,868 churn tents refused; Nate: identical to p3-base-gated |
+| p3-base-gated | gates on the default path (no THIN) | 135K | 0 | 352 | 12042 | 0.097 | 170 s; gates cost baseline nothing (0.092 -> 0.097); nm rise = churn tents were papering pinches (geometric 0-open holds) |
+| r2-thin-gated | resolution 2 + THIN + gates | 427K | 0 | 1201 | 24675 | 0.110(r2 sp) | **198 s / 1.77 GB** - r2 was impossible pre-THIN (15.4M witnesses dropped, 928K kept; the untinned DT would take 16M points).  New profile: extract+repair 74 s, insert points 52 s now lead |
 
 ## Perf round ledger (2026-07-17 evening, Nate's B-then-A vote)
 

@@ -47,19 +47,33 @@ here if lost - all ~50-100 lines numpy): stlview.py (z-buffer
 region render), roughness.py (dihedral clusters), openedges_
 exact.py (independent watertight check), teeth/tilt/densdiff
 (anatomy censuses - tilt.py is the screws error-by-definition
-benchmark).  Reviews: doc/reviews/2026-07-17-*.md (correctness /
-performance / architecture / quadric).
+benchmark), fightpix.py (z-fighting pixel census).  All in
+tools/ in-repo.  Reviews: doc/reviews/2026-07-17-*.md
+(correctness / performance / architecture / quadric).
 
 Knob roster: ~26 STIBIUM_DMESH_* - defaults are all measured-in;
 see the architecture review for the product/frozen/dead tiers.
 
-## CURRENT STATE (2026-07-17 night)
+## CURRENT STATE (2026-07-18 early am)
 
 Best zeiss: autod31 (727K tris / 0 open / 0.465* / 42 min pre-
-femto-guard; next run projected ~25 min).  Best bino: v28-v32
-lineage (132K tris / 0.092 sp / 0 open) - AT the product bar.
-QEM dial verdict: STIBIUM_DMESH_SIMPLIFY=0.01 acceptable
-(screws 9,016 -> 1,686), 0.02 too far, 0.05 = octagon bores.
+femto-guard).  With THIN + gates the zeiss projection is SINGLE-
+DIGIT minutes - the validation run is the next big dish.
+Bino: THIN+gates 59 s (Nate: identical to base-gated), r2 in
+198 s / 1.77 GB (impossible pre-THIN).  Screws v20-class needs
+MAX=3 (queue: referee level-3 into the default).  THIN default
+still OFF pending Nate's default call.  QEM dial verdict:
+STIBIUM_DMESH_SIMPLIFY=0.01 acceptable, 0.02 too far, 0.05 =
+octagon bores.  Analysis scripts live IN-REPO at tools/
+(Nate's call, 2026-07-18): fightpix.py (z-fighting pixel
+census - THE separator for coincident-geometry classes),
+razors/overlaps/sheets/tilt/openedges_exact/peak.py.
+R2 economics (bino, measured): time x3.4, tris x3.2, RSS
+1.77 GB; every sp-scaled defect HALVES in absolute size -
+Nate on r2 bino: "absolutely fucking beautiful", only the
+fold/scar class survives (resolution-immune, coincident).
+Zeiss r2 projection ~30-40 min / ~8-10 GB - the post-fold-cure
+validation dish.
 
 ## FRONT 1: PERFORMANCE (Nate's vote - before the next big run)
 
@@ -128,17 +142,25 @@ Battle plan (each is A/B-able on bino in minutes, referee-gated):
   instrument refusal counters per gate, then design from data.
   They radiate through QEM as scratches - nipping them helps
   every metric (Nate's read, shared).
-  SCAR-HUNT LEDGER (2026-07-17 night): Nate sees razor-line
-  z-fighting scars on THIN screws that base lacks; view-angle
-  flashing, print-harmless.  Snap EXONERATED (nosnap + gated
-  both still scarred).  Static censuses DON'T separate scarred
-  from clean: altitude razors (103 vs 101), dup-tri (67 vs 60,
-  base MORE), fat-edge, fold180, near-sheet pairs - all read
-  equal.  Whatever the renderer sees, adjacency + altitude
-  metrics are blind to it.  NEXT INSTRUMENT: fighting-pixel
-  z-buffer census (2 same-facing tris within depth-eps at the
-  front surface -> scar map with COORDINATES), or one scar
-  coordinate from Nate's meshlab wireframe -> FPROBE.
+  SCAR CASE CLOSED (2026-07-17 night, fightpix.py z-buffer
+  census - the instrument that finally separated what Nate's
+  renderer sees): EXTRACTION MINTS ~3,600 INVERTED coplanar
+  facets on lattice-aligned flats (screws +z, base and THIN
+  IDENTICALLY - anatomy at (3.31,-13.30,67.25): n=(0,0,-1)
+  triangles ON the top face overlapping n=(0,0,+1) ones in
+  area).  decimate_flats is the JANITOR: cleans base 3,604 ->
+  278 (92%) but THIN only 3,589 -> 915 (75%) - the scar
+  difference is CLEANUP EFFICIENCY, not minting.  Snap
+  exonerated; THIN exonerated of minting.  This is likely
+  bino's 992-razor class too ("solution is elsewhere" - Nate,
+  correct).  CURE DESIGN (next battle): the field knows
+  orientation - a facet whose normal disagrees with the field
+  gradient at its centroid is inverted BY DEFINITION.
+  Gradient-vs-normal detector -> targeted fold removal (or fix
+  extraction's degenerate-flat facet orientation at the
+  source).  Static adjacency/altitude censuses are BLIND to
+  this class (fold180 reads 211 vs 234 while fightpix reads
+  278 vs 915) - overlapping folds rarely share edges.
 - CLOSE-PERIMETER can of worms (bino): air-chords + pockmarks on
   close-together perimeters.  The strips/level-3/weld composite
   class - reopen AFTER perf (Nate's call).  Assets: NM_DEBUG
