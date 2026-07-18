@@ -27,6 +27,7 @@ referee.  Update this table with EVERY rev handed over for review.
 | autod28 | c0f0aa4f | DC bias suppressed in crease band (air-chord fix) | 1.13M | 0 | 175 | 16.0K | 0.294 | "cleaned up a huge swathe of open-air chords... NEW BASELINE" (Nate); autod23 keeps narrow edge on fine detail + close geometry |
 | autod29 | 8eb34437 | live-pair crowding trigger (density campaign 1/3) | 1.45M | 0 | 156 | 16.0K | 0.277 | screws-class density model-wide; screws extract: "MUCH cleaner" (r2-grade awaits law delivery); tangle armor held at 7,194 level-2 leaves |
 | autod31 | c0de2ff6 | law delivery + local snap + flat-fan decimation (new defaults) | 727K | 0 | 152 | 27.0K | 0.465* | HALF of autod29, under 1M for the first time; 16.0 GB peak / 42 min measured; *depth at eyepiece collar needs Nate's eyes (site has flapped before) |
+| autod32 | (validation) | THIN default + snap gates + fold fix + P5 threading + stall exit + femto guard | 540K | 0 | 294 | 27.0K | 0.364 | **13.1 min / 3.31 GB** (was 42 min / 16 GB); constraints identical to autod31 (law preserved); retreat ran 3 attempts (2 extra B+C passes ~6 min - the new biggest wall item); worst site (4.15, 15.94, 89.01) awaits Nate's eyes |
 
 ## Bino referee (examples/torture/zeiss_id02_bino.sb, fast loop)
 
