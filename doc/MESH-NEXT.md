@@ -1,5 +1,26 @@
 # The meshing campaign: adaptive Delaunay on sound intervals
 
+## >>> PERF/MEMORY CAMPAIGN - MOVED UP (2026-07-17 evening, Nate) <<<
+
+Two concurrent zeiss exports at 20+ GB RSS each locked Nate's
+laptop for an hour (reboot).  HARD RULE: one full-model export at
+a time, forever.  Peak-RSS now a referee metric (peak.py wraps
+runs).  Measured pie for the optimization round (autod31-era, r1):
+- CGAL insert samples 675 s + insert points 215 s = ~2/3 of wall.
+  Levers: Parallel_tag/TBB spatial-lock insertion (does CCDT
+  tolerate it?), feed fewer points (flat-leaf sample thinning -
+  the decimation lesson applied UPSTREAM), batch construction.
+- sample+bisect+QEF 153 s (two full drill-down passes; pass 2
+  re-samples everything - incremental re-sample of flagged
+  leaves only is the design item).  Thread the eval side
+  (TAPE-NEXT item).
+- RAM ~20 GB: the DT itself dominates (millions of points, ~6.5x
+  cells).  Cheap first win: FREE pass-1's soup before pass 2
+  samples (both currently alive through the drill-down).  Then
+  sample thinning; then investigate CCDT constraint-hierarchy
+  overhead.
+- segment referee 37 s (grew linearly with 4x law - healthy).
+
 ## >>> MORNING VERDICT + STRIPS DIAL (2026-07-17/18, fa454dc0) <<<
 
 NATE'S EYES on autod23 (the shallow-channel reference): "cleanest
