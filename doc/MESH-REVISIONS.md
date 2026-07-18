@@ -28,6 +28,7 @@ referee.  Update this table with EVERY rev handed over for review.
 | autod29 | 8eb34437 | live-pair crowding trigger (density campaign 1/3) | 1.45M | 0 | 156 | 16.0K | 0.277 | screws-class density model-wide; screws extract: "MUCH cleaner" (r2-grade awaits law delivery); tangle armor held at 7,194 level-2 leaves |
 | autod31 | c0de2ff6 | law delivery + local snap + flat-fan decimation (new defaults) | 727K | 0 | 152 | 27.0K | 0.465* | HALF of autod29, under 1M for the first time; 16.0 GB peak / 42 min measured; *depth at eyepiece collar needs Nate's eyes (site has flapped before) |
 | autod32 | (validation) | THIN default + snap gates + fold fix + P5 threading + stall exit + femto guard | 540K | 0 | 294 | 27.0K | 0.364 | **13.1 min / 3.31 GB** (was 42 min / 16 GB); constraints identical to autod31 (law preserved); retreat ran 3 attempts (2 extra B+C passes ~6 min - the new biggest wall item); worst site (4.15, 15.94, 89.01) awaits Nate's eyes |
+| autod33 | (tier A, r2) | BEAUTIFUL preset validation: hygiene + tier-A stack at resolution 2 | 1.61M | 0 | 1643 | 54.2K | n/a* | **26.7 min / 10.78 GB** at r2 (Nate's app run: 29 min); bit-exact welder 0/0; prusa 1,488 open (pinch-seam class at r2 scale) + 18 reversed; constrained doubled vs r1 (law scales); *depth instrument omitted - rerun with _CHIP_DEBUG when it matters |
 
 ## Bino referee (examples/torture/zeiss_id02_bino.sb, fast loop)
 
