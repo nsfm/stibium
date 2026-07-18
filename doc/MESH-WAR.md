@@ -120,11 +120,16 @@ merge), surface-insert spatial sort + hints, repair stall exit
 r1 bino 49 s (170.6 at the night's start = 3.5x); depths/water-
 tightness identical, screws tilt 2.84 -> 3.12% (stall trade, eye
 referee pending).  RSS 1.78 -> 1.93 GB (worker transients).
-REMAINING ROCKS at r2, now CGAL-dominated: extract+repair 54 s
-(oracle + chip-detect eval batches still SERIAL - same range-
-threading pattern applies, next increment), insert points 41 s
-(CCDT bookkeeping - P6 research), insert samples 27 s, tracer+
-referee 26 s (chain/segment-parallel candidates).
+INCREMENT 2 (same day): eval_points_mt - range-parallel base-tape
+batch evals, MIN_VOLUME-aligned (BIT-identical output, verified),
+at the 14 big sites.  r2 bino extract+repair 54 -> 32 s, total
+165 -> 141 s.  REMAINING ROCKS, now genuinely CGAL-bound:
+insert points 45 s (CCDT bookkeeping - P6 research), insert
+samples 28 s, tracer 18 s (march batches too small for mt;
+chain-parallel is the shape), refinement 15 s, referee 9 s
+(non-eval dominated).  STALL knob surfaced per Nate (default 1,
+=2 restores patience; tilt 2.84 -> 3.12% trade accepted
+"sub-slicing scale").
 
 Battle plan (each is A/B-able on bino in minutes, referee-gated):
 - P1 LIVE-BAR CALIBRATION - RUN 2026-07-17 night.  Census: bino
