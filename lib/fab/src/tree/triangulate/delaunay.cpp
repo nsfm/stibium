@@ -5447,6 +5447,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         const bool snap_on = !snap_env || atoi(snap_env) != 0;
         uint64_t snapped = 0, snap_skipped = 0;
         uint64_t skip_far = 0, skip_hits = 0, snap_surf = 0;
+        uint64_t skip_damage = 0, skip_churn = 0;
         /*  Self-feeding stash (zeiss run, 2026-07-15): when the
          *  repair loop exhausts MAX_REPAIR (real models churn), the
          *  per-round stash is stale and was cleared - but the chips
@@ -5784,6 +5785,119 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     if (touched.count(hit[0].first) ||
                         touched.count(hit[1].first))
                         continue;         // next wave
+                    /*  Tent damage referee (2026-07-17 night, the
+                     *  thinning autopsy): a tent whose apex
+                     *  attributes to the wrong feature at a step
+                     *  corner BUILDS a divot deeper than the chip
+                     *  it cures (bino: one tent minted 0.309 sp
+                     *  from a sub-0.242 site; the 2.5x attribution
+                     *  gate cannot see it - the wrong crease was
+                     *  close enough).  Same law as everything that
+                     *  survived here: measure the damage.  Probe
+                     *  the four new edges' midpoints; if any reads
+                     *  a feature deeper than the chip being cured
+                     *  (plus a noise floor), refuse the tent - the
+                     *  chip stays at its known bounded depth.  */
+                    {
+                        const uint32_t w0 =
+                                out->tris[3*hit[0].first +
+                                          (hit[0].second+2) % 3];
+                        const uint32_t w1 =
+                                out->tris[3*hit[1].first +
+                                          (hit[1].second+2) % 3];
+                        const float* C2 = &out->verts[3*w0];
+                        const float* D2 = &out->verts[3*w1];
+                        /*  Churn gate (Nate's eyes, 2026-07-17
+                         *  night: "razor-thin z-fighting flat-
+                         *  surface scars", THIN screws): a tent
+                         *  whose apex barely leaves the plane of
+                         *  the triangles it splits adds no
+                         *  geometry - just a sliver bump one
+                         *  depth-quantum above a flat, flickering
+                         *  in the render.  The FIELD cannot see
+                         *  this class (|f| ~ 0 either way); the
+                         *  plane can.  Refuse tents under 0.02 sp
+                         *  of tent height over BOTH split
+                         *  triangles.  */
+                        const auto plane_h = [&](const float* P,
+                                                 const float* Q,
+                                                 const float* R) {
+                            const float ux = Q[0]-P[0],
+                                    uy = Q[1]-P[1], uz = Q[2]-P[2];
+                            const float vx2 = R[0]-P[0],
+                                    vy2 = R[1]-P[1],
+                                    vz2 = R[2]-P[2];
+                            float nx = uy*vz2 - uz*vy2;
+                            float ny = uz*vx2 - ux*vz2;
+                            float nz = ux*vy2 - uy*vx2;
+                            const float nl = sqrtf(nx*nx + ny*ny +
+                                                   nz*nz);
+                            if (!(nl > 0))
+                                return 0.f;
+                            return fabsf(((px-P[0])*nx +
+                                          (py-P[1])*ny +
+                                          (pz-P[2])*nz) / nl);
+                        };
+                        const float th = std::max(
+                                plane_h(A2, B2, C2),
+                                plane_h(A2, B2, D2));
+                        if (th < 0.02f * soup.spacing)
+                        {
+                            done[s] = 1;
+                            ++snap_skipped;
+                            ++skip_churn;
+                            continue;
+                        }
+                        const float ref[4][3] = {
+                            { (A2[0]+px)*0.5f, (A2[1]+py)*0.5f,
+                              (A2[2]+pz)*0.5f },
+                            { (B2[0]+px)*0.5f, (B2[1]+py)*0.5f,
+                              (B2[2]+pz)*0.5f },
+                            { (C2[0]+px)*0.5f, (C2[1]+py)*0.5f,
+                              (C2[2]+pz)*0.5f },
+                            { (D2[0]+px)*0.5f, (D2[1]+py)*0.5f,
+                              (D2[2]+pz)*0.5f } };
+                        const float rh = 0.01f * soup.spacing;
+                        std::vector<float> rx(28), ry(28), rz(28),
+                                rv;
+                        for (int q = 0; q < 4; ++q)
+                            for (int o = 0; o < 7; ++o)
+                            {
+                                rx[q*7+o] = ref[q][0];
+                                ry[q*7+o] = ref[q][1];
+                                rz[q*7+o] = ref[q][2];
+                            }
+                        for (int q = 0; q < 4; ++q)
+                        {
+                            rx[q*7+1] += rh;  rx[q*7+2] -= rh;
+                            ry[q*7+3] += rh;  ry[q*7+4] -= rh;
+                            rz[q*7+5] += rh;  rz[q*7+6] -= rh;
+                        }
+                        eval_points(deck_base(deck), ctx, rx, ry,
+                                    rz, rv);
+                        const float bar = std::max(snap_d[s],
+                                0.02f * soup.spacing);
+                        bool damage = false;
+                        for (int q = 0; q < 4 && !damage; ++q)
+                        {
+                            const float f = rv[q*7];
+                            const float gx = (rv[q*7+1]-rv[q*7+2]);
+                            const float gy = (rv[q*7+3]-rv[q*7+4]);
+                            const float gz = (rv[q*7+5]-rv[q*7+6]);
+                            const float gl = sqrtf(gx*gx + gy*gy +
+                                    gz*gz) / (2 * rh);
+                            if (std::isfinite(f) && gl > 0 &&
+                                fabsf(f) / gl > bar)
+                                damage = true;
+                        }
+                        if (damage)
+                        {
+                            done[s] = 1;
+                            ++snap_skipped;
+                            ++skip_damage;
+                            continue;
+                        }
+                    }
                     const uint32_t pi =
                             uint32_t(out->verts.size() / 3);
                     out->verts.push_back(px);
@@ -5815,12 +5929,15 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             {
                 fprintf(stderr, "SNAP: %llu chip edges tented "
                         "(%llu onto the surface), %llu skipped "
-                        "(%llu far, %llu hits)\n",
+                        "(%llu far, %llu hits, %llu damage, "
+                        "%llu churn)\n",
                         (unsigned long long)snapped,
                         (unsigned long long)snap_surf,
                         (unsigned long long)snap_skipped,
                         (unsigned long long)skip_far,
-                        (unsigned long long)skip_hits);
+                        (unsigned long long)skip_hits,
+                        (unsigned long long)skip_damage,
+                        (unsigned long long)skip_churn);
                 /*  Where do the UNTRACED chips live?  5-cell bins,
                  *  top clusters - probe targets for the seed-
                  *  coverage hunt.  */
