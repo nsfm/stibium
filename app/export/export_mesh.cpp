@@ -183,10 +183,21 @@ void ExportMeshWorker::async()
     // drop the bar back to its busy animation instead of a full bar.
     progress_total = 0;
 
-    if (_simplify > 0 && indices.size() >= 3 && !halt)
+    /*  QEM on the dmesh path (quadric assessment 2026-07-17):
+     *  STIBIUM_DMESH_SIMPLIFY=<mm> forces the vendored meshopt
+     *  pass on dmesh exports - deviation-bounded, in model
+     *  units.  Nate's standalone experiment (50% off, no visual
+     *  defects, twice) green-lit QEM for this geometry; this
+     *  delivers it from code already in the tree.  Phase 2
+     *  (crease vertex_lock) is designed in doc/reviews/.  */
+    float simplify = _simplify;
+    if (getenv("STIBIUM_EXPORT_DMESH"))
+        if (const char* se = getenv("STIBIUM_DMESH_SIMPLIFY"))
+            simplify = float(atof(se));
+    if (simplify > 0 && indices.size() >= 3 && !halt)
     {
         progress_phase = PHASE_SIMPLIFYING;
-        simplifyMesh(verts, indices);
+        simplifyMesh(simplify, verts, indices);
     }
 
     progress_phase = PHASE_WRITING;
@@ -205,15 +216,16 @@ void ExportMeshWorker::async()
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void ExportMeshWorker::simplifyMesh(std::vector<float>& verts,
+void ExportMeshWorker::simplifyMesh(float deviation,
+                                    std::vector<float>& verts,
                                     std::vector<uint32_t>& indices) const
 {
     const size_t vertex_count = verts.size() / 3;
 
-    // target_error is relative to mesh extent; _simplify is in model units
+    // target_error is relative to mesh extent; deviation is in model units
     const float scale = meshopt_simplifyScale(
             verts.data(), vertex_count, 3 * sizeof(float));
-    const float target_error = scale > 0 ? _simplify / scale : _simplify;
+    const float target_error = scale > 0 ? deviation / scale : deviation;
 
     std::vector<uint32_t> simplified(indices.size());
     const size_t out_index_count = meshopt_simplify(
