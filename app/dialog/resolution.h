@@ -54,11 +54,29 @@ public:
      */
     float getSimplifyDeviation() const;
 
+    /*  Stibnite integration (2026-07-18): mesher choice and the
+     *  curated advanced knobs.  Only meaningful for 3D dialogs;
+     *  2D callers never see the widgets.  */
+    enum Mesher { MESHER_STIBNITE = 0, MESHER_CLASSIC = 1 };
+    int getMesher() const;
+    bool getAutodense() const;
+    int getDensityCap() const;      // 2 (standard) or 3 (high)
+    bool getDecimate() const;
+    bool getSnap() const;
+    int getStallPatience() const;   // 1 (fast) or 2 (patient)
+
 protected slots:
     /*
      *  When a value changes, update pixel / voxel count
      */
     void onValueChanged(int i);
+
+    /*
+     *  Mesher / quality selection changed: swap the dialog between
+     *  Stibnite mode (quality presets, advanced group) and Classic
+     *  mode (voxels-per-unit spin, feature detection).
+     */
+    void onModeChanged();
 
 protected:
     Bounds bounds;
@@ -66,4 +84,5 @@ protected:
     bool deviation_touched=false;
     bool updating_deviation=false;
     const bool z_bounded;
+    bool is_3d=false;
 };

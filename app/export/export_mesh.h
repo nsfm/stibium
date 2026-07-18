@@ -55,4 +55,21 @@ protected:
      *  simplifying the mesh after triangulation; <= 0 disables it.
      */
     float _simplify;
+
+    /*  Stibnite integration (2026-07-18): mesher routing + the
+     *  curated advanced knobs.  The dialog path applies these to
+     *  the process environment before meshing (one export at a
+     *  time is law, so setenv is safe); the headless path leaves
+     *  the environment untouched and env-driven as ever.  */
+    int _mesher = 0;                // 0 Stibnite, 1 Classic
+    bool _from_dialog = false;
+    bool _adv_autodense = true;
+    int _adv_density_cap = 2;
+    bool _adv_decimate = true;
+    bool _adv_snap = true;
+    int _adv_stall = 1;
+
+    /*  Post-export report, filled by async(), shown by run() on
+     *  the GUI thread (empty = nothing to show).  */
+    QString _stats;
 };
