@@ -96,10 +96,20 @@ Battle plan (each is A/B-able on bino in minutes, referee-gated):
   0.309 sp at ONE step corner (-8.31, 57.37, 74.09).  Cause
   NON-local: site witnesses all KEPT (THINDBG), shell 1/2/4
   byte-identical chip, refinement converges (1 round, 0 leftover
-  i/o edges).  Structural shift: ~31K surface separators become
-  refinement chord-placed instead of lattice-placed.  Next:
-  baseline REFINE count, then either cure the one-site class or
-  referee the tradeoff (Nate's eyes on the STL pair).
+  i/o edges), AND separator counts match (31.5K thin vs 31.7K
+  base - the chord-separator theory died too, 5th of the night).
+  CONVICTED: the SNAP PASS minted it POST-repair (both repair
+  loops plateau 0.242 at the same site; snap tents baseline down
+  to 0.092 but one wrong-attribution tent under THIN builds
+  0.309; SNAP=0 kills it; snap also deepened screws 0.125 ->
+  0.177).  CURE LANDED: per-tent referees - DAMAGE (probe the 4
+  new tent edges, refuse tents out-defecting the chip they cure)
+  + CHURN (refuse apexes < 0.02 sp above the split triangles'
+  planes).  Gated results: bino THIN 0.309 -> 0.170 (187 damage
+  + 2,868 churn refused), bino base 0.092 -> 0.097 (held),
+  screws 0.177 -> 0.125.  Cost: index nm rises (243 -> ~352,
+  both paths - churn tents were papering over pinch sites);
+  geometric 0-open holds everywhere.
 - P3 STRIPS WITHOUT RE-RUN (half-day): promote from the pass-2
   soup incrementally instead of full stage-A round 2.
 - P4 INCREMENTAL REFINEMENT (half-day, medium): only re-scan
@@ -118,6 +128,17 @@ Battle plan (each is A/B-able on bino in minutes, referee-gated):
   instrument refusal counters per gate, then design from data.
   They radiate through QEM as scratches - nipping them helps
   every metric (Nate's read, shared).
+  SCAR-HUNT LEDGER (2026-07-17 night): Nate sees razor-line
+  z-fighting scars on THIN screws that base lacks; view-angle
+  flashing, print-harmless.  Snap EXONERATED (nosnap + gated
+  both still scarred).  Static censuses DON'T separate scarred
+  from clean: altitude razors (103 vs 101), dup-tri (67 vs 60,
+  base MORE), fat-edge, fold180, near-sheet pairs - all read
+  equal.  Whatever the renderer sees, adjacency + altitude
+  metrics are blind to it.  NEXT INSTRUMENT: fighting-pixel
+  z-buffer census (2 same-facing tris within depth-eps at the
+  front surface -> scar map with COORDINATES), or one scar
+  coordinate from Nate's meshlab wireframe -> FPROBE.
 - CLOSE-PERIMETER can of worms (bino): air-chords + pockmarks on
   close-together perimeters.  The strips/level-3/weld composite
   class - reopen AFTER perf (Nate's call).  Assets: NM_DEBUG
