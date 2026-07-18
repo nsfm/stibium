@@ -7528,6 +7528,327 @@ static void flip_slivers(DMesh* out, float sp)
  *  uncounted (the razor-sliver gashes reached Nate's slicer with
  *  a clean ledger row).  Same semantics as the in-pipeline
  *  accounting: opens on welded GEOMETRIC ids, nm on index ids.  */
+/*  Slicer-hygiene seal (2026-07-18, the "0 auto-repairs" bar):
+ *  manifold-pass twins start position-identical, then a later
+ *  vertex-moving pass (sliver weld, snap tent) shifts ONE copy by
+ *  ~1e-4 sp, and every slicer's exact matcher reads the seam as
+ *  open edges (prusa: bino 528, kinea 1).  Merge vertices within
+ *  STIBIUM_DMESH_SEAL * sp (default 3e-4 - a tenth of a MICRON at
+ *  product scale, three orders under the 0.1 mm feature bar) onto
+ *  the first-seen position, and cull the zero-area slivers the
+ *  merge exposes.  0 disables.  */
+static void seal_seams(DMesh* out, float sp)
+{
+    static const char* env = getenv("STIBIUM_DMESH_SEAL");
+    const float eps = (env ? float(atof(env)) : 3e-4f) * sp;
+    if (!(eps > 0) || out->verts.empty())
+        return;
+    const size_t nv = out->verts.size() / 3;
+    const auto cell = [&](float v) {
+        return int64_t(floorf(v / eps));
+    };
+    const auto key = [&](int64_t x, int64_t y, int64_t z) {
+        return (uint64_t(x & 0x1FFFFF) << 42) |
+               (uint64_t(y & 0x1FFFFF) << 21) |
+                uint64_t(z & 0x1FFFFF);
+    };
+    std::unordered_map<uint64_t, std::vector<uint32_t>> grid;
+    grid.reserve(nv);
+    std::vector<uint32_t> remap(nv);
+    uint64_t sealed = 0;
+    for (size_t v = 0; v < nv; ++v)
+    {
+        const float x = out->verts[3*v], y = out->verts[3*v + 1],
+                    z = out->verts[3*v + 2];
+        const int64_t cx = cell(x), cy = cell(y), cz = cell(z);
+        uint32_t canon = UINT32_MAX;
+        for (int dx = -1; dx <= 1 && canon == UINT32_MAX; ++dx)
+            for (int dy = -1; dy <= 1 && canon == UINT32_MAX; ++dy)
+                for (int dz = -1; dz <= 1; ++dz)
+                {
+                    const auto it = grid.find(key(cx+dx, cy+dy,
+                                                  cz+dz));
+                    if (it == grid.end())
+                        continue;
+                    for (const uint32_t w : it->second)
+                    {
+                        const float ex = out->verts[3*w] - x;
+                        const float ey = out->verts[3*w+1] - y;
+                        const float ez = out->verts[3*w+2] - z;
+                        if (ex*ex + ey*ey + ez*ez <= eps * eps)
+                        {
+                            canon = w;
+                            break;
+                        }
+                    }
+                    if (canon != UINT32_MAX)
+                        break;
+                }
+        if (canon == UINT32_MAX)
+        {
+            grid[key(cx, cy, cz)].push_back(uint32_t(v));
+            remap[v] = uint32_t(v);
+        }
+        else
+        {
+            remap[v] = canon;
+            if (out->verts[3*canon] != x ||
+                out->verts[3*canon+1] != y ||
+                out->verts[3*canon+2] != z)
+                ++sealed;
+        }
+    }
+    std::vector<uint32_t>& T = out->tris;
+    /*  First pass: remap + cull point/edge-degenerates.  */
+    size_t w2 = 0;
+    for (size_t t = 0; t < T.size(); t += 3)
+    {
+        const uint32_t a = remap[T[t]], b = remap[T[t+1]],
+                       c = remap[T[t+2]];
+        if (a == b || b == c || a == c)
+            continue;
+        T[w2] = a; T[w2+1] = b; T[w2+2] = c;
+        w2 += 3;
+    }
+    T.resize(w2);
+    /*  Second pass: annihilate opposite-facing twins.  Sealing a
+     *  pinch seam brings two sheets into exact contact; their
+     *  facing triangles become coincident zero-thickness walls
+     *  (same vertex triple, opposite winding) that slicers count
+     *  as reversed facets.  Cancel them in pairs, like the soap
+     *  film they are.  Same-winding duplicates collapse to one.  */
+    std::unordered_map<uint64_t, int> par;
+    par.reserve(T.size() / 3);
+    const auto tkey = [](uint32_t a, uint32_t b, uint32_t c) {
+        uint32_t v[3] = { a, b, c };
+        std::sort(v, v + 3);
+        uint64_t h = 0xcbf29ce484222325ull;
+        for (const uint32_t w : v)
+            h = (h ^ w) * 0x100000001b3ull;
+        return h;
+    };
+    const auto parity = [](uint32_t a, uint32_t b, uint32_t c) {
+        /*  +1 / -1 by whether (a,b,c) is an even permutation of
+         *  the sorted triple.  */
+        int p = 1;
+        if (a > b) { std::swap(a, b); p = -p; }
+        if (b > c) { std::swap(b, c); p = -p; }
+        if (a > b) { std::swap(a, b); p = -p; }
+        return p;
+    };
+    for (size_t t = 0; t < T.size(); t += 3)
+        par[tkey(T[t], T[t+1], T[t+2])] +=
+                parity(T[t], T[t+1], T[t+2]);
+    uint64_t annihilated = 0;
+    std::unordered_map<uint64_t, int> left = par;
+    size_t w3 = 0;
+    for (size_t t = 0; t < T.size(); t += 3)
+    {
+        const uint64_t k = tkey(T[t], T[t+1], T[t+2]);
+        const int p = parity(T[t], T[t+1], T[t+2]);
+        int& net = par[k];
+        int& budget = left[k];
+        /*  Keep only |net| copies of the majority orientation;
+         *  everything else cancels.  */
+        if (net != 0 && (p > 0) == (net > 0) && budget != 0)
+        {
+            T[w3] = T[t]; T[w3+1] = T[t+1]; T[w3+2] = T[t+2];
+            w3 += 3;
+            budget -= p;
+        }
+        else
+            ++annihilated;
+    }
+    T.resize(w3);
+    if ((sealed || annihilated) &&
+        (getenv("STIBIUM_DMESH_TIME") ||
+         getenv("STIBIUM_DMESH_CHIP_DEBUG")))
+        fprintf(stderr, "SEAL: %llu near-coincident vertices "
+                "merged, %llu twin facets annihilated\n",
+                (unsigned long long)sealed,
+                (unsigned long long)annihilated);
+}
+
+/*  Winding repair (2026-07-18, same bar): a facet whose normal
+ *  opposes the field gradient at its centroid is wound backwards
+ *  BY DEFINITION (the fold-war's gradient-vs-normal detector,
+ *  landed as a cure).  Slicers count these as facets_reversed
+ *  (screws: 228).  Batch-eval centroid gradients, flip where
+ *  the disagreement is decisive (dot < -0.1 of |n||g|); leave
+ *  ambiguous razor noise alone.  STIBIUM_DMESH_WINDING=0
+ *  disables.  */
+static void repair_winding(const Deck* deck, DMesh* out)
+{
+    static const char* env = getenv("STIBIUM_DMESH_WINDING");
+    if (env && atoi(env) == 0)
+        return;
+    const size_t nt = out->tris.size() / 3;
+    if (!nt)
+        return;
+    TapeCtx* ctx = tape_ctx_new(deck);
+    const std::vector<uint32_t>& T = out->tris;
+    const std::vector<float>& V = out->verts;
+    /*  Stencil pitch from the mesh scale.  */
+    float ex0 = 0;
+    for (size_t t = 0; t < std::min<size_t>(nt, 64); ++t)
+    {
+        const float dx = V[3*T[3*t]] - V[3*T[3*t+1]];
+        const float dy = V[3*T[3*t]+1] - V[3*T[3*t+1]+1];
+        const float dz = V[3*T[3*t]+2] - V[3*T[3*t+1]+2];
+        ex0 = std::max(ex0, sqrtf(dx*dx + dy*dy + dz*dz));
+    }
+    const float h = std::max(1e-5f, 0.01f * ex0);
+    std::vector<float> xs(nt * 6), ys(nt * 6), zs(nt * 6), vals;
+    for (size_t t = 0; t < nt; ++t)
+    {
+        const uint32_t a = T[3*t], b = T[3*t+1], c = T[3*t+2];
+        const float cx = (V[3*a] + V[3*b] + V[3*c]) / 3;
+        const float cy = (V[3*a+1] + V[3*b+1] + V[3*c+1]) / 3;
+        const float cz = (V[3*a+2] + V[3*b+2] + V[3*c+2]) / 3;
+        for (int o = 0; o < 6; ++o)
+        {
+            xs[t*6+o] = cx + (o==0 ? h : o==1 ? -h : 0);
+            ys[t*6+o] = cy + (o==2 ? h : o==3 ? -h : 0);
+            zs[t*6+o] = cz + (o==4 ? h : o==5 ? -h : 0);
+        }
+    }
+    eval_points_mt(deck, ctx, xs, ys, zs, vals);
+    tape_ctx_free(ctx);
+
+    /*  Winding is a COHERENCE property (prusa counts facets whose
+     *  traversal disagrees with their neighbors around shared
+     *  edges), so per-facet field tests cannot fix it - measured:
+     *  145 field-flips left 191 incoherent.  The classic cure:
+     *  flood-fill orientation across every clean 2-facet edge
+     *  (shared edges must be traversed in opposite directions),
+     *  then ONE field vote per connected component sets the
+     *  global sign (sum of per-facet normal-dot-gradient,
+     *  area-weighted - individual razor centroids are noisy, the
+     *  component sum is not).  Pinch edges (> 2 facets) are
+     *  barriers, not links.  */
+    const auto ekey = [](uint32_t a, uint32_t b) {
+        return (uint64_t(std::min(a, b)) << 32) | std::max(a, b);
+    };
+    std::unordered_map<uint64_t, std::array<uint32_t, 2>> einc;
+    std::unordered_map<uint64_t, uint32_t> ecount;
+    einc.reserve(nt * 3 / 2);
+    for (uint32_t t = 0; t < nt; ++t)
+        for (int e = 0; e < 3; ++e)
+        {
+            const uint64_t k = ekey(T[3*t + e],
+                                    T[3*t + (e + 1) % 3]);
+            auto& n2 = ecount[k];
+            if (n2 < 2)
+            {
+                auto& pr = einc[k];
+                pr[n2] = t;
+            }
+            ++n2;
+        }
+    std::vector<uint8_t> flip(nt, 0), seen(nt, 0);
+    std::vector<uint32_t> stack;
+    uint64_t flipped = 0, comps = 0;
+    const auto traverses = [&](uint32_t t, uint32_t a,
+                               uint32_t b) {
+        /*  Does triangle t (with current flip state) traverse the
+         *  directed edge a->b?  */
+        for (int e = 0; e < 3; ++e)
+        {
+            uint32_t p = T[3*t + e], q = T[3*t + (e + 1) % 3];
+            if (flip[t])
+                std::swap(p, q);
+            if (p == a && q == b)
+                return true;
+        }
+        return false;
+    };
+    for (uint32_t t0 = 0; t0 < nt; ++t0)
+    {
+        if (seen[t0])
+            continue;
+        ++comps;
+        std::vector<uint32_t> comp;
+        stack.assign(1, t0);
+        seen[t0] = 1;
+        while (!stack.empty())
+        {
+            const uint32_t t = stack.back();
+            stack.pop_back();
+            comp.push_back(t);
+            for (int e = 0; e < 3; ++e)
+            {
+                const uint32_t a = T[3*t + e],
+                               b = T[3*t + (e + 1) % 3];
+                const uint64_t k = ekey(a, b);
+                if (ecount[k] != 2)
+                    continue;       // boundary or pinch: barrier
+                const auto& pr = einc[k];
+                const uint32_t u = pr[0] == t ? pr[1] : pr[0];
+                if (seen[u])
+                    continue;
+                /*  t's EFFECTIVE direction (traverses applies
+                 *  flip[t]); u evaluated unflipped.  Coherence
+                 *  wants opposite directions, so same direction
+                 *  means u flips.  */
+                const bool t_ab = traverses(t, a, b);
+                const bool u_ab = traverses(u, a, b);
+                flip[u] = uint8_t(t_ab == u_ab);
+                seen[u] = 1;
+                stack.push_back(u);
+            }
+        }
+        /*  Field vote for the component's global sign - but only
+         *  overrule extraction (globally consistent by
+         *  construction) on DECISIVE evidence: sizeable component,
+         *  strong majority.  Razor-fan fragments bounded by pinch
+         *  edges vote near zero, and flipping them minted the very
+         *  backwards edges this pass exists to cure (bino: 632
+         *  ambiguous flips -> +12 prusa opens.  Measured, of
+         *  course).  */
+        double vote = 0, mag = 0;
+        for (const uint32_t t : comp)
+        {
+            const float gx = vals[t*6] - vals[t*6+1];
+            const float gy = vals[t*6+2] - vals[t*6+3];
+            const float gz = vals[t*6+4] - vals[t*6+5];
+            const uint32_t a = T[3*t], b = T[3*t+1], c = T[3*t+2];
+            const float ux = V[3*b]-V[3*a],
+                        uy = V[3*b+1]-V[3*a+1],
+                        uz = V[3*b+2]-V[3*a+2];
+            const float wx = V[3*c]-V[3*a],
+                        wy = V[3*c+1]-V[3*a+1],
+                        wz = V[3*c+2]-V[3*a+2];
+            float nx = uy*wz - uz*wy;
+            float ny = uz*wx - ux*wz;
+            float nz = ux*wy - uy*wx;
+            if (flip[t])
+            {
+                nx = -nx; ny = -ny; nz = -nz;
+            }
+            const double c2 = double(nx*gx + ny*gy + nz*gz);
+            vote += c2;
+            mag += std::abs(c2);
+        }
+        const bool decisive = comp.size() >= 8 &&
+                mag > 0 && std::abs(vote) > 0.5 * mag;
+        if (!decisive)
+            continue;   // leave exactly as extracted
+        const uint8_t invert = vote < 0 ? 1 : 0;
+        for (const uint32_t t : comp)
+            if (flip[t] != invert)
+            {
+                std::swap(out->tris[3*t+1], out->tris[3*t+2]);
+                ++flipped;
+            }
+    }
+    if (flipped && (getenv("STIBIUM_DMESH_TIME") ||
+                    getenv("STIBIUM_DMESH_CHIP_DEBUG")))
+        fprintf(stderr, "WINDING: %llu facets flipped across "
+                "%llu components\n",
+                (unsigned long long)flipped,
+                (unsigned long long)comps);
+}
+
 static void recount_quality(DMesh* out)
 {
     std::unordered_map<uint64_t, uint32_t> ec;
@@ -7833,6 +8154,9 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                 if (!df_env || atoi(df_env) != 0)
                     decimate_flats(out);
                 pt.sub("decimate_flats");
+                seal_seams(out, soup.spacing);
+                repair_winding(deck, out);
+                pt.sub("seal+winding");
                 recount_quality(out);
                 pt.sub("recount_quality");
                 pt.mark("fix stages");
@@ -7949,6 +8273,9 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
             if (!df_env || atoi(df_env) != 0)
                 decimate_flats(out);
             fixpt.sub("decimate_flats");
+            seal_seams(out, r.X[1] - r.X[0]);
+            repair_winding(deck, out);
+            fixpt.sub("seal+winding");
             recount_quality(out);
             fixpt.sub("recount_quality");
             fixpt.mark("fix stages");
