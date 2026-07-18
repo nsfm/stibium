@@ -20,6 +20,7 @@
  */
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
@@ -186,6 +187,28 @@ struct DMesh
      *  together at every band density; measured 2026-07-15).  */
     uint64_t snapped = 0;
 };
+
+/*  Progress reporting for long exports (app integration): a
+ *  process-global sink - legitimate as a global because one
+ *  export at a time is LAW (the laptop incident, 2026-07-17).
+ *  `stage` indexes dmesh_stage_name(); `in_stage` is a 0..1
+ *  fraction where a counter was already lying around (sampling
+ *  tasks, insert loops, repair rounds, snap waves) and 0
+ *  elsewhere; `overall` is a 0..1 estimate from measured phase
+ *  weights (r1/r2 bino blend, 2026-07-18 - an ESTIMATE, models
+ *  vary).  Retreat attempts honestly jump progress backward.
+ *  Poll from any thread; writes are relaxed atomics.
+ *  STIBIUM_DMESH_PROGRESS=1 additionally emits throttled
+ *  "PROGRESS <stage> <overall%> <stage%>" lines on stderr.  */
+struct DMeshProgress
+{
+    std::atomic<int> stage{ 0 };
+    std::atomic<float> in_stage{ 0 };
+    std::atomic<float> overall{ 0 };
+};
+DMeshProgress* dmesh_progress();
+const char* dmesh_stage_name(int stage);
+int dmesh_stage_count();
 
 /*  Stages B+C: point soup -> Delaunay -> refine -> extract.
  *  Returns false when built without CGAL support.  */
