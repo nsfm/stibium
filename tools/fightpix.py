@@ -67,7 +67,7 @@ for path in sys.argv[2:]:
         l1 = ((y2 - y3) * (gu - x3) + (x3 - x2) * (gv - y3)) / det
         l2 = ((y3 - y1) * (gu - x3) + (x1 - x3) * (gv - y3)) / det
         l3 = 1 - l1 - l2
-        inside = (l1 >= -1e-9) & (l2 >= -1e-9) & (l3 >= -1e-9)
+        inside = (l1 > 1e-4) & (l2 > 1e-4) & (l3 > 1e-4)
         w = l1 * ws[0] + l2 * ws[1] + l3 * ws[2]
         ii, jj = gu[inside], gv[inside]
         for i2, j2, w2 in zip(ii.ravel(), jj.ravel(),

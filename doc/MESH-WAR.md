@@ -138,49 +138,25 @@ Battle plan (each is A/B-able on bino in minutes, referee-gated):
 
 ## OPEN DEFECT CLASSES (quality queue, post-perf)
 
-- RAZOR CLUSTERS on flat-face interiors (bino "covered in razor
-  slits").  Weld link-condition + flip improvement test mutually
-  refuse clusters; flip pass currently INERT.  NEXT MOVE:
-  instrument refusal counters per gate, then design from data.
-  They radiate through QEM as scratches - nipping them helps
-  every metric (Nate's read, shared).
-  SCAR CASE CLOSED (2026-07-17 night, fightpix.py z-buffer
-  census - the instrument that finally separated what Nate's
-  renderer sees): EXTRACTION MINTS ~3,600 INVERTED coplanar
-  facets on lattice-aligned flats (screws +z, base and THIN
-  IDENTICALLY - anatomy at (3.31,-13.30,67.25): n=(0,0,-1)
-  triangles ON the top face overlapping n=(0,0,+1) ones in
-  area).  decimate_flats is the JANITOR: cleans base 3,604 ->
-  278 (92%) but THIN only 3,589 -> 915 (75%) - the scar
-  difference is CLEANUP EFFICIENCY, not minting.  Snap
-  exonerated; THIN exonerated of minting.  This is likely
-  bino's 992-razor class too ("solution is elsewhere" - Nate,
-  correct).  CURE DESIGN (next battle): the field knows
-  orientation - a facet whose normal disagrees with the field
-  gradient at its centroid is inverted BY DEFINITION.
-  Gradient-vs-normal detector -> targeted fold removal (or fix
-  extraction's degenerate-flat facet orientation at the
-  source).  Static adjacency/altitude censuses are BLIND to
-  this class (fold180 reads 211 vs 234 while fightpix reads
-  278 vs 915) - overlapping folds rarely share edges.
-  FOLD-CURE ROUND 1 (2026-07-18 ~3am, theories 8+9): the
-  DEGEN pass landed (all-surf rel-vol histogram + neighbor-
-  sign adoption for cells < 1e-4 rel-vol, tie-break inside,
-  STIBIUM_DMESH_DEGEN=bar) - cures the ~24 float-degenerate
-  pancakes but fightpix UNCHANGED (3,596).  The real
-  population: REPAIR-MINTED pancakes at rel-vol 1e-3..1e-2,
-  GROWING per repair round (221 -> 1,045 by round 3; Newton-
-  projected inserts land exactly on the flat and mint new
-  near-zero cells between old surface vertices; layer gaps
-  3e-4..3e-3 = the z-fight band).  Volume alone CANNOT
-  separate them from the DC wedge tets (same 1e-2 decade).
-  NEXT-SESSION DESIGN: discriminator = gradient uniformity
-  across the cell (pancake: one flat patch, uniform gradient;
-  wedge: split gradient - the very reason DC exists).  Then
-  either disenfranchise pancakes at classification, or
-  post-pass excision seeded by the gradient-vs-normal facet
-  detector.  Fresh eyes, referee everything against the
-  concave-chip dishes (plinth + screws heads).
+- RAZOR/Z-FIGHT SCARS - ***SOLVED*** (2026-07-18, three rounds,
+  ten+ theories).  FINAL STORY: raw extraction is INNOCENT (the
+  tet-complex disjointness guarantee is perfect - strict-interior
+  fightpix reads ZERO on every nodec mesh; the earlier
+  "extraction mints 3,600 folds / decimation janitors" story was
+  an INSTRUMENT ARTIFACT: boundary-tolerant rasterization counted
+  shared-edge pixels of coplanar NEIGHBORS as fights.  Verify the
+  instrument - one full-precision anatomy dump exposed it).
+  The trio bisection convicted DECIMATE_FLATS SOLO (522 fights;
+  weld_slivers solo 0).  THE HOLE: collapses decided on ORIGINAL
+  positions, applied at pass end - a triangle with two vertices
+  collapsing in one pass gets double-remapped into a
+  configuration neither orientation guard evaluated.  THE FIX:
+  independent-set rule (an accepted collapse claims every fan
+  vertex for the pass).  RESULTS: screws 571 -> 0/0/0 all axes
+  (tris/depth unchanged); bino 443 -> 59 (razors 1,019 -> 823;
+  residue = small next hunt, snap tents suspected), time/depth/
+  watertight held everywhere.  Solo gates (WELDSLIV / FLIPSLIV /
+  DECFLATS) + DEGEN pass + histograms remain as instruments.
 - CLOSE-PERIMETER can of worms (bino): air-chords + pockmarks on
   close-together perimeters.  The strips/level-3/weld composite
   class - reopen AFTER perf (Nate's call).  Assets: NM_DEBUG
