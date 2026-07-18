@@ -4259,6 +4259,31 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     }
     CH shint{};
     size_t spn = 0;
+    /*  Hash-grid coincidence guard (perf round 3 rock 2a): the
+     *  1e-3 sp near-coincidence check paid a full nearest_vertex
+     *  walk per point.  A spatial hash of every vertex placed so
+     *  far answers the same question in O(1); the DT walk is
+     *  reserved for actual inserts.  Nearest-of-candidates keeps
+     *  the semantics of nearest_vertex exactly.  */
+    const double hw = 1e-3 * soup.spacing;
+    std::unordered_map<uint64_t, std::vector<VH>> vhash;
+    const auto hkey = [&](double x, double y, double z) {
+        const int64_t cx = int64_t(std::floor(x / hw));
+        const int64_t cy = int64_t(std::floor(y / hw));
+        const int64_t cz = int64_t(std::floor(z / hw));
+        return (uint64_t(cx & 0x1FFFFF) << 42) |
+               (uint64_t(cy & 0x1FFFFF) << 21) |
+                uint64_t(cz & 0x1FFFFF);
+    };
+    if constexpr (CCDT_MODE)
+    {
+        vhash.reserve(dt.number_of_vertices());
+        for (auto vit = dt.finite_vertices_begin();
+             vit != dt.finite_vertices_end(); ++vit)
+            vhash[hkey(vit->point().x(), vit->point().y(),
+                       vit->point().z())]
+                    .push_back(vit);
+    }
     for (const auto& [sp3, si] : sorder)
     {
         if ((++spn & 1023) == 0)
@@ -4276,16 +4301,33 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
          *  the va == vb guard below.  */
         if constexpr (CCDT_MODE)
         {
-            if (dt.number_of_vertices() > 0)
             {
-                const auto nv = shint != CH()
-                        ? dt.nearest_vertex(sp3, shint)
-                        : dt.nearest_vertex(sp3);
+                VH nv{};
+                double best = hw * hw;
+                const double px2 = sp3.x(), py2 = sp3.y(),
+                             pz2 = sp3.z();
+                for (int dx = -1; dx <= 1; ++dx)
+                 for (int dy = -1; dy <= 1; ++dy)
+                  for (int dz = -1; dz <= 1; ++dz)
+                  {
+                    const auto it = vhash.find(hkey(
+                            px2 + dx*hw, py2 + dy*hw,
+                            pz2 + dz*hw));
+                    if (it == vhash.end())
+                        continue;
+                    for (const VH& cand2 : it->second)
+                    {
+                        const double d2 = CGAL::squared_distance(
+                                cand2->point(), sp3);
+                        if (d2 < best)
+                        {
+                            best = d2;
+                            nv = cand2;
+                        }
+                    }
+                  }
                 if (nv != VH())
                 {
-                    const double w = 1e-3 * soup.spacing;
-                    if (CGAL::squared_distance(nv->point(), sp3) <
-                        w * w)
                     {
                         /*  Correctness review #3: this reuse path
                          *  overwrites an existing vertex's info
@@ -4321,6 +4363,8 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         }
         surf_vh[si] = vh;
         shint = vh->cell();
+        if constexpr (CCDT_MODE)
+            vhash[hkey(sp3.x(), sp3.y(), sp3.z())].push_back(vh);
     }
     if (witness_overwrites &&
         (getenv("STIBIUM_DMESH_TIME") ||
@@ -8441,6 +8485,23 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                 ? a.open_edges < b.open_edges
                 : a.nonmanifold_edges < b.nonmanifold_edges;
     };
+    /*  Trace carry (perf round 3, rock 1a): the crease polylines
+     *  are geometric objects of the FIELD - invariant to density
+     *  promotion/demotion - yet every strips/retreat re-run
+     *  re-traced from scratch (~18 s on bino, the log's continue
+     *  swallowed it).  Trace once; later attempts re-append the
+     *  carried chain POINTS into the fresh soup (indices are
+     *  soup-relative and must be rebuilt).  REFEREE VERDICT
+     *  (2026-07-18): REFUTED as a default - the re-trace on the
+     *  PROMOTED soup mints MORE law (denser seeds complete more
+     *  chains; constrained 12,042 -> 11,504 with carry, a -4.5%
+     *  law loss), even though worst depth read BETTER (0.097 vs
+     *  0.170 - a lead worth a fresh-eyes look: is some law
+     *  HURTING depth?).  OPT-IN via STIBIUM_DMESH_TRACE_CARRY=1
+     *  for experiments; the 18 s re-trace is the price of law.  */
+    std::vector<std::vector<std::array<float, 3>>> carried;
+    std::vector<uint8_t> carried_closed;
+    bool have_carry = false;
     for (int attempt = 0; attempt < 4; ++attempt)
     {
         PhaseTimer pt;
@@ -8452,10 +8513,48 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
         if (*halt)
             return false;
         static const char* tr_env = getenv("STIBIUM_DMESH_TRACE");
-        if (!tr_env || atoi(tr_env) != 0)
+        static const char* tc_env =
+                getenv("STIBIUM_DMESH_TRACE_CARRY");
+        const bool carry_ok = tc_env && atoi(tc_env) != 0;
+        if (have_carry && carry_ok)
+        {
+            for (size_t c2 = 0; c2 < carried.size(); ++c2)
+            {
+                std::vector<uint32_t> chain;
+                chain.reserve(carried[c2].size());
+                for (const auto& p : carried[c2])
+                {
+                    chain.push_back(
+                            uint32_t(soup.surface.size()));
+                    soup.surface.push_back({ p[0], p[1], p[2] });
+                    ++soup.traced;
+                }
+                soup.tchains.push_back(std::move(chain));
+                soup.tclosed.push_back(carried_closed[c2]);
+            }
+        }
+        else if (!tr_env || atoi(tr_env) != 0)
         {
             prog_stage(3);
             delaunay_trace(deck, r, &soup, halt);
+            if (carry_ok && !soup.tchains.empty())
+            {
+                carried.clear();
+                carried_closed.assign(soup.tclosed.begin(),
+                                      soup.tclosed.end());
+                for (const auto& ch : soup.tchains)
+                {
+                    std::vector<std::array<float, 3>> pts2;
+                    pts2.reserve(ch.size());
+                    for (const uint32_t i : ch)
+                        pts2.push_back({
+                                soup.surface[i].x,
+                                soup.surface[i].y,
+                                soup.surface[i].z });
+                    carried.push_back(std::move(pts2));
+                }
+                have_carry = true;
+            }
         }
         if (const char* cp = getenv("STIBIUM_DMESH_DUMP_CHAINS"))
             dump_chains_stl(cp, soup);
