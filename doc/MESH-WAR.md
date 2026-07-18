@@ -179,6 +179,39 @@ round2, bino-hygiene-autopsy, perf-round3-design, guarantees-
 research}.md.  Fleet's own fixes already landed: TRACE=0 unbraced-
 if bug, fresh dialog-knob reads, weld_slivers fan-claim.
 
+TIER A SESSION VERDICTS (2026-07-18 day, autonomous run - the
+plan met reality and reality won several rounds):
+- PINCH-SPLIT: built, works (index-nm 274 -> 0), but coincident
+  copies make prusa WORSE (it re-welds them; screws manifold
+  yes -> no) and the epsilon nudge opened 2,198 geometric edges
+  (per-vertex components disagree along seam curves).  OPT-IN
+  (PINCHSPLIT=1) until seam-consistent sheet labeling is
+  designed.  KEY REFRAME: prusa's residual opens/reversed on
+  pinch models measure THROUGH its own exact-position weld -
+  our geometric counter + bit-exact welder + fightpix are the
+  geometry truth; prusa-clean is a separate (epsilon-
+  separation) engineering goal.
+- DECIMATION WINDING-VETO: built, then refuted - the autopsy's
+  attribution dissolved under solo gates (prusa reversed is
+  mostly its pinch-walk artifact; weld owns ~4-6 real ones).
+  The WELD variant tripled the razor census (627 -> 1,744):
+  removed.  Decimate veto OPT-IN (DECVETO=1).
+- TRACE CARRY: built, law-refuted (re-trace on the promoted
+  soup mints MORE law; carried = -4.5% constraints).  OPT-IN
+  (TRACE_CARRY=1).  LEAD: the carried mesh read worst depth
+  0.097 vs 0.170 with LESS law - is some law near (-2.7, 37.1,
+  61.7) hurting depth?  Fresh-eyes candidate.
+- HASH-GRID GUARD: kept (semantics-exact, ~1 s - the CCDT
+  insert wall is bookkeeping, P6 confirmed).
+- OPEN TRADE for Nate: the weld FAN-CLAIM (fleet correctness
+  guard) costs screws prusa-manifold (yes -> no, 68 opens) via
+  collapse reordering - structural-guard-vs-slicer-cleanliness
+  needs an eyes decision.
+- NATE'S LEAD (2026-07-18): bino is mirror-symmetric but ONE
+  side carries significantly more flaws - order-dependence
+  somewhere (insertion order / tie-breaks / float sign under
+  mirroring).  Investigation seed.
+
 TIER A - cheap certain wins (each <= half-day):
 1. Decimation ORIENTATION-VETO on collapse (autopsy: reversed
    150 -> ~6; DECIMATE=0 proves decimation mints them).
