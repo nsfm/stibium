@@ -3779,6 +3779,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     uint64_t(iz & 0x1FFFFF);
         };
         std::unordered_map<uint64_t, std::vector<VH>> vgrid;
+        vgrid.reserve(size_t(dt.number_of_vertices()));
         for (auto v = dt.finite_vertices_begin();
              v != dt.finite_vertices_end(); ++v)
             vgrid[cell_key(float(v->point().x()),
@@ -3886,7 +3887,9 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         if (*halt)
             break;
         std::vector<PendingEdge> pending;
+        static size_t seen_hint = 0;
         std::unordered_set<uint64_t> seen;
+        seen.reserve(seen_hint + 64);
         for (auto e = dt.finite_edges_begin();
              e != dt.finite_edges_end(); ++e)
         {
@@ -3909,6 +3912,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             if (seen.insert(h).second)
                 pending.push_back(ed);
         }
+        seen_hint = seen.size();
         if (pending.empty())
             break;
         auto fresh = bisect_pending(deck, ctx, pending, halt);
@@ -4921,15 +4925,31 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     etris[(a << 32) | b].push_back(t);
                 }
 
-            /*  Triangle lookup by sorted vertex triple  */
-            std::unordered_map<uint64_t, uint32_t> trikey;
-            const auto tri_key = [&](uint32_t x, uint32_t y,
-                                     uint32_t z) -> uint64_t {
+            /*  Triangle lookup by sorted vertex triple.  EXACT
+             *  key (correctness review finding 2): the old
+             *  21-bit-per-index packing silently aliased above
+             *  2,097,151 vertices - multi-million-tri exports
+             *  already ship.  Struct key with equality resolves
+             *  hash collisions correctly at any size.  */
+            struct TriKeyHash
+            {
+                size_t operator()(
+                        const std::array<uint32_t, 3>& k) const
+                {
+                    uint64_t h = 0xcbf29ce484222325ull;
+                    for (const uint32_t w : k)
+                        h = (h ^ w) * 0x100000001b3ull;
+                    return size_t(h);
+                }
+            };
+            std::unordered_map<std::array<uint32_t, 3>, uint32_t,
+                               TriKeyHash> trikey;
+            const auto tri_key = [](uint32_t x, uint32_t y,
+                                    uint32_t z) {
                 if (x > y) std::swap(x, y);
                 if (y > z) std::swap(y, z);
                 if (x > y) std::swap(x, y);
-                return (uint64_t(x) << 42) | (uint64_t(y) << 21) |
-                       uint64_t(z);
+                return std::array<uint32_t, 3>{ x, y, z };
             };
             for (uint32_t t = 0; t < ntri; ++t)
                 trikey[tri_key(out->tris[3*t], out->tris[3*t + 1],
