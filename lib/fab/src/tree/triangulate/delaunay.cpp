@@ -867,8 +867,17 @@ void descend(Collector& c, const Region& r, Tape* tape)
             {
                 const bool tangle =
                         sep < autod_sep_bar() * c.spacing;
+                /*  Magnitude-scaled like the residual formula:
+                 *  extreme crowding (4x the bar) asks for level 3
+                 *  - eighth-cells put ~4 lattice rows across a
+                 *  screw slot that level 2 spans in 1-2 (the
+                 *  large visible tilted tris at the head rims).
+                 *  Level 3 stays behind the AUTODENSE_MAX cap
+                 *  (default 2): opt-in until refereed.  */
+                const int want = (live >= 4 * autod_live_bar() &&
+                                  autod_max_level() >= 3) ? 3 : 2;
                 int& lv = c.want_dense[key];
-                lv = std::max(lv, tangle ? 1 : 2);
+                lv = std::max(lv, tangle ? 1 : want);
             }
         }
 
@@ -5939,6 +5948,148 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
 
 }  // namespace
 
+/*  Flat-fan decimation (the cost lever, opened 2026-07-18 from
+ *  the screws loop: 91.8% of a dense-band export's triangles are
+ *  strictly axis-aligned flats - eighth-cell tessellation of
+ *  planes that three vertices could carry).  A vertex whose
+ *  ENTIRE incident fan lies in one plane adds nothing: collapse
+ *  it into a neighbour.  Creases, law, and every curved surface
+ *  survive geometrically - their fans are never coplanar - so
+ *  the pass needs no provenance.  In-plane orientation check
+ *  guards against fold-overs; boundary-of-plane vertices keep
+ *  themselves (their fans contain off-plane triangles).
+ *  STIBIUM_DMESH_DECIMATE=0 disables.  */
+static void decimate_flats(DMesh* out)
+{
+    const size_t nv = out->verts.size() / 3;
+    if (!nv)
+        return;
+    std::vector<uint32_t>& T = out->tris;
+    auto vp = [&](uint32_t v, int q) {
+        return out->verts[3 * v + q];
+    };
+    for (int pass = 0; pass < 30; ++pass)
+    {
+        /*  Incident-triangle lists  */
+        std::vector<std::vector<uint32_t>> inc(nv);
+        for (size_t t = 0; t < T.size(); t += 3)
+            for (int e = 0; e < 3; ++e)
+                inc[T[t + e]].push_back(uint32_t(t));
+        std::vector<uint32_t> remap(nv);
+        for (size_t v = 0; v < nv; ++v)
+            remap[v] = uint32_t(v);
+        std::vector<uint8_t> touched(nv, 0);
+        size_t collapsed = 0;
+        for (size_t v = 0; v < nv; ++v)
+        {
+            const auto& fan = inc[v];
+            if (fan.size() < 3 || touched[v])
+                continue;
+            /*  Fan plane from the first triangle  */
+            float n0[3] = { 0, 0, 0 };
+            bool flat = true;
+            float scale = 0;
+            for (const uint32_t t : fan)
+            {
+                const uint32_t a = T[t], b = T[t+1], c2 = T[t+2];
+                const float ux = vp(b,0)-vp(a,0),
+                            uy = vp(b,1)-vp(a,1),
+                            uz = vp(b,2)-vp(a,2);
+                const float wx = vp(c2,0)-vp(a,0),
+                            wy = vp(c2,1)-vp(a,1),
+                            wz = vp(c2,2)-vp(a,2);
+                float nx = uy*wz - uz*wy, ny = uz*wx - ux*wz,
+                      nz = ux*wy - uy*wx;
+                const float nl = sqrtf(nx*nx + ny*ny + nz*nz);
+                if (!(nl > 0))
+                    continue;
+                nx /= nl; ny /= nl; nz /= nl;
+                if (!(n0[0] || n0[1] || n0[2]))
+                {
+                    n0[0] = nx; n0[1] = ny; n0[2] = nz;
+                    scale = sqrtf(nl);
+                    continue;
+                }
+                if (nx*n0[0] + ny*n0[1] + nz*n0[2] < 1.f - 1e-6f)
+                {
+                    flat = false;
+                    break;
+                }
+            }
+            if (!flat || !(n0[0] || n0[1] || n0[2]))
+                continue;
+            /*  Collapse v into its nearest fan neighbour, with an
+             *  in-plane orientation guard: every surviving fan
+             *  triangle must keep its normal direction.  */
+            uint32_t tgt = UINT32_MAX;
+            float bd = 1e30f;
+            for (const uint32_t t : fan)
+                for (int e = 0; e < 3; ++e)
+                {
+                    const uint32_t w = T[t + e];
+                    if (w == v || touched[w])
+                        continue;
+                    const float dx = vp(w,0)-vp(uint32_t(v),0),
+                                dy = vp(w,1)-vp(uint32_t(v),1),
+                                dz = vp(w,2)-vp(uint32_t(v),2);
+                    const float d = dx*dx + dy*dy + dz*dz;
+                    if (d < bd)
+                    {
+                        bd = d;
+                        tgt = w;
+                    }
+                }
+            if (tgt == UINT32_MAX)
+                continue;
+            bool ok = true;
+            for (const uint32_t t : fan)
+            {
+                uint32_t a = T[t], b = T[t+1], c2 = T[t+2];
+                if (a == v) a = tgt;
+                if (b == v) b = tgt;
+                if (c2 == v) c2 = tgt;
+                if (a == b || b == c2 || a == c2)
+                    continue;        // degenerate: will be culled
+                const float ux = vp(b,0)-vp(a,0),
+                            uy = vp(b,1)-vp(a,1),
+                            uz = vp(b,2)-vp(a,2);
+                const float wx = vp(c2,0)-vp(a,0),
+                            wy = vp(c2,1)-vp(a,1),
+                            wz = vp(c2,2)-vp(a,2);
+                const float nx = uy*wz - uz*wy,
+                            ny = uz*wx - ux*wz,
+                            nz = ux*wy - uy*wx;
+                const float dot = nx*n0[0] + ny*n0[1] + nz*n0[2];
+                if (dot <= 1e-12f * scale * scale)
+                {
+                    ok = false;      // flip or collapse to zero
+                    break;
+                }
+            }
+            if (!ok)
+                continue;
+            remap[v] = tgt;
+            touched[v] = 1;
+            touched[tgt] = 1;
+            ++collapsed;
+        }
+        if (!collapsed)
+            break;
+        /*  Apply remaps, cull degenerates  */
+        size_t w2 = 0;
+        for (size_t t = 0; t < T.size(); t += 3)
+        {
+            uint32_t a = remap[T[t]], b = remap[T[t+1]],
+                     c2 = remap[T[t+2]];
+            if (a == b || b == c2 || a == c2)
+                continue;
+            T[w2] = a; T[w2+1] = b; T[w2+2] = c2;
+            w2 += 3;
+        }
+        T.resize(w2);
+    }
+}
+
 /*  Observability pack (Nate's ask, 2026-07-17): binary STL
  *  writers so every intermediate product can be dropped into a
  *  normal slicer next to the export.  */
@@ -6179,7 +6330,13 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
         const bool ok = delaunay_mesh_soup(deck, soup, halt, out);
         pt.mark("mesh (B+C total)");
         if (!ok || out->open_edges == 0 || *halt)
+        {
+            static const char* de =
+                    getenv("STIBIUM_DMESH_DECIMATE");
+            if (ok && !*halt && (!de || atoi(de) != 0))
+                decimate_flats(out);
             return ok;
+        }
         if (!have_best || better(*out, best))
         {
             best = *out;
@@ -6263,6 +6420,11 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
     }
     if (have_best && better(best, *out))
         *out = std::move(best);
+    {
+        static const char* de = getenv("STIBIUM_DMESH_DECIMATE");
+        if (!de || atoi(de) != 0)
+            decimate_flats(out);
+    }
     return true;
 }
 
