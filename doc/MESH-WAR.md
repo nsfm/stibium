@@ -207,18 +207,23 @@ Battle plan (each is A/B-able on bino in minutes, referee-gated):
   (Nate's design seed).  Density campaign trigger 2 of 3.
 - THIN TAPERED CONES (knob): missing material at sub-lattice
   caps; hidden-thin trigger (density campaign 3 of 3).
-- SLICER HYGIENE - MEASURED 2026-07-18, next correctness design
-  item.  Referee command: prusa-slicer --info X.stl (manifold /
-  open_edges / facets_reversed).  Baselines on the crowned
-  meshes: bino 528 open + 14 reversed; screws 56 open + 228
-  reversed.  Anatomy: manifold-pass pinch SPLITS leave twin
-  vertices at IDENTICAL positions - geometric weld reads closed,
-  a slicer's exact matcher reads every split seam open; the
-  reversed facets are winding noise on leftover sub-razor
-  slivers (render-invisible).  Prusa auto-repairs silently -
-  prints fine - but "0 auto-repairs" is the primetime bar.
-  Design task: split-seam reconciliation + winding repair in
-  the EXPORT path.
+- SLICER HYGIENE - ROUND 1 LANDED 2026-07-18 late night.
+  Referee: prusa-slicer --info (the formal harness judge).
+  Passes at the pipeline tail: SEAL (epsilon-weld at 3e-4 sp +
+  degenerate cull + opposite-twin ANNIHILATION - sealed pinch
+  seams mint coincident zero-thickness walls that cancel in
+  pairs) and WINDING (flood-fill orientation across 2-facet
+  edges, ONE field vote per component, gated to components >= 8
+  tris with >50% decisive vote - ungated fragment flips MINTED
+  backwards edges, measured).  Env: STIBIUM_DMESH_SEAL (sp
+  units, 0 off), STIBIUM_DMESH_WINDING=0 off.
+  SCORE: screws 56 open/228 rev -> MANIFOLD=YES, 0 open, 76
+  rev.  Bino 528 open/14 rev -> 336 open/150 rev (nm 504 ->
+  318).  OPEN QUESTIONS: bino's residual 336-open anatomy
+  (T-junctions? seams past 3e-4 eps?), and reversed-count
+  attribution (p6 stall-exit-era baseline never prusa'd -
+  the 14 -> 150 delta may predate the seal).  Screws-class =
+  DONE; bino-class = next hunt with the same referee.
 - Regression tests for the eyeball-only bug classes (architecture
   review #6: two-pass liveness, ship-best, geometric-vs-index
   opens, spacing tie-flip, trust-gate cliff).
