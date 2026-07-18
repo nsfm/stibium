@@ -4385,10 +4385,30 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     {
         static const char* dg_env = getenv("STIBIUM_DMESH_DEGEN");
         const float dg_bar = dg_env ? float(atof(dg_env)) : 1e-4f;
-        if (dg_bar > 0)
+        /*  Pancake discriminator (fold-cure round 2, 2026-07-18):
+         *  the REPAIR-MINTED pancake population (rel-vol 1e-3..
+         *  1e-2, growing per round - Newton-projected inserts land
+         *  exactly on flats and mint near-zero cells between old
+         *  surface vertices) shares a volume decade with the DC
+         *  wedge tets, so volume alone cannot disenfranchise it.
+         *  The field can: a PANCAKE is thinner than the razor bar
+         *  (height < STIBIUM_DMESH_PANCAKE * sp, default 0.02 -
+         *  sub-print noise by definition) AND gradient-UNIFORM
+         *  across its four corners (one flat patch).  A wedge
+         *  holds a real corner: its corner gradients SPLIT - the
+         *  very reason DC semantics exist (screws: 90 degrees,
+         *  dot ~ 0, nowhere near the 0.9 bar).  Thin + uniform
+         *  adopts neighbor signs like the float-degenerates; thin
+         *  + split keeps its DC vote.  0 disables.  */
+        static const char* pk_env = getenv("STIBIUM_DMESH_PANCAKE");
+        const float pk_bar = (pk_env ? float(atof(pk_env)) : 0.02f)
+                * soup.spacing;
+        if (dg_bar > 0 || pk_bar > 0)
         {
             uint64_t vhist[10] = {};   // log10 rel-vol buckets
             std::vector<CH> degen;
+            std::vector<CH> pk_cells;
+            std::vector<std::array<VH, 4>> pk_verts;
             for (auto c = dt.finite_cells_begin();
                  c != dt.finite_cells_end(); ++c)
             {
@@ -4434,8 +4454,143 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 int b = rel <= 0 ? 0
                         : int(9 + floor(log10(rel)));
                 ++vhist[b < 0 ? 0 : b > 9 ? 9 : b];
-                if (rel < dg_bar)
+                if (dg_bar > 0 && rel < dg_bar)
+                {
                     degen.push_back(c);
+                    continue;
+                }
+                if (!(pk_bar > 0))
+                    continue;
+                /*  Height over the largest face: h = 3V / Amax  */
+                double amax = 0;
+                for (int i = 0; i < 4; ++i)
+                {
+                    const double* q0 = p[(i + 1) & 3];
+                    const double* q1 = p[(i + 2) & 3];
+                    const double* q2 = p[(i + 3) & 3];
+                    const double ux2 = q1[0]-q0[0],
+                            uy2 = q1[1]-q0[1], uz2 = q1[2]-q0[2];
+                    const double vx3 = q2[0]-q0[0],
+                            vy3 = q2[1]-q0[1], vz3 = q2[2]-q0[2];
+                    const double fx = uy2*vz3 - uz2*vy3;
+                    const double fy = uz2*vx3 - ux2*vz3;
+                    const double fz = ux2*vy3 - uy2*vx3;
+                    amax = std::max(amax, 0.5 *
+                            sqrt(fx*fx + fy*fy + fz*fz));
+                }
+                if (amax > 0 && 3.0 * vol / amax < pk_bar)
+                {
+                    pk_cells.push_back(c);
+                    pk_verts.push_back({ c->vertex(0),
+                            c->vertex(1), c->vertex(2),
+                            c->vertex(3) });
+                }
+            }
+            uint64_t pancakes = 0;
+            if (!pk_cells.empty())
+            {
+                /*  One gradient per unique vertex (7-pt stencil,
+                 *  batched); a cell is a pancake only when all
+                 *  four corner gradients agree (min pairwise dot
+                 *  > 0.9 ~ 26 degrees - a concave wedge reads
+                 *  ~0).  Zero-length gradients keep the DC vote
+                 *  (bad stencil is not evidence).  */
+                std::unordered_map<const void*, uint32_t> gidx;
+                std::vector<float> gx2, gy2, gz2, gv2;
+                const float gh = 0.01f * soup.spacing;
+                for (const auto& vv : pk_verts)
+                    for (const VH& v : vv)
+                        if (!gidx.count(&*v))
+                        {
+                            const uint32_t id =
+                                    uint32_t(gidx.size());
+                            gidx.emplace(&*v, id);
+                            const float vx4 =
+                                    float(v->point().x());
+                            const float vy4 =
+                                    float(v->point().y());
+                            const float vz4 =
+                                    float(v->point().z());
+                            for (int o = 0; o < 6; ++o)
+                            {
+                                gx2.push_back(vx4 +
+                                        (o==0?gh:o==1?-gh:0));
+                                gy2.push_back(vy4 +
+                                        (o==2?gh:o==3?-gh:0));
+                                gz2.push_back(vz4 +
+                                        (o==4?gh:o==5?-gh:0));
+                            }
+                        }
+                eval_points(deck_base(deck), ctx, gx2, gy2, gz2,
+                            gv2);
+                std::vector<std::array<float, 3>> grad(
+                        gidx.size());
+                for (size_t i = 0; i < gidx.size(); ++i)
+                {
+                    const float dx2 = gv2[i*6] - gv2[i*6+1];
+                    const float dy2 = gv2[i*6+2] - gv2[i*6+3];
+                    const float dz2 = gv2[i*6+4] - gv2[i*6+5];
+                    const float l = sqrtf(dx2*dx2 + dy2*dy2 +
+                                          dz2*dz2);
+                    grad[i] = l > 0
+                            ? std::array<float, 3>{ dx2/l, dy2/l,
+                                                    dz2/l }
+                            : std::array<float, 3>{ 0, 0, 0 };
+                }
+                uint64_t dhist[12] = {};  // min-dot [-1,1] buckets
+                for (size_t i = 0; i < pk_cells.size(); ++i)
+                {
+                    float mind = 1;
+                    bool bad = false;
+                    for (int a2 = 0; a2 < 4 && !bad; ++a2)
+                    {
+                        const auto& ga =
+                                grad[gidx[&*pk_verts[i][a2]]];
+                        if (ga[0] == 0 && ga[1] == 0 &&
+                            ga[2] == 0)
+                            bad = true;
+                        for (int b2 = a2 + 1; b2 < 4; ++b2)
+                        {
+                            const auto& gb =
+                                    grad[gidx[&*pk_verts[i][b2]]];
+                            mind = std::min(mind,
+                                    ga[0]*gb[0] + ga[1]*gb[1] +
+                                    ga[2]*gb[2]);
+                        }
+                    }
+                    if (!bad)
+                    {
+                        int b3 = int((mind + 1) * 6);
+                        ++dhist[b3 < 0 ? 0 : b3 > 11 ? 11 : b3];
+                    }
+                    /*  The min-dot histogram (screws, 2026-07-18)
+                     *  killed the uniform-gradient theory: the
+                     *  thin population is ~0 uniform, ~1,050 at
+                     *  dot 0 (crease-straddlers, GROWING per
+                     *  repair round - the fighting-layer growth
+                     *  signature) and ~100 at dot -1 (thin-wall
+                     *  spanners).  The clean rule is HEIGHT
+                     *  alone: a cell under 0.02 sp cannot hold a
+                     *  product-bar feature whatever its
+                     *  gradients say - its vote moves the
+                     *  surface by less than its own sub-print
+                     *  thickness.  The DC wedge cure lives at
+                     *  0.03 sp+ with real cell heights - orders
+                     *  away from the bar.  The hist stays as the
+                     *  population instrument.  */
+                    (void)mind;
+                    degen.push_back(pk_cells[i]);
+                    ++pancakes;
+                }
+                if (getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+                {
+                    fprintf(stderr, "PANCAKE min-dot hist "
+                            "[-1..1]: ");
+                    for (int b3 = 0; b3 < 12; ++b3)
+                        fprintf(stderr, "%llu ",
+                                (unsigned long long)dhist[b3]);
+                    fprintf(stderr, "\n");
+                }
             }
             uint64_t adopted = 0;
             for (int round = 0; round < 8; ++round)
@@ -4470,9 +4625,12 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             }
             if (getenv("STIBIUM_DMESH_CHIP_DEBUG"))
             {
-                fprintf(stderr, "DEGEN: %llu adopted of %zu degen; "
+                fprintf(stderr, "DEGEN: %llu adopted of %zu degen "
+                        "(%llu pancakes of %zu thin candidates); "
                         "all-surf rel-vol hist (<=1e-9..>=1): ",
-                        (unsigned long long)adopted, degen.size());
+                        (unsigned long long)adopted, degen.size(),
+                        (unsigned long long)pancakes,
+                        pk_cells.size());
                 for (int b = 0; b < 10; ++b)
                     fprintf(stderr, "%llu ",
                             (unsigned long long)vhist[b]);
@@ -6540,6 +6698,20 @@ static void decimate_flats(DMesh* out)
             remap[v] = tgt;
             touched[v] = 1;
             touched[tgt] = 1;
+            /*  Claim the whole fan (fold conviction, 2026-07-18):
+             *  collapses are decided on ORIGINAL positions but
+             *  applied at pass end, so a triangle with two
+             *  vertices collapsing in one pass is double-remapped
+             *  into a configuration NEITHER guard evaluated - the
+             *  in-plane fold mint behind every z-fighting scar
+             *  (fightpix: decimate_flats solo 522, weld solo 0).
+             *  Independent-set rule: every vertex of every fan
+             *  triangle becomes untouchable this pass; no triangle
+             *  is rewritten twice between checks.  The 30-pass
+             *  loop recovers the collapse rate.  */
+            for (const uint32_t t : fan)
+                for (int e = 0; e < 3; ++e)
+                    touched[T[t + e]] = 1;
             ++collapsed;
         }
         if (!collapsed)
@@ -7161,9 +7333,21 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                     getenv("STIBIUM_DMESH_DECIMATE");
             if (ok && !*halt && (!de || atoi(de) != 0))
             {
-                weld_slivers(out, soup.spacing);
-                flip_slivers(out, soup.spacing);
-                decimate_flats(out);
+                /*  Individual gates for fold bisection (the
+                 *  z-fight hunt): the trio shares the DECIMATE
+                 *  master switch; each stage can be soloed off.  */
+                static const char* ws_env =
+                        getenv("STIBIUM_DMESH_WELDSLIV");
+                static const char* fs_env =
+                        getenv("STIBIUM_DMESH_FLIPSLIV");
+                static const char* df_env =
+                        getenv("STIBIUM_DMESH_DECFLATS");
+                if (!ws_env || atoi(ws_env) != 0)
+                    weld_slivers(out, soup.spacing);
+                if (!fs_env || atoi(fs_env) != 0)
+                    flip_slivers(out, soup.spacing);
+                if (!df_env || atoi(df_env) != 0)
+                    decimate_flats(out);
                 recount_quality(out);
             }
             return ok;
@@ -7255,9 +7439,18 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
         static const char* de = getenv("STIBIUM_DMESH_DECIMATE");
         if (!de || atoi(de) != 0)
         {
-            weld_slivers(out, r.X[1] - r.X[0]);
-            flip_slivers(out, r.X[1] - r.X[0]);
-            decimate_flats(out);
+            static const char* ws_env =
+                    getenv("STIBIUM_DMESH_WELDSLIV");
+            static const char* fs_env =
+                    getenv("STIBIUM_DMESH_FLIPSLIV");
+            static const char* df_env =
+                    getenv("STIBIUM_DMESH_DECFLATS");
+            if (!ws_env || atoi(ws_env) != 0)
+                weld_slivers(out, r.X[1] - r.X[0]);
+            if (!fs_env || atoi(fs_env) != 0)
+                flip_slivers(out, r.X[1] - r.X[0]);
+            if (!df_env || atoi(df_env) != 0)
+                decimate_flats(out);
             recount_quality(out);
         }
     }
