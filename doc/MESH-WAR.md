@@ -113,6 +113,19 @@ sub-stage lines + per-repair-round anatomy + EVAL tally):
   173 sign-witness overwrites per bino - real, consequence
   unknown, fix waits for a correlated defect).
 
+PERF ROUND 2 - LANDED 2026-07-18 (3f4da55e): P5 parallel descend
++ range-parallel bisect (THREADS env, default hw-2, deterministic
+merge), surface-insert spatial sort + hints, repair stall exit
+(STALL env, default 1, round-2 floor).  r2 bino 221 -> 165 s;
+r1 bino 49 s (170.6 at the night's start = 3.5x); depths/water-
+tightness identical, screws tilt 2.84 -> 3.12% (stall trade, eye
+referee pending).  RSS 1.78 -> 1.93 GB (worker transients).
+REMAINING ROCKS at r2, now CGAL-dominated: extract+repair 54 s
+(oracle + chip-detect eval batches still SERIAL - same range-
+threading pattern applies, next increment), insert points 41 s
+(CCDT bookkeeping - P6 research), insert samples 27 s, tracer+
+referee 26 s (chain/segment-parallel candidates).
+
 Battle plan (each is A/B-able on bino in minutes, referee-gated):
 - P1 LIVE-BAR CALIBRATION - RUN 2026-07-17 night.  Census: bino
   live median 91 (bench 4-5; live is partly CSG-clause count, not
