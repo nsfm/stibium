@@ -45,6 +45,25 @@ referee.  Update this table with EVERY rev handed over for review.
 | v25 | + trace local step (pre snap fix) | 281K | 0 | 148 | 12042 | 0.577 | REGRESSION: 4x law feeding global snap tents = folds |
 | v26 | + snap tents at local pitch | 278K | 0 | 148 | 12042 | **0.092** | BEST EVER by 2x - at the 0.1mm product bar; the fix pair is load-bearing together |
 
+## Perf round ledger (2026-07-17 evening, Nate's B-then-A vote)
+
+- FEMTO-SEGMENT GUARD: both autod31 cascades were float-noise
+  constraint segments (endpoints ~1e-14 apart, mirror twins);
+  each cost a full ~660 s rebuild.  March endpoint guard + referee
+  length floor; bino cascades 1 -> 0, mesh bit-identical.  Zeiss
+  projection ~42 -> ~25 min.
+- Exact tri_key (21-bit aliasing defused), refinement/manifold
+  reserves, pass-1 soup release (sampling RSS roughly halved).
+- QEM enabled on dmesh path (STIBIUM_DMESH_SIMPLIFY, default
+  off): screws 9,016 -> 1,686 @ 0.01mm watertight; 0.05mm =
+  octagon bores (the phase-2 vertex_lock case).
+- Razor class: weld_slivers + link condition + honest recount;
+  screws razors 515 -> 103; bino v28 132K tris @ 0.092 sp.
+  Nate: v15 z-fighting "very minor"; bino razors remain (curved-
+  adjacent class) - QEM indifferent to them, next sweep's target.
+- Multicore verdict: insert is CCDT-sequential (split = research);
+  eval-side threading = the day-sized item; cores wait on CGAL.
+
 ## Open questions the next rev must answer
 
 - Selective detail density to replace the churn subsidy: per-leaf
