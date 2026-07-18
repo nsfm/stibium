@@ -196,17 +196,34 @@ void ExportMeshWorker::async()
         }
 
         /*  Mirror the mesher's progress sink into the dialog's
-         *  bar until meshing returns.  */
+         *  bar until meshing returns: overall fraction, stage
+         *  index, and a remaining-time estimate (elapsed x
+         *  (1-f)/f, honest only past 10% - before that the
+         *  dialog just shows the stage).  */
         progress_total = 1000;
         std::atomic<bool> mesh_done{ false };
         std::thread mirror([&]() {
+            const auto m0 = std::chrono::steady_clock::now();
             while (!mesh_done.load())
             {
-                progress_done = uint64_t(
-                        dmesh_progress()->overall.load() * 1000);
+                const float f = dmesh_progress()->overall.load();
+                progress_done = uint64_t(f * 1000);
+                progress_stage = dmesh_progress()->stage.load();
+                if (f > 0.10f && f < 1.f)
+                {
+                    const double el =
+                            std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - m0)
+                            .count();
+                    progress_eta_s = int(el * (1.f - f) / f);
+                }
+                else
+                    progress_eta_s = -1;
                 std::this_thread::sleep_for(
                         std::chrono::milliseconds(100));
             }
+            progress_stage = -1;
+            progress_eta_s = -1;
         });
 
         const auto t0 = std::chrono::steady_clock::now();
@@ -219,7 +236,8 @@ void ExportMeshWorker::async()
         const double wall = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - t0).count();
 
-        fprintf(stderr, "dmesh export: %s, %zu tris, %llu open, "
+        fprintf(stderr, "stibnite mesh report: %s, %zu tris, "
+                "%llu open, "
                 "%llu non-manifold, %llu constrained, %llu steiner, "
                 "%llu repaired, %llu split, %llu snapped\n",
                 ok ? "ok" : "FAILED (built without CGAL?)",

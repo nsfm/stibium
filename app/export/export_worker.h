@@ -87,5 +87,14 @@ protected:
                  PHASE_WRITING, PHASE_CONTOURING };
     std::atomic<int> progress_phase{PHASE_DEFAULT};
 
+    /*  Stibnite detail (2026-07-18): the mesher's stage index
+     *  (-1 = not meshing with Stibnite) and a remaining-time
+     *  estimate in seconds (-1 = unknown/too early).  Filled by
+     *  the export worker's mirror thread, read by the dialog's
+     *  poll timer for a "Meshing: repairing (~2 min left)" status
+     *  line.  */
+    std::atomic<int> progress_stage{-1};
+    std::atomic<int> progress_eta_s{-1};
+
     static QString phaseLabel(int phase);
 };

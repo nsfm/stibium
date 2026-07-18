@@ -11,6 +11,8 @@
 #include "export/export_worker.h"
 #include "dialog/exporting.h"
 
+#include "fab/tree/triangulate/delaunay.h"
+
 void ExportWorker::runAsync()
 {
     auto exporting_dialog = new ExportingDialog();
@@ -18,6 +20,8 @@ void ExportWorker::runAsync()
     progress_total = 0;
     progress_phase = PHASE_DEFAULT;
 
+    progress_stage = -1;
+    progress_eta_s = -1;
     auto future = QtConcurrent::run(&ExportWorker::async, this);
     QFutureWatcher<void> watcher;
     watcher.setFuture(future);
@@ -28,7 +32,20 @@ void ExportWorker::runAsync()
     // Poll the worker's progress counters into the dialog's bar
     QTimer timer;
     connect(&timer, &QTimer::timeout, exporting_dialog, [=, this]{
-        exporting_dialog->setStatus(phaseLabel(progress_phase.load()));
+        QString status = phaseLabel(progress_phase.load());
+        /*  Stibnite meshing: append the mesher's own stage and,
+         *  once the estimate settles, the remaining time.  */
+        const int st = progress_stage.load();
+        if (progress_phase.load() == PHASE_MESHING && st >= 0)
+        {
+            status = QString("Meshing: %1").arg(dmesh_stage_name(st));
+            const int eta = progress_eta_s.load();
+            if (eta >= 120)
+                status += QString(" (~%1 min left)").arg(eta / 60);
+            else if (eta >= 5)
+                status += QString(" (~%1 s left)").arg(eta);
+        }
+        exporting_dialog->setStatus(status);
         exporting_dialog->setProgress(progress_done.load(),
                                       progress_total.load());
     });

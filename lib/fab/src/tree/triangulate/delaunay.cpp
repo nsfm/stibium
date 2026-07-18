@@ -276,21 +276,24 @@ struct ProgStage
     const char* name;
     float weight;
 };
+/*  Names are USER-FACING (the export dialog's status line reads
+ *  them); the TIME instrument keeps its own terse pt.mark labels
+ *  separately.  */
 constexpr ProgStage PROG_STAGES[] = {
-    { "idle",            0.00f },
-    { "sample pass 1",   0.08f },
-    { "sample pass 2",   0.10f },
-    { "crease tracer",   0.09f },
-    { "segment referee", 0.04f },
-    { "insert samples",  0.09f },
-    { "insert points",   0.17f },
-    { "constraints",     0.01f },
-    { "refinement",      0.07f },
-    { "extract+repair",  0.24f },
-    { "manifold",        0.01f },
-    { "snap",            0.03f },
-    { "fix stages",      0.03f },
-    { "done",            0.04f },
+    { "starting",           0.00f },
+    { "sampling",           0.08f },
+    { "sampling detail",    0.10f },
+    { "tracing features",   0.09f },
+    { "verifying features", 0.04f },
+    { "building lattice",   0.09f },
+    { "placing surface",    0.17f },
+    { "constraining",       0.01f },
+    { "refining",           0.07f },
+    { "repairing",          0.24f },
+    { "splitting pinches",  0.01f },
+    { "snapping creases",   0.03f },
+    { "optimizing",         0.03f },
+    { "finishing",          0.04f },
 };
 constexpr int PROG_N =
         int(sizeof(PROG_STAGES) / sizeof(PROG_STAGES[0]));
