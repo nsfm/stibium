@@ -213,8 +213,10 @@ int mesh_threads()
     static const char* env = getenv("STIBIUM_DMESH_THREADS");
     if (env)
         return std::max(1, atoi(env));
+    /*  hw-1: leave the UI thread a lane (Nate's call, app
+     *  integration 2026-07-18).  Env-only - not a UI knob.  */
     const unsigned hw = std::thread::hardware_concurrency();
-    return hw > 2 ? int(hw - 2) : 1;
+    return hw > 1 ? int(hw - 1) : 1;
 }
 
 /*  Evaluate an arbitrary point list in MIN_VOLUME-sized batches on
