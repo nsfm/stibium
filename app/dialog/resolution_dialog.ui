@@ -31,8 +31,8 @@
    <item>
     <widget class="QComboBox" name="mesher">
      <property name="toolTip">
-      <string>Stibnite: adaptive mesher - sharp features, watertight output, adaptive detail.
-Classic: fast uniform sampler - low memory, larger files.</string>
+      <string>Stibnite: adaptive mesher with sharp feature preservation and watertight output.
+Classic: fast uniform sampler - lower memory, much larger files.</string>
      </property>
      <item>
       <property name="text">
@@ -56,8 +56,8 @@ Classic: fast uniform sampler - low memory, larger files.</string>
    <item>
     <widget class="QComboBox" name="quality">
      <property name="toolTip">
-      <string>Each step roughly triples meshing time and halves the size of surface defects.
-Extreme is untested territory - expect hours on large models.</string>
+      <string>Each step roughly triples meshing time and doubles surface fidelity.
+Extreme can take hours on large models.</string>
      </property>
      <item>
       <property name="text">
@@ -71,7 +71,7 @@ Extreme is untested territory - expect hours on large models.</string>
      </item>
      <item>
       <property name="text">
-       <string>Extreme (untested)</string>
+       <string>Extreme (very slow)</string>
       </property>
      </item>
      <item>
@@ -206,8 +206,7 @@ Extreme is untested territory - expect hours on large models.</string>
          <string>Adaptive detail density</string>
         </property>
         <property name="toolTip">
-         <string>Automatically refines the sampling lattice where the model carries
-sub-lattice detail (curvature and crowding driven)</string>
+         <string>Automatically increases sampling density where the model has fine detail</string>
         </property>
         <property name="checked">
          <bool>true</bool>
@@ -226,8 +225,8 @@ sub-lattice detail (curvature and crowding driven)</string>
         <item>
          <widget class="QComboBox" name="adv_density_cap">
           <property name="toolTip">
-           <string>High resolves finer sub-lattice detail (threads, knurling)
-at roughly double the meshing time on dense models</string>
+           <string>High resolves finer detail (threads, knurling, engraving)
+at up to double the meshing time</string>
           </property>
           <item>
            <property name="text">
@@ -249,7 +248,7 @@ at roughly double the meshing time on dense models</string>
          <string>Decimate flat regions</string>
         </property>
         <property name="toolTip">
-         <string>Collapses redundant triangles on flat surfaces (~4x smaller files)</string>
+         <string>Merges redundant triangles on flat surfaces (about 4x smaller files)</string>
         </property>
         <property name="checked">
          <bool>true</bool>
@@ -262,8 +261,7 @@ at roughly double the meshing time on dense models</string>
          <string>Crease snap</string>
         </property>
         <property name="toolTip">
-         <string>Snaps residual surface defects onto traced feature edges
-(guarded by damage referees)</string>
+         <string>Sharpens feature edges by snapping nearby surface points onto them</string>
         </property>
         <property name="checked">
          <bool>true</bool>
@@ -282,8 +280,7 @@ at roughly double the meshing time on dense models</string>
         <item>
          <widget class="QComboBox" name="adv_stall">
           <property name="toolTip">
-           <string>Patient runs extra repair rounds after progress stalls -
-marginally finer flat regions at extra time</string>
+           <string>Patient spends extra repair passes for slightly cleaner surfaces</string>
           </property>
           <item>
            <property name="text">

@@ -33,19 +33,27 @@ void ExportWorker::runAsync()
     QTimer timer;
     connect(&timer, &QTimer::timeout, exporting_dialog, [=, this]{
         QString status = phaseLabel(progress_phase.load());
-        /*  Stibnite meshing: append the mesher's own stage and,
-         *  once the estimate settles, the remaining time.  */
+        QString eta_text;
+        /*  Stibnite meshing: the mesher's own stage as the status,
+         *  the remaining-time countdown in its own right-aligned
+         *  label so it never shifts with the text around it.  */
         const int st = progress_stage.load();
         if (progress_phase.load() == PHASE_MESHING && st >= 0)
         {
             status = QString("Meshing: %1").arg(dmesh_stage_name(st));
             const int eta = progress_eta_s.load();
-            if (eta >= 120)
-                status += QString(" (~%1 min left)").arg(eta / 60);
+            if (eta == -2)
+                eta_text = "wrapping up";
+            else if (eta >= 3600)
+                eta_text = QString("~%1 h %2 min")
+                        .arg(eta / 3600).arg((eta % 3600) / 60);
+            else if (eta >= 120)
+                eta_text = QString("~%1 min").arg(eta / 60);
             else if (eta >= 5)
-                status += QString(" (~%1 s left)").arg(eta);
+                eta_text = QString("~%1 s").arg((eta / 5) * 5);
         }
         exporting_dialog->setStatus(status);
+        exporting_dialog->setEta(eta_text);
         exporting_dialog->setProgress(progress_done.load(),
                                       progress_total.load());
     });

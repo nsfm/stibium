@@ -197,25 +197,42 @@ void ExportMeshWorker::async()
 
         /*  Mirror the mesher's progress sink into the dialog's
          *  bar until meshing returns: overall fraction, stage
-         *  index, and a remaining-time estimate (elapsed x
-         *  (1-f)/f, honest only past 10% - before that the
-         *  dialog just shows the stage).  */
+         *  index, and a remaining-time estimate.
+         *
+         *  The raw estimate (elapsed x (1-f)/f) whipsaws while the
+         *  early stages burn through their phase weights, so the
+         *  display runs on a LOCKED DEADLINE: past 15% overall the
+         *  smoothed estimate sets a finish time and the label just
+         *  counts down toward it (smooth by construction).  The
+         *  deadline only moves for sustained disagreement - pushed
+         *  out when the smoothed estimate exceeds the countdown by
+         *  25%, pulled in when it drops below half.  Overshooting
+         *  the deadline shows "wrapping up" (eta sentinel -2)
+         *  instead of a lie.  */
         progress_total = 1000;
         std::atomic<bool> mesh_done{ false };
         std::thread mirror([&]() {
             const auto m0 = std::chrono::steady_clock::now();
+            double ema = -1;
+            double deadline = -1;   // seconds since m0
             while (!mesh_done.load())
             {
                 const float f = dmesh_progress()->overall.load();
                 progress_done = uint64_t(f * 1000);
                 progress_stage = dmesh_progress()->stage.load();
-                if (f > 0.10f && f < 1.f)
+                const double el = std::chrono::duration<double>(
+                        std::chrono::steady_clock::now() - m0)
+                        .count();
+                if (f > 0.15f && f < 1.f)
                 {
-                    const double el =
-                            std::chrono::duration<double>(
-                            std::chrono::steady_clock::now() - m0)
-                            .count();
-                    progress_eta_s = int(el * (1.f - f) / f);
+                    const double raw = el * (1.f - f) / f;
+                    ema = ema < 0 ? raw : 0.9 * ema + 0.1 * raw;
+                    const double left0 = deadline - el;
+                    if (deadline < 0 || ema > left0 * 1.25 ||
+                        ema < left0 * 0.5)
+                        deadline = el + ema;
+                    const double left = deadline - el;
+                    progress_eta_s = left >= 1 ? int(left) : -2;
                 }
                 else
                     progress_eta_s = -1;
@@ -291,6 +308,11 @@ void ExportMeshWorker::async()
     {
         progress_phase = PHASE_SIMPLIFYING;
         simplifyMesh(simplify, verts, indices);
+        if (!_stats.isEmpty())
+            _stats += QString("<br>after simplify: %1 triangles, "
+                              "%2 vertices")
+                    .arg(indices.size() / 3)
+                    .arg(verts.size() / 3);
     }
 
     progress_phase = PHASE_WRITING;

@@ -27,6 +27,13 @@ public:
      */
     void setStatus(const QString& status);
 
+    /*
+     *  Updates the right-aligned, fixed-width remaining-time label
+     *  (empty string clears it).  Separate from the status text so
+     *  the countdown the user is staring at never shifts position.
+     */
+    void setEta(const QString& eta);
+
 protected:
     Ui::ExportingDialog* ui;
 };

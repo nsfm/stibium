@@ -15,6 +15,12 @@ void ExportingDialog::setStatus(const QString& status)
         ui->statusLabel->setText(status);
 }
 
+void ExportingDialog::setEta(const QString& eta)
+{
+    if (ui->etaLabel->text() != eta)
+        ui->etaLabel->setText(eta);
+}
+
 void ExportingDialog::setProgress(uint64_t done, uint64_t total)
 {
     // A total of 0 means "working, duration unknown": show Qt's busy
