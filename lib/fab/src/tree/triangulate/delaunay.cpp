@@ -219,6 +219,28 @@ int mesh_threads()
 
 /*  Evaluate an arbitrary point list in MIN_VOLUME-sized batches on
  *  the given tape (same dummy-Region pattern as get_normals).  */
+static void eval_range(const Tape* tape, TapeCtx* ctx,
+                       const std::vector<float>& xs,
+                       const std::vector<float>& ys,
+                       const std::vector<float>& zs,
+                       std::vector<float>& out,
+                       size_t lo, size_t hi)
+{
+    for (size_t at = lo; at < hi; at += MIN_VOLUME)
+    {
+        const unsigned count =
+                unsigned(hi - at < MIN_VOLUME ? hi - at
+                                              : MIN_VOLUME);
+        Region dummy = {};
+        dummy.voxels = count;
+        dummy.X = const_cast<float*>(xs.data() + at);
+        dummy.Y = const_cast<float*>(ys.data() + at);
+        dummy.Z = const_cast<float*>(zs.data() + at);
+        const float* v = tape_eval_r(tape, ctx, dummy);
+        memcpy(out.data() + at, v, count * sizeof(float));
+    }
+}
+
 void eval_points(const Tape* tape, TapeCtx* ctx,
                  const std::vector<float>& xs,
                  const std::vector<float>& ys,
@@ -228,18 +250,59 @@ void eval_points(const Tape* tape, TapeCtx* ctx,
     const auto e0 = std::chrono::steady_clock::now();
     const size_t n = xs.size();
     out.resize(n);
-    for (size_t at = 0; at < n; at += MIN_VOLUME)
+    eval_range(tape, ctx, xs, ys, zs, out, 0, n);
     {
-        const unsigned count =
-                unsigned(n - at < MIN_VOLUME ? n - at : MIN_VOLUME);
-        Region dummy = {};
-        dummy.voxels = count;
-        dummy.X = const_cast<float*>(xs.data() + at);
-        dummy.Y = const_cast<float*>(ys.data() + at);
-        dummy.Z = const_cast<float*>(zs.data() + at);
-        const float* v = tape_eval_r(tape, ctx, dummy);
-        memcpy(out.data() + at, v, count * sizeof(float));
+        std::lock_guard<std::mutex> lk(g_eval_mx);
+        g_eval.secs += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - e0).count();
+        g_eval.pts += n;
+        ++g_eval.calls;
     }
+}
+
+int mesh_threads();
+
+/*  Threaded batch eval on the BASE tape (perf round 2 increment
+ *  2): the repair oracle, chip detection, segment referee, snap
+ *  stash and Newton projection all push 100K+ point batches
+ *  through eval_points serially.  Base-tape evals are pure per
+ *  point, so ranges split freely; each worker gets its own ctx
+ *  (pushed tapes belong to their owning ctx's arena and stay on
+ *  the serial path).  Ranges align to MIN_VOLUME so batch
+ *  boundaries match the serial run bit-for-bit.  */
+void eval_points_mt(const Deck* deck, TapeCtx* ctx,
+                    const std::vector<float>& xs,
+                    const std::vector<float>& ys,
+                    const std::vector<float>& zs,
+                    std::vector<float>& out)
+{
+    const size_t n = xs.size();
+    const size_t nt = std::min<size_t>(
+            size_t(mesh_threads()),
+            std::max<size_t>(1, n / (4 * MIN_VOLUME)));
+    if (nt <= 1)
+    {
+        eval_points(deck_base(deck), ctx, xs, ys, zs, out);
+        return;
+    }
+    const auto e0 = std::chrono::steady_clock::now();
+    out.resize(n);
+    const size_t chunks = (n + MIN_VOLUME - 1) / MIN_VOLUME;
+    std::vector<std::thread> pool;
+    for (size_t t = 0; t < nt; ++t)
+        pool.emplace_back([&, t]() {
+            TapeCtx* wctx = tape_ctx_new(deck);
+            const size_t lo = std::min(n,
+                    chunks * t / nt * MIN_VOLUME);
+            const size_t hi = std::min(n,
+                    chunks * (t + 1) / nt * MIN_VOLUME);
+            if (lo < hi)
+                eval_range(deck_base(deck), wctx, xs, ys, zs,
+                           out, lo, hi);
+            tape_ctx_free(wctx);
+        });
+    for (auto& th : pool)
+        th.join();
     {
         std::lock_guard<std::mutex> lk(g_eval_mx);
         g_eval.secs += std::chrono::duration<double>(
@@ -1218,7 +1281,7 @@ void project_points_impl(const Deck* deck, TapeCtx* ctx,
             ys[i*7 + 3] += h;   ys[i*7 + 4] -= h;
             zs[i*7 + 5] += h;   zs[i*7 + 6] -= h;
         }
-        eval_points(base, ctx, xs, ys, zs, vals);
+        eval_points_mt(deck, ctx, xs, ys, zs, vals);
         for (size_t i = 0; i < n; ++i)
         {
             const float f = vals[i*7];
@@ -2173,7 +2236,7 @@ static void field_probe(const Deck* deck)
             qy.push_back(py[i] + (q==3 ? h : q==4 ? -h : 0));
             qz.push_back(pz[i] + (q==5 ? h : q==6 ? -h : 0));
         }
-    eval_points(deck_base(deck), ctx, qx, qy, qz, qv);
+    eval_points_mt(deck, ctx, qx, qy, qz, qv);
     for (size_t i = 0; i < px.size(); ++i)
     {
         const float f = qv[i*7];
@@ -3313,7 +3376,7 @@ std::vector<DSurfPoint> bisect_pending(const Deck* deck, TapeCtx* ctx,
             ys[e] = (edges[e].ay + edges[e].by) * 0.5f;
             zs[e] = (edges[e].az + edges[e].bz) * 0.5f;
         }
-        eval_points(base, ctx, xs, ys, zs, vals);
+        eval_points_mt(deck, ctx, xs, ys, zs, vals);
         for (size_t e = 0; e < n; ++e)
         {
             PendingEdge& ed = edges[e];
@@ -3447,7 +3510,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             }
         }
         if (!sx.empty())
-            eval_points(base, ctx, sx, sy, sz, sv);
+            eval_points_mt(deck, ctx, sx, sy, sz, sv);
         /*  Cross-pair duplicate-coverage dedupe (zeiss run,
          *  2026-07-15): a merged CSG tree repeats surfaces, so the
          *  SAME physical crease is traced by several min/max pairs
@@ -4595,7 +4658,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     }
     if (!oracle_cells.empty())
     {
-        eval_points(deck_base(deck), ctx, cxs, cys, czs, cvals);
+        eval_points_mt(deck, ctx, cxs, cys, czs, cvals);
         size_t at = 0;
         for (size_t i = 0; i < oracle_cells.size(); ++i)
         {
@@ -4774,7 +4837,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                         (o==4?gh:o==5?-gh:0));
                             }
                         }
-                eval_points(deck_base(deck), ctx, gx2, gy2, gz2,
+                eval_points_mt(deck, ctx, gx2, gy2, gz2,
                             gv2);
                 std::vector<std::array<float, 3>> grad(
                         gidx.size());
@@ -5076,7 +5139,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             gys[i*7+3] += whs[i];  gys[i*7+4] -= whs[i];
             gzs[i*7+5] += whs[i];  gzs[i*7+6] -= whs[i];
         }
-        eval_points(base2, ctx, gxs, gys, gzs, gv);
+        eval_points_mt(deck, ctx, gxs, gys, gzs, gv);
         std::vector<size_t> cand;
         std::vector<uint8_t> cspec;   // 1 = chip (f < 0)
         std::vector<float> cdist;     // |f|/|grad| at detection
@@ -5268,7 +5331,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             }
             if (!px.empty())
             {
-                eval_points(base2, ctx, px, py, pz, pv);
+                eval_points_mt(deck, ctx, px, py, pz, pv);
                 std::vector<float> bestd(cand.size(), 1e30f);
                 for (const Seg& s : segs)
                 {
@@ -5339,7 +5402,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     sz[q*NSAMP + u] = eaz[i] + t * (ebz[i] - eaz[i]);
                 }
             }
-            eval_points(base2, ctx, sx, sy, sz, sv);
+            eval_points_mt(deck, ctx, sx, sy, sz, sv);
             for (size_t q = 0; q < cand.size(); ++q)
             {
                 const size_t i = cand[q];
@@ -5426,7 +5489,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 vy[i*7 + 3] += vh2;   vy[i*7 + 4] -= vh2;
                 vz[i*7 + 5] += vh2;   vz[i*7 + 6] -= vh2;
             }
-            eval_points(deck_base(deck), ctx, vx, vy, vz, vv);
+            eval_points_mt(deck, ctx, vx, vy, vz, vv);
             for (size_t i = 0; i < kx.size(); ++i)
             {
                 const float f = vv[i*7];
@@ -6067,7 +6130,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 gzs[i*7+5] += qhs[i];  gzs[i*7+6] -= qhs[i];
             }
             if (!keys.empty())
-                eval_points(deck_base(deck), ctx, gxs, gys, gzs,
+                eval_points_mt(deck, ctx, gxs, gys, gzs,
                             gv);
             for (size_t i = 0; i < keys.size(); ++i)
             {
@@ -6583,7 +6646,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             gys[i*7+3] += fhs[i];  gys[i*7+4] -= fhs[i];
             gzs[i*7+5] += fhs[i];  gzs[i*7+6] -= fhs[i];
         }
-        eval_points(deck_base(deck), ctx, gxs, gys, gzs, fv);
+        eval_points_mt(deck, ctx, gxs, gys, gzs, fv);
         float worst = 0;
         float wpos[3] = { 0, 0, 0 };
         uint64_t nfinal = 0;
@@ -6698,7 +6761,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     qy.push_back(m[1] + (q==3?h:q==4?-h:0));
                     qz.push_back(m[2] + (q==5?h:q==6?-h:0));
                 }
-            eval_points(deck_base(deck), ctx, qx, qy, qz, qv);
+            eval_points_mt(deck, ctx, qx, qy, qz, qv);
             std::vector<std::array<float, 3>> nrm(mids.size());
             for (size_t i = 0; i < mids.size(); ++i)
             {
@@ -6721,7 +6784,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                         qy.push_back(mids[i][1] + t*nrm[i][1]);
                         qz.push_back(mids[i][2] + t*nrm[i][2]);
                     }
-            eval_points(deck_base(deck), ctx, qx, qy, qz, qv);
+            eval_points_mt(deck, ctx, qx, qy, qz, qv);
             int hist_solid[5] = {}, hist_air[5] = {}, none = 0;
             const auto bucket = [](float t) {
                 return t < 0.25f ? 0 : t < 0.5f ? 1 : t < 1.f ? 2
