@@ -6353,6 +6353,150 @@ static void weld_slivers(DMesh* out, float sp)
     }
 }
 
+/*  Coplanar sliver flip (the razor class, round 2, 2026-07-17):
+ *  the weld handles short-edge razors, but the LONG-THIN needles
+ *  beside constraint lines survive it - their endpoints are far
+ *  apart, and collapsing would move real geometry.  Nate's read:
+ *  razors radiate through QEM as flat-face scratches, most
+ *  visible exactly there.  The cure that moves NOTHING: when a
+ *  razor triangle and its neighbour across the long edge are
+ *  coplanar, flip the diagonal - the sliver quad re-splits into
+ *  two healthy triangles.  Flip accepted only when the minimum
+ *  triangle height IMPROVES and both new triangles keep the
+ *  plane's orientation (convexity falls out of that test).  */
+static void flip_slivers(DMesh* out, float sp)
+{
+    if (!(sp > 0))
+        return;
+    std::vector<uint32_t>& T = out->tris;
+    auto vp = [&](uint32_t v, int q) {
+        return out->verts[3 * v + q];
+    };
+    const float hbar = 0.05f * sp;
+    const auto tri_h = [&](uint32_t a, uint32_t b, uint32_t c2,
+                           float n[3]) {
+        const float ux = vp(b,0)-vp(a,0), uy = vp(b,1)-vp(a,1),
+                    uz = vp(b,2)-vp(a,2);
+        const float wx = vp(c2,0)-vp(a,0), wy = vp(c2,1)-vp(a,1),
+                    wz = vp(c2,2)-vp(a,2);
+        n[0] = uy*wz - uz*wy;
+        n[1] = uz*wx - ux*wz;
+        n[2] = ux*wy - uy*wx;
+        const float a2 = sqrtf(n[0]*n[0] + n[1]*n[1] + n[2]*n[2]);
+        float emax = 0;
+        const uint32_t vs[3] = { a, b, c2 };
+        for (int e = 0; e < 3; ++e)
+        {
+            const uint32_t p = vs[e], q = vs[(e+1)%3];
+            const float dx = vp(q,0)-vp(p,0),
+                        dy = vp(q,1)-vp(p,1),
+                        dz = vp(q,2)-vp(p,2);
+            emax = std::max(emax,
+                    sqrtf(dx*dx + dy*dy + dz*dz));
+        }
+        return emax > 0 ? a2 / emax : 0.f;
+    };
+    for (int pass = 0; pass < 8; ++pass)
+    {
+        std::unordered_map<uint64_t, std::vector<uint32_t>> et;
+        for (size_t t = 0; t < T.size(); t += 3)
+            for (int e = 0; e < 3; ++e)
+            {
+                uint64_t a = T[t + e], b = T[t + (e+1)%3];
+                if (a > b)
+                    std::swap(a, b);
+                et[(a << 32) | b].push_back(uint32_t(t));
+            }
+        std::vector<uint8_t> dirty(T.size() / 3, 0);
+        size_t flips = 0;
+        for (size_t t = 0; t < T.size(); t += 3)
+        {
+            if (dirty[t / 3])
+                continue;
+            float n1[3];
+            const float h1 = tri_h(T[t], T[t+1], T[t+2], n1);
+            if (!(h1 > 0) || h1 > hbar)
+                continue;
+            /*  Longest edge of the razor  */
+            int le = 0;
+            float lel = 0;
+            for (int e = 0; e < 3; ++e)
+            {
+                const uint32_t p = T[t + e],
+                               q = T[t + (e+1)%3];
+                const float dx = vp(q,0)-vp(p,0),
+                            dy = vp(q,1)-vp(p,1),
+                            dz = vp(q,2)-vp(p,2);
+                const float l = dx*dx + dy*dy + dz*dz;
+                if (l > lel)
+                {
+                    lel = l;
+                    le = e;
+                }
+            }
+            const uint32_t a = T[t + le], b = T[t + (le+1)%3],
+                           c2 = T[t + (le+2)%3];
+            uint64_t ka = a, kb = b;
+            if (ka > kb)
+                std::swap(ka, kb);
+            const auto it = et.find((ka << 32) | kb);
+            if (it == et.end() || it->second.size() != 2)
+                continue;
+            const uint32_t t2 = it->second[0] == uint32_t(t)
+                    ? it->second[1] : it->second[0];
+            if (dirty[t2 / 3])
+                continue;
+            uint32_t d = UINT32_MAX;
+            for (int e = 0; e < 3; ++e)
+            {
+                const uint32_t w = T[t2 + e];
+                if (w != a && w != b)
+                    d = w;
+            }
+            if (d == UINT32_MAX || d == c2)
+                continue;
+            float n2[3];
+            const float h2 = tri_h(T[t2], T[t2+1], T[t2+2], n2);
+            /*  Coplanarity against the NEIGHBOUR's plane - the
+             *  razor's own normal is numerically unstable
+             *  precisely because it is a razor (first cut of
+             *  this pass tested razor-normal dot and flipped
+             *  NOTHING).  The razor's apex must lie in the
+             *  neighbour's plane.  */
+            const float l2 = sqrtf(n2[0]*n2[0] + n2[1]*n2[1] +
+                                   n2[2]*n2[2]);
+            if (!(l2 > 0))
+                continue;
+            const float px = vp(c2,0) - vp(d,0),
+                        py = vp(c2,1) - vp(d,1),
+                        pz = vp(c2,2) - vp(d,2);
+            const float pdist = fabsf(px*n2[0] + py*n2[1] +
+                                      pz*n2[2]) / l2;
+            if (pdist > 1e-4f * sp)
+                continue;
+            /*  Flipped pair: (c2, d, a) and (d, c2, b) - both
+             *  must keep the NEIGHBOUR plane's orientation and
+             *  beat the old minimum height (convexity falls out
+             *  of the orientation test).  */
+            float na[3], nb[3];
+            const float ha = tri_h(c2, d, a, na);
+            const float hb = tri_h(d, c2, b, nb);
+            if (!(ha > 0) || !(hb > 0) ||
+                std::min(ha, hb) <= std::min(h1, h2) ||
+                na[0]*n2[0] + na[1]*n2[1] + na[2]*n2[2] <= 0 ||
+                nb[0]*n2[0] + nb[1]*n2[1] + nb[2]*n2[2] <= 0)
+                continue;
+            T[t] = c2;   T[t+1] = d;    T[t+2] = a;
+            T[t2] = d;   T[t2+1] = c2;  T[t2+2] = b;
+            dirty[t / 3] = 1;
+            dirty[t2 / 3] = 1;
+            ++flips;
+        }
+        if (!flips)
+            break;
+    }
+}
+
 /*  Post-mutation quality recount (correctness review finding 1,
  *  2026-07-17): decimation was the only mesh-mutating stage
  *  running AFTER the quality accounting - its damage shipped
@@ -6646,6 +6790,7 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
             if (ok && !*halt && (!de || atoi(de) != 0))
             {
                 weld_slivers(out, soup.spacing);
+                flip_slivers(out, soup.spacing);
                 decimate_flats(out);
                 recount_quality(out);
             }
@@ -6739,6 +6884,7 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
         if (!de || atoi(de) != 0)
         {
             weld_slivers(out, r.X[1] - r.X[0]);
+            flip_slivers(out, r.X[1] - r.X[0]);
             decimate_flats(out);
             recount_quality(out);
         }
