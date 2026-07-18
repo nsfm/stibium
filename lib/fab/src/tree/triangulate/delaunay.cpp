@@ -216,6 +216,8 @@ void eval_points(const Tape* tape, TapeCtx* ctx,
  *  leaf's drill-down address; crease_leaf says the pushed tape kept
  *  a live crease pair (gates the hidden-feature trigger - smooth
  *  tangent grazes read hidden too, and they never need density).  */
+float box_dense_factor(const DSoup& soup, float x, float y, float z);
+
 void sample_block(Collector& c, const Region& r, Tape* tape,
                   uint64_t leaf_key, bool crease_leaf)
 {
@@ -348,13 +350,117 @@ void sample_block(Collector& c, const Region& r, Tape* tape,
     for (size_t p = 0; p < n; ++p)
         (inside(p) ? any_in : any_out) = true;
 
+    /*  Sample thinning (perf front P2, 2026-07-17): the DT only
+     *  needs sign witnesses where signs can DISAGREE - refinement
+     *  bisects inside<->outside tet edges, and the interval-culled
+     *  far field already witnesses at 8 corners per box.  Deep
+     *  lattice interiors contribute nothing but insert time and
+     *  RAM (bino: insert 56% of wall).  Keep the sign-change band
+     *  (both endpoints of every crossing edge) dilated by
+     *  STIBIUM_DMESH_THIN rings of 26-neighbourhood shell, plus
+     *  the 8 block corners everywhere (the culled-region witness
+     *  granularity - an unwitnessed air gap between parts would
+     *  let an all-inside tet span the air).  Exact-zero samples
+     *  (on_surface) always survive.  -1 disables (dense legacy
+     *  lattice).  Dropping is per-block; keeping is the UNION
+     *  across blocks (shared faces dedup in add_sample), so a
+     *  crossing just over a block boundary keeps its shell from
+     *  the block that sees it.  */
+    static const char* thin_env = getenv("STIBIUM_DMESH_THIN");
+    const int shell = thin_env ? atoi(thin_env) : -1;
+    std::vector<uint8_t> keep;
+    if (shell >= 0)
+    {
+        keep.assign(n, 0);
+        if (any_in && any_out)
+        {
+            for (uint32_t k = 0; k < cz; ++k)
+                for (uint32_t j = 0; j < cy; ++j)
+                    for (uint32_t i = 0; i < cx; ++i)
+                    {
+                        const size_t p = idx(i, j, k);
+                        const size_t nb[3] = {
+                            i + 1 < cx ? idx(i + 1, j, k) : p,
+                            j + 1 < cy ? idx(i, j + 1, k) : p,
+                            k + 1 < cz ? idx(i, j, k + 1) : p,
+                        };
+                        for (const size_t pn : nb)
+                            if (pn != p && inside(p) != inside(pn))
+                                keep[p] = keep[pn] = 1;
+                    }
+            const auto near_kept = [&](uint32_t i, uint32_t j,
+                                       uint32_t k) {
+                const uint32_t i0 = i ? i - 1 : i,
+                        i1 = i + 1 < cx ? i + 1 : i,
+                        j0 = j ? j - 1 : j,
+                        j1 = j + 1 < cy ? j + 1 : j,
+                        k0 = k ? k - 1 : k,
+                        k1 = k + 1 < cz ? k + 1 : k;
+                for (uint32_t kk = k0; kk <= k1; ++kk)
+                    for (uint32_t jj = j0; jj <= j1; ++jj)
+                        for (uint32_t ii = i0; ii <= i1; ++ii)
+                            if (keep[idx(ii, jj, kk)])
+                                return true;
+                return false;
+            };
+            std::vector<uint8_t> next;
+            for (int ring = 0; ring < shell; ++ring)
+            {
+                next = keep;
+                for (uint32_t k = 0; k < cz; ++k)
+                    for (uint32_t j = 0; j < cy; ++j)
+                        for (uint32_t i = 0; i < cx; ++i)
+                            if (!keep[idx(i, j, k)] &&
+                                near_kept(i, j, k))
+                                next[idx(i, j, k)] = 1;
+                keep.swap(next);
+            }
+        }
+        for (int k = 0; k < 2; ++k)
+            for (int j = 0; j < 2; ++j)
+                for (int i = 0; i < 2; ++i)
+                    keep[idx(i ? ni : 0, j ? nj : 0,
+                             k ? nk : 0)] = 1;
+    }
+
+    /*  Thinning autopsy (STIBIUM_DMESH_THIN_DEBUG="x,y,z,r"):
+     *  every lattice decision within r of the point, with class -
+     *  the witness-level FPROBE.  */
+    static const char* tdb_env = getenv("STIBIUM_DMESH_THIN_DEBUG");
+    static float tdb[4] = { 0, 0, 0, -1 };
+    if (tdb_env && tdb[3] < 0)
+        sscanf(tdb_env, "%f,%f,%f,%f",
+               tdb, tdb + 1, tdb + 2, tdb + 3);
+
     for (uint32_t k = 0; k < cz; ++k)
         for (uint32_t j = 0; j < cy; ++j)
             for (uint32_t i = 0; i < cx; ++i)
             {
                 const size_t p = idx(i, j, k);
-                c.add_sample(xs[p], ys[p], zs[p], inside(p),
-                             vals[p] == 0);
+                if (tdb_env && tdb[3] > 0)
+                {
+                    const float ddx = xs[p] - tdb[0],
+                            ddy = ys[p] - tdb[1],
+                            ddz = zs[p] - tdb[2];
+                    if (ddx*ddx + ddy*ddy + ddz*ddz <
+                        tdb[3] * tdb[3])
+                        fprintf(stderr, "THINDBG (%.4f, %.4f, "
+                                "%.4f) f=%.5g %s block=%s%s\n",
+                                xs[p], ys[p], zs[p], vals[p],
+                                shell < 0 ? "legacy"
+                                : (keep[p] || vals[p] == 0)
+                                        ? "KEEP" : "DROP",
+                                any_in && any_out ? "mixed"
+                                : any_in ? "uni-in" : "uni-out",
+                                box_dense_factor(c.soup, xs[p],
+                                        ys[p], zs[p]) > 1
+                                        ? "-dense" : "");
+                }
+                if (shell < 0 || keep[p] || vals[p] == 0)
+                    c.add_sample(xs[p], ys[p], zs[p], inside(p),
+                                 vals[p] == 0);
+                else
+                    ++c.soup.thinned;
                 const size_t nb[3] = {
                     i + 1 < cx ? idx(i + 1, j, k) : p,
                     j + 1 < cy ? idx(i, j + 1, k) : p,
@@ -1895,6 +2001,11 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
         fprintf(stderr, "WELD: %llu air samples fused (sub-bar "
                 "clearances)\n",
                 (unsigned long long)c.soup.welded);
+    if (c.soup.thinned && (census.on ||
+                           getenv("STIBIUM_DMESH_TIME")))
+        fprintf(stderr, "THIN: %llu witnesses dropped, %zu kept\n",
+                (unsigned long long)c.soup.thinned,
+                c.soup.samples.size());
 
     /*  Stage-D drill-down: pass 1 is also the survey.  When any
      *  leaf triggered (QEF residual over the bar, or a hidden
@@ -2046,6 +2157,11 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
                     census2.on ? &census2 : nullptr, noweld);
         if (census2.on)
             census_print(census2, c2.soup, "CENSUS2");
+        if (c2.soup.thinned && dbg)
+            fprintf(stderr, "THIN2: %llu witnesses dropped, "
+                    "%zu kept\n",
+                    (unsigned long long)c2.soup.thinned,
+                    c2.soup.samples.size());
         if (dbg && !c2.want_dense.empty())
             fprintf(stderr, "AUTOD residue: %zu leaves still hot "
                     "after drill-down\n", c2.want_dense.size());
@@ -4046,6 +4162,24 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         sweep_steiner();
         if (!round_added)
             break;   // every insert coincided: no progress possible
+    }
+    /*  Which exit: converged (no pending in/out edges), stalled
+     *  (inserts all coincided - the survivors get spanned by
+     *  extraction), or round-capped.  A stall/cap leaves i/o edges
+     *  in the DT and extraction chords them - chip factory.  */
+    if (getenv("STIBIUM_DMESH_TIME"))
+    {
+        size_t leftover = 0;
+        for (auto e = dt.finite_edges_begin();
+             e != dt.finite_edges_end(); ++e)
+            if (e->first->vertex(e->second)->info() *
+                e->first->vertex(e->third)->info() == -1)
+                ++leftover;
+        fprintf(stderr, "REFINE: %d rounds, %llu inserted, "
+                "%zu i/o edges leftover%s\n", round,
+                (unsigned long long)inserted, leftover,
+                round >= MAX_ROUNDS ? " (ROUND CAP)"
+                : leftover ? " (STALLED)" : "");
     }
     pt.mark("refinement");
 
