@@ -61,8 +61,10 @@ femto-guard).  With THIN + gates the zeiss projection is SINGLE-
 DIGIT minutes - the validation run is the next big dish.
 Bino: THIN+gates 59 s (Nate: identical to base-gated), r2 in
 198 s / 1.77 GB (impossible pre-THIN).  Screws v20-class needs
-MAX=3 (queue: referee level-3 into the default).  THIN default
-still OFF pending Nate's default call.  QEM dial verdict:
+MAX=3 (queue: referee level-3 into the default).  THIN DEFAULT
+ON since 2026-07-18 (Nate: "I couldn't spot any visible
+difference... Worth it"; the 0.097-vs-0.170 depth delta did
+not register to the eye referee).  QEM dial verdict:
 STIBIUM_DMESH_SIMPLIFY=0.01 acceptable, 0.02 too far, 0.05 =
 octagon bores.  Analysis scripts live IN-REPO at tools/
 (Nate's call, 2026-07-18): fightpix.py (z-fighting pixel

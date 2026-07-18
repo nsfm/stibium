@@ -362,12 +362,16 @@ void sample_block(Collector& c, const Region& r, Tape* tape,
      *  granularity - an unwitnessed air gap between parts would
      *  let an all-inside tet span the air).  Exact-zero samples
      *  (on_surface) always survive.  -1 disables (dense legacy
-     *  lattice).  Dropping is per-block; keeping is the UNION
+     *  lattice).  DEFAULT 1 (Nate's eyes, 2026-07-18: "I couldn't
+     *  spot any visible difference.  Worth it" - bino 170 -> 59 s,
+     *  r2 unlocked at 198 s / 1.77 GB; the snap damage/churn
+     *  referees are the enabling guard).  Dropping is per-block;
+     *  keeping is the UNION
      *  across blocks (shared faces dedup in add_sample), so a
      *  crossing just over a block boundary keeps its shell from
      *  the block that sees it.  */
     static const char* thin_env = getenv("STIBIUM_DMESH_THIN");
-    const int shell = thin_env ? atoi(thin_env) : -1;
+    const int shell = thin_env ? atoi(thin_env) : 1;
     std::vector<uint8_t> keep;
     if (shell >= 0)
     {
