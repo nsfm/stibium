@@ -4364,6 +4364,123 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         }
     }
 
+    /*  Degenerate-sliver disenfranchisement (the z-fighting
+     *  conviction, 2026-07-18): lattice-aligned flats breed
+     *  ZERO-VOLUME tets lying flat in the surface plane - all
+     *  four vertices on-surface, so the oracle's probes all read
+     *  |f| ~ 0 and the cell's sign is rounding noise.  A noise
+     *  sign disagreeing with a neighbor emits a facet through a
+     *  cell with no interior: a second coincident layer in the
+     *  plane (fightpix: ~3,600 fighting pixels on screws, base
+     *  and THIN alike), with noise orientation (the apex dot is
+     *  the same degenerate volume).  A cell with no volume has
+     *  no geometric interior - ANY sign is consistent - so it
+     *  adopts the majority sign of its finite neighbors, which
+     *  cancels every facet through it.  Scale referee: flat
+     *  slivers read |V|/emax^3 ~ 1e-6, the DC wedge tets the
+     *  bias exists for read ~1e-2 - the 1e-4 bar splits the
+     *  measured populations by two orders each side.  Stacked
+     *  slivers settle by fixpoint (guarded).  STIBIUM_DMESH_
+     *  DEGEN=0 disables.  */
+    {
+        static const char* dg_env = getenv("STIBIUM_DMESH_DEGEN");
+        const float dg_bar = dg_env ? float(atof(dg_env)) : 1e-4f;
+        if (dg_bar > 0)
+        {
+            uint64_t vhist[10] = {};   // log10 rel-vol buckets
+            std::vector<CH> degen;
+            for (auto c = dt.finite_cells_begin();
+                 c != dt.finite_cells_end(); ++c)
+            {
+                bool allsurf = true;
+                for (int i = 0; i < 4 && allsurf; ++i)
+                    allsurf = c->vertex(i)->info() == 0;
+                if (!allsurf)
+                    continue;
+                double p[4][3];
+                for (int i = 0; i < 4; ++i)
+                {
+                    p[i][0] = c->vertex(i)->point().x();
+                    p[i][1] = c->vertex(i)->point().y();
+                    p[i][2] = c->vertex(i)->point().z();
+                }
+                double emax2 = 0;
+                for (int i = 0; i < 4; ++i)
+                    for (int j = i + 1; j < 4; ++j)
+                    {
+                        const double dx = p[i][0]-p[j][0],
+                                     dy = p[i][1]-p[j][1],
+                                     dz = p[i][2]-p[j][2];
+                        emax2 = std::max(emax2,
+                                dx*dx + dy*dy + dz*dz);
+                    }
+                const double ax = p[1][0]-p[0][0],
+                             ay = p[1][1]-p[0][1],
+                             az = p[1][2]-p[0][2];
+                const double bx = p[2][0]-p[0][0],
+                             by = p[2][1]-p[0][1],
+                             bz = p[2][2]-p[0][2];
+                const double cx2 = p[3][0]-p[0][0],
+                             cy2 = p[3][1]-p[0][1],
+                             cz2 = p[3][2]-p[0][2];
+                const double vol = fabs(
+                        ax*(by*cz2 - bz*cy2) +
+                        ay*(bz*cx2 - bx*cz2) +
+                        az*(bx*cy2 - by*cx2)) / 6.0;
+                const double e3 = emax2 * sqrt(emax2);
+                if (!(e3 > 0))
+                    continue;
+                const double rel = vol / e3;
+                int b = rel <= 0 ? 0
+                        : int(9 + floor(log10(rel)));
+                ++vhist[b < 0 ? 0 : b > 9 ? 9 : b];
+                if (rel < dg_bar)
+                    degen.push_back(c);
+            }
+            uint64_t adopted = 0;
+            for (int round = 0; round < 8; ++round)
+            {
+                bool changed = false;
+                for (const CH& c : degen)
+                {
+                    int votes = 0;
+                    for (int i = 0; i < 4; ++i)
+                    {
+                        const CH n = c->neighbor(i);
+                        votes += dt.is_infinite(n) ? 1
+                                : int(n->info());
+                    }
+                    /*  Ties break INSIDE, deterministically: a
+                     *  pancake between solid-below and air-above
+                     *  reads 2 v 2, and stacked pancakes with
+                     *  alternating noise signs emit a coincident
+                     *  facet at EVERY flip (the doubled layers).
+                     *  Any uniform choice makes a stack monotone
+                     *  - one emission, at the stack's air side.  */
+                    const int8_t want = votes > 0 ? 1 : -1;
+                    if (c->info() != want)
+                    {
+                        c->info() = want;
+                        changed = true;
+                        ++adopted;
+                    }
+                }
+                if (!changed)
+                    break;
+            }
+            if (getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+            {
+                fprintf(stderr, "DEGEN: %llu adopted of %zu degen; "
+                        "all-surf rel-vol hist (<=1e-9..>=1): ",
+                        (unsigned long long)adopted, degen.size());
+                for (int b = 0; b < 10; ++b)
+                    fprintf(stderr, "%llu ",
+                            (unsigned long long)vhist[b]);
+                fprintf(stderr, "\n");
+            }
+        }
+    }
+
     /*  Extraction: facets whose three corners are surface vertices,
      *  between cells of opposite sign; oriented so the triangle is
      *  CCW seen from the outside cell.  Facets of a tet complex
