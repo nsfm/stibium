@@ -163,6 +163,24 @@ Battle plan (each is A/B-able on bino in minutes, referee-gated):
   source).  Static adjacency/altitude censuses are BLIND to
   this class (fold180 reads 211 vs 234 while fightpix reads
   278 vs 915) - overlapping folds rarely share edges.
+  FOLD-CURE ROUND 1 (2026-07-18 ~3am, theories 8+9): the
+  DEGEN pass landed (all-surf rel-vol histogram + neighbor-
+  sign adoption for cells < 1e-4 rel-vol, tie-break inside,
+  STIBIUM_DMESH_DEGEN=bar) - cures the ~24 float-degenerate
+  pancakes but fightpix UNCHANGED (3,596).  The real
+  population: REPAIR-MINTED pancakes at rel-vol 1e-3..1e-2,
+  GROWING per repair round (221 -> 1,045 by round 3; Newton-
+  projected inserts land exactly on the flat and mint new
+  near-zero cells between old surface vertices; layer gaps
+  3e-4..3e-3 = the z-fight band).  Volume alone CANNOT
+  separate them from the DC wedge tets (same 1e-2 decade).
+  NEXT-SESSION DESIGN: discriminator = gradient uniformity
+  across the cell (pancake: one flat patch, uniform gradient;
+  wedge: split gradient - the very reason DC exists).  Then
+  either disenfranchise pancakes at classification, or
+  post-pass excision seeded by the gradient-vs-normal facet
+  detector.  Fresh eyes, referee everything against the
+  concave-chip dishes (plinth + screws heads).
 - CLOSE-PERIMETER can of worms (bino): air-chords + pockmarks on
   close-together perimeters.  The strips/level-3/weld composite
   class - reopen AFTER perf (Nate's call).  Assets: NM_DEBUG
