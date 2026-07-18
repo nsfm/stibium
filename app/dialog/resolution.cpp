@@ -9,7 +9,8 @@ ResolutionDialog::ResolutionDialog(Bounds bounds, bool dimensions, bool has_unit
                                    long max_voxels, QWidget* parent,
                                    float min_resolution)
     : QDialog(parent), bounds(bounds), ui(new Ui::ResolutionDialog),
-      z_bounded(!std::isinf(bounds.zmax) && !std::isinf(bounds.zmin))
+      z_bounded(!std::isinf(bounds.zmax) && !std::isinf(bounds.zmin)),
+      is_3d(dimensions == RESOLUTION_DIALOG_3D)
 {
     ui->setupUi(this);
 
@@ -25,6 +26,26 @@ ResolutionDialog::ResolutionDialog(Bounds bounds, bool dimensions, bool has_unit
         ui->simplify_mesh->hide();
         ui->max_deviation_label->hide();
         ui->max_deviation->hide();
+        ui->mesher_label->hide();
+        ui->mesher->hide();
+        ui->quality_label->hide();
+        ui->quality->hide();
+        ui->advanced_group->hide();
+    }
+    else
+    {
+        connect(ui->mesher,
+                static_cast<void (QComboBox::*)(int)>(
+                    &QComboBox::currentIndexChanged),
+                this, &ResolutionDialog::onModeChanged);
+        connect(ui->quality,
+                static_cast<void (QComboBox::*)(int)>(
+                    &QComboBox::currentIndexChanged),
+                this, &ResolutionDialog::onModeChanged);
+        connect(ui->adv_autodense, &QCheckBox::toggled,
+                ui->adv_density_cap, &QComboBox::setEnabled);
+        connect(ui->adv_autodense, &QCheckBox::toggled,
+                ui->adv_density_label, &QLabel::setEnabled);
     }
 
     connect(ui->simplify_mesh, &QCheckBox::toggled,
@@ -77,6 +98,75 @@ ResolutionDialog::ResolutionDialog(Bounds bounds, bool dimensions, bool has_unit
         ui->export_res->setValue(std::max(double(min_resolution),
                 pow(max_voxels / volume, 1/3.) / 2.52));
     }
+
+    if (is_3d)
+        onModeChanged();
+}
+
+void ResolutionDialog::onModeChanged()
+{
+    const bool stibnite = ui->mesher->currentIndex() == MESHER_STIBNITE;
+    const bool custom = ui->quality->currentIndex() == 3;
+
+    ui->quality_label->setVisible(stibnite);
+    ui->quality->setVisible(stibnite);
+    ui->advanced_group->setVisible(stibnite);
+    ui->detect_features->setVisible(!stibnite);
+    ui->feature_size->setVisible(!stibnite);
+
+    /*  Stibnite's resolution is a lattice multiplier (the quality
+     *  presets); Classic's is voxels-per-unit.  The spin only shows
+     *  for Stibnite when Custom is picked.  */
+    ui->label_2->setText(stibnite ? "Resolution multiplier:"
+                                  : "Voxels per unit:");
+    ui->label_2->setVisible(!stibnite || custom);
+    ui->export_res->setVisible(!stibnite || custom);
+    if (stibnite && custom && ui->export_res->value() > 8)
+        ui->export_res->setValue(1);
+
+    /*  Stibnite ships the refereed 0.01 mm simplify dial; Classic
+     *  keeps its resolution-tracking tenth-of-a-voxel formula.  */
+    if (stibnite && !deviation_touched)
+    {
+        updating_deviation = true;
+        ui->max_deviation->setValue(0.01);
+        updating_deviation = false;
+    }
+    else if (!stibnite)
+        onValueChanged(ui->export_res->value());
+
+    layout()->invalidate();
+    adjustSize();
+}
+
+int ResolutionDialog::getMesher() const
+{
+    return is_3d ? ui->mesher->currentIndex() : MESHER_CLASSIC;
+}
+
+bool ResolutionDialog::getAutodense() const
+{
+    return ui->adv_autodense->isChecked();
+}
+
+int ResolutionDialog::getDensityCap() const
+{
+    return ui->adv_density_cap->currentIndex() == 1 ? 3 : 2;
+}
+
+bool ResolutionDialog::getDecimate() const
+{
+    return ui->adv_decimate->isChecked();
+}
+
+bool ResolutionDialog::getSnap() const
+{
+    return ui->adv_snap->isChecked();
+}
+
+int ResolutionDialog::getStallPatience() const
+{
+    return ui->adv_stall->currentIndex() == 1 ? 2 : 1;
 }
 
 void ResolutionDialog::onValueChanged(int i)
@@ -108,6 +198,16 @@ void ResolutionDialog::onValueChanged(int i)
 
 float ResolutionDialog::getResolution() const
 {
+    if (is_3d && ui->mesher->currentIndex() == MESHER_STIBNITE)
+    {
+        switch (ui->quality->currentIndex())
+        {
+            case 0: return 1;   // Standard
+            case 1: return 2;   // Beautiful
+            case 2: return 3;   // Extreme (untested territory)
+            default: return ui->export_res->value();
+        }
+    }
     return ui->export_res->value();
 }
 

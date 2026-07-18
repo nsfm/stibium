@@ -1,6 +1,9 @@
 #include <Python.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstring>
+#include <thread>
 #include <vector>
 
 #include <QFileDialog>
@@ -39,12 +42,19 @@ void ExportMeshWorker::run()
     if (resolution == -1)
     {
         auto resolution_dialog = new ResolutionDialog(
-                bounds, RESOLUTION_DIALOG_3D, UNITLESS, 1 << 22, NULL, 7);
+                bounds, RESOLUTION_DIALOG_3D, UNITLESS, 1 << 22, NULL, 1);
         if (!resolution_dialog->exec())
             return;
         _resolution = resolution_dialog->getResolution();
         _detect_features = resolution_dialog->getDetectFeatures();
         _simplify = resolution_dialog->getSimplifyDeviation();
+        _mesher = resolution_dialog->getMesher();
+        _adv_autodense = resolution_dialog->getAutodense();
+        _adv_density_cap = resolution_dialog->getDensityCap();
+        _adv_decimate = resolution_dialog->getDecimate();
+        _adv_snap = resolution_dialog->getSnap();
+        _adv_stall = resolution_dialog->getStallPatience();
+        _from_dialog = true;
         delete resolution_dialog;
     }
     else
@@ -52,6 +62,7 @@ void ExportMeshWorker::run()
         _resolution = resolution;
         _detect_features = detect_features;
         _simplify = simplify;
+        _mesher = getenv("STIBIUM_EXPORT_CLASSIC") ? 1 : 0;
     }
 
     if (_resolution == 0)
@@ -89,7 +100,15 @@ void ExportMeshWorker::run()
                   QFileInfo(_filename).absolutePath());
 
     if (checkWritable())
+    {
         runAsync();
+        /*  Post-export report (Nate's stats-dialog ask,
+         *  2026-07-18): async() fills _stats; we are back on the
+         *  GUI thread here.  Silent when cancelled or classic.  */
+        if (!_stats.isEmpty() && !halt)
+            QMessageBox::information(NULL, "Export complete",
+                                     _stats);
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -109,6 +128,13 @@ bool ExportMeshWorker::runHeadless(const QString& fname, float res,
     _resolution = res > 0 ? res : resolution;
     _detect_features = detect < 0 ? detect_features : bool(detect);
     _simplify = simplify;
+    /*  Headless default is Stibnite (integration 2026-07-18);
+     *  STIBIUM_EXPORT_CLASSIC=1 routes to the classic sampler.
+     *  STIBIUM_EXPORT_DMESH=1 remains accepted (now a no-op) so
+     *  every documented harness command keeps working.  Knobs
+     *  stay env-driven on this path.  */
+    _mesher = getenv("STIBIUM_EXPORT_CLASSIC") ? 1 : 0;
+    _from_dialog = false;
 
     if (_filename.isEmpty())
     {
@@ -143,22 +169,56 @@ void ExportMeshWorker::async()
 
     // The mesher produces an indexed mesh directly (unique vertices +
     // three indices per triangle), so no welding pass is needed.
-    // Meshing is chunked across all cores; the progress counters feed
-    // the export dialog's bar.
     progress_phase = PHASE_MESHING;
     progress_total = r.voxels;
     std::vector<float> verts;
     std::vector<uint32_t> indices;
-    /*  STIBIUM_EXPORT_DMESH=1 routes the export through the
-     *  adaptive-Delaunay mesher (doc/MESH-NEXT.md) instead of the
-     *  production Kobbelt path - the final-quality pipeline, single
-     *  threaded, no progress reporting.  Experimental.  */
-    if (getenv("STIBIUM_EXPORT_DMESH"))
+    _stats.clear();
+    /*  Stibnite (the adaptive-Delaunay mesher, doc/MESH-WAR.md) is
+     *  the default; Classic is the dialog's other choice or
+     *  STIBIUM_EXPORT_CLASSIC=1 headless.  */
+    if (_mesher == 0)
     {
+        /*  Dialog knobs -> process environment.  Safe: one export
+         *  at a time is law, and the headless path never enters
+         *  here with _from_dialog set.  */
+        if (_from_dialog)
+        {
+            qputenv("STIBIUM_DMESH_AUTODENSE",
+                    _adv_autodense ? "1" : "0");
+            qputenv("STIBIUM_DMESH_AUTODENSE_MAX",
+                    QByteArray::number(_adv_density_cap));
+            qputenv("STIBIUM_DMESH_DECIMATE",
+                    _adv_decimate ? "1" : "0");
+            qputenv("STIBIUM_DMESH_SNAP", _adv_snap ? "1" : "0");
+            qputenv("STIBIUM_DMESH_STALL",
+                    QByteArray::number(_adv_stall));
+        }
+
+        /*  Mirror the mesher's progress sink into the dialog's
+         *  bar until meshing returns.  */
+        progress_total = 1000;
+        std::atomic<bool> mesh_done{ false };
+        std::thread mirror([&]() {
+            while (!mesh_done.load())
+            {
+                progress_done = uint64_t(
+                        dmesh_progress()->overall.load() * 1000);
+                std::this_thread::sleep_for(
+                        std::chrono::milliseconds(100));
+            }
+        });
+
+        const auto t0 = std::chrono::steady_clock::now();
         Deck* deck = deck_from_tree(shape.tree.get());
         DMesh m;
         const bool ok = delaunay_mesh(deck, r, &halt, &m);
         deck_free(deck);
+        mesh_done = true;
+        mirror.join();
+        const double wall = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - t0).count();
+
         fprintf(stderr, "dmesh export: %s, %zu tris, %llu open, "
                 "%llu non-manifold, %llu constrained, %llu steiner, "
                 "%llu repaired, %llu split, %llu snapped\n",
@@ -171,6 +231,21 @@ void ExportMeshWorker::async()
                 (unsigned long long)m.repaired,
                 (unsigned long long)m.split_verts,
                 (unsigned long long)m.snapped);
+        if (ok && !halt)
+            _stats = QString(
+                    "<b>Stibnite mesh report</b><br><br>"
+                    "%1 triangles, %2 vertices<br>"
+                    "open edges: %3<br>"
+                    "feature edges constrained: %4<br>"
+                    "repairs: %5 &nbsp; crease snaps: %6<br>"
+                    "meshing time: %7 s")
+                    .arg(m.tris.size() / 3)
+                    .arg(m.verts.size() / 3)
+                    .arg(m.open_edges)
+                    .arg(m.constrained)
+                    .arg(m.repaired)
+                    .arg(m.snapped)
+                    .arg(wall, 0, 'f', 1);
         verts = std::move(m.verts);
         indices = std::move(m.tris);
     }
@@ -191,7 +266,7 @@ void ExportMeshWorker::async()
      *  delivers it from code already in the tree.  Phase 2
      *  (crease vertex_lock) is designed in doc/reviews/.  */
     float simplify = _simplify;
-    if (getenv("STIBIUM_EXPORT_DMESH"))
+    if (_mesher == 0)
         if (const char* se = getenv("STIBIUM_DMESH_SIMPLIFY"))
             simplify = float(atof(se));
     if (simplify > 0 && indices.size() >= 3 && !halt)

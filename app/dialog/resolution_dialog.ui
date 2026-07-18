@@ -6,19 +6,79 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>239</width>
-    <height>238</height>
+    <width>259</width>
+    <height>420</height>
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Resolution</string>
+   <string>Export mesh</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
     <widget class="QLabel" name="label">
      <property name="text">
-      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Resolution&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Export&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="mesher_label">
+     <property name="text">
+      <string>Mesher:</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QComboBox" name="mesher">
+     <property name="toolTip">
+      <string>Stibnite: adaptive mesher - sharp features, watertight output, adaptive detail.
+Classic: fast uniform sampler - low memory, larger files.</string>
+     </property>
+     <item>
+      <property name="text">
+       <string>Stibnite (adaptive)</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>Classic (sampling)</string>
+      </property>
+     </item>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="quality_label">
+     <property name="text">
+      <string>Quality:</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QComboBox" name="quality">
+     <property name="toolTip">
+      <string>Each step roughly triples meshing time and halves the size of surface defects.
+Extreme is untested territory - expect hours on large models.</string>
+     </property>
+     <item>
+      <property name="text">
+       <string>Standard</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>Beautiful (~3x time)</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>Extreme (untested)</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>Custom</string>
+      </property>
+     </item>
     </widget>
    </item>
    <item>
@@ -133,6 +193,114 @@
       </widget>
      </item>
     </layout>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="advanced_group">
+     <property name="title">
+      <string>Advanced</string>
+     </property>
+     <layout class="QVBoxLayout" name="advancedLayout">
+      <item>
+       <widget class="QCheckBox" name="adv_autodense">
+        <property name="text">
+         <string>Adaptive detail density</string>
+        </property>
+        <property name="toolTip">
+         <string>Automatically refines the sampling lattice where the model carries
+sub-lattice detail (curvature and crowding driven)</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="density_layout">
+        <item>
+         <widget class="QLabel" name="adv_density_label">
+          <property name="text">
+           <string>Density cap:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QComboBox" name="adv_density_cap">
+          <property name="toolTip">
+           <string>High resolves finer sub-lattice detail (threads, knurling)
+at roughly double the meshing time on dense models</string>
+          </property>
+          <item>
+           <property name="text">
+            <string>Standard</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>High</string>
+           </property>
+          </item>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="adv_decimate">
+        <property name="text">
+         <string>Decimate flat regions</string>
+        </property>
+        <property name="toolTip">
+         <string>Collapses redundant triangles on flat surfaces (~4x smaller files)</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="adv_snap">
+        <property name="text">
+         <string>Crease snap</string>
+        </property>
+        <property name="toolTip">
+         <string>Snaps residual surface defects onto traced feature edges
+(guarded by damage referees)</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="stall_layout">
+        <item>
+         <widget class="QLabel" name="adv_stall_label">
+          <property name="text">
+           <string>Repair effort:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QComboBox" name="adv_stall">
+          <property name="toolTip">
+           <string>Patient runs extra repair rounds after progress stalls -
+marginally finer flat regions at extra time</string>
+          </property>
+          <item>
+           <property name="text">
+            <string>Fast</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Patient</string>
+           </property>
+          </item>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
    </item>
    <item>
     <widget class="QDialogButtonBox" name="buttonBox">
