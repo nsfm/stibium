@@ -2536,11 +2536,14 @@ static void trace_step_seams(const Deck* deck, DSoup* soup,
     /*  Wake bar: a tenth of the step-prominence bar (the same
      *  calibration the contact tracer measured).  */
     const float cbar = 0.005f / sp;
-    /*  Ridge-rung prominence bar (1/sp units): the smeared-step
-     *  shoulder overshoot must not chain.  */
+    /*  Ridge-rung prominence bar (1/sp units, default 0 = the
+     *  plain strict rule): measured 2026-07-19, prominence
+     *  cannot separate crossing spikes from step shoulders at
+     *  any bar - the FOLD-EXCESS referee below does that; the
+     *  knob stays for experiments.  */
     static const char* rp_env =
             getenv("STIBIUM_DMESH_RIDGE_PROM");
-    const float rprom = (rp_env ? float(atof(rp_env)) : 0.1f)
+    const float rprom = (rp_env ? float(atof(rp_env)) : 0.f)
                         / std::max(sp, 1e-20f);
     for (const auto& s : soup->tseeds)
     {
@@ -2602,6 +2605,75 @@ static void trace_step_seams(const Deck* deck, DSoup* soup,
                     got = valley_project(deck, ctx, sp, sp,
                                          x, y, z, 0.002f, true,
                                          rprom);
+                    /*  SCALE-DIVERGENCE referee: neither
+                     *  prominence nor fold-excess separates a
+                     *  crossing KINK from a smeared G1 STEP
+                     *  (both measured failing, see MESH-WAR -
+                     *  total normal turn is conserved under
+                     *  smearing, so every step "folds").  What
+                     *  separates them is how kappa RESPONDS TO
+                     *  THE STENCIL: a kink is a delta - its
+                     *  reading grows ~theta/2h as h shrinks; a
+                     *  C1 step saturates at its taller plateau
+                     *  (curvature between two smooth sheets
+                     *  never exceeds either side).  Probe kmax
+                     *  at h and h/2: divergent = kink, keep;
+                     *  saturated = shoulder, drop.  */
+                    if (got)
+                    {
+                        static const char* sd_env = getenv(
+                                "STIBIUM_DMESH_SCALE_DIV");
+                        const float sbar = sd_env
+                                ? float(atof(sd_env)) : 1.4f;
+                        /*  The projected candidate sits at the
+                         *  SMEARED kappa peak, which the step
+                         *  asymmetry biases off the kink line
+                         *  (measured: ratio 1.000 at the
+                         *  candidate itself) - sweep stations
+                         *  across; some station lands within
+                         *  h/2 of the kink and diverges.  */
+                        /*  Station pitch must be finer than the
+                         *  SMALL stencil's capture radius (h/2
+                         *  = 0.025 sp) or every station misses
+                         *  the kink and the small probe reads
+                         *  LOWER than the big one (measured:
+                         *  candidates sit ~0.035 sp off the
+                         *  kink, 0.1-pitch stations all read
+                         *  1.001).  */
+                        KOut kc0;
+                        float best = 0;
+                        got = curvature_probe(deck, ctx,
+                                      0.1f * sp, x, y, z, &kc0);
+                        for (int st = -5; got && st <= 5; ++st)
+                        {
+                            const float qx =
+                                    x + 0.02f*sp*st*kc0.sx,
+                                    qy = y + 0.02f*sp*st*kc0.sy,
+                                    qz = z + 0.02f*sp*st*kc0.sz;
+                            KOut kh, kh2;
+                            if (curvature_probe(deck, ctx,
+                                        0.1f * sp, qx, qy, qz,
+                                        &kh) &&
+                                curvature_probe(deck, ctx,
+                                        0.05f * sp, qx, qy, qz,
+                                        &kh2) &&
+                                kh.kmax > 0)
+                                best = std::max(best,
+                                        kh2.kmax / kh.kmax);
+                        }
+                        if (got)
+                            got = best > sbar;
+                        if (dbg_rej < 8 && getenv(
+                                "STIBIUM_DMESH_CHIP_DEBUG"))
+                        {
+                            ++dbg_rej;
+                            fprintf(stderr, "  TSEEDDBG ridge "
+                                    "cand (%.3f,%.3f,%.3f) "
+                                    "scale-ratio=%.3f %s\n",
+                                    x, y, z, best,
+                                    got ? "KEEP" : "drop");
+                        }
+                    }
                     if (got)
                         mode = 2;
                 }

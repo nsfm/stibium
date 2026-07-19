@@ -505,28 +505,45 @@ STIBIUM_DMESH_STEP_TRACE=0 disables.  Exhibits for Nate:
 build/zeiss_dmesh/{onaxis,offaxis}_tseed_{ring,mesh}.stl.
 
 OPEN - THE SPIKE-RUNG QUESTION (opt-in STIBIUM_DMESH_TSEED_
-RIDGE=1, next primitive hunt): the cone-torus lip (stacked_
-cone_cylinder_torus_lip) meets at ~13 deg - a real crossing
-BELOW the crease tracer's reach (no z~15.2 ring in tchains) and
-step_project rightly refuses it (a crossing is a kappa SPIKE;
-the strict peak gate is a RAMP detector - the derivative flips
-sign mid-window; that asymmetry is exactly why bino mints no
-false seams).  Valley+ridge fallback rungs are BUILT and the
-ridge rung traces the cone seam full-azimuth (24/24, r 10.0-
-10.5, z 15.3-15.8, exhibit cone_tseed_ridge_optin.stl) - but
-it ALSO chains the stencil's overshoot SHOULDER 0.5 sp inside
-the off-axis fillet (a wobbling false rail; today it measures
-harmless - mesh report identical - but it is the "curvy chaotic
-lines" class in embryo).  PROMINENCE CANNOT SEPARATE THEM
-(measured: bars 0.02/0.05/0.1 per sp each fail one side -
-STIBIUM_DMESH_RIDGE_PROM plumbed through valley_project ridge
-branch and march mode 2, kept for the hunt).  Next
-discriminator candidate: NORMAL-FOLD EXCESS - probe normals
-+/-0.25 sp across the line; a true crossing folds beyond what
-the measured curvature explains, a shoulder does not.  Note the
-cone seam's mesh damage today is 0.008 sp (sub-floor) - this
-rung is about ZEISS-CLASS shallow-crossing coverage (the 22K
-untraced tangent-blend chips), not the bench.
+RIDGE=1; three discriminators measured-refuted 2026-07-19,
+read before resuming): the cone-torus lip carries a true ~13
+deg crossing ring at z=15/r=10.5 (the torus outer equator
+meets the CLIPPED cone's rim - note the model is union(torus,
+c1, c0 INTERSECT cone): the cone stops at z=15, there is no
+upper crossing; a chord-geometry derivation missing the clip
+cost an hour).  NOBODY owns that ring: crease law traces only
+z=16/r=9.5 + the sharp rims (fine census), and step_project
+rightly peak-rejects its seeds (spike, not ramp - the same
+strictness that keeps bino clean).  The ridge rung traces it
+full-azimuth (24/24) but ALSO chains the smeared-step SHOULDER
+0.5 sp inside the off-axis fillet.  REFUTED SEPARATORS, with
+mechanisms: (1) PROMINENCE (bars 0.02/0.05/0.1 per sp each
+fail one side; RIDGE_PROM knob kept, default 0) - at sp ~ tube
+radius the smeared kink height theta/2h ~ 1.1/sp coincides
+with the fillet plateau 1/sp.  (2) FOLD-EXCESS (normals +/-d
+minus curvature-explained rotation) - total normal turn is
+CONSERVED under smearing, so every step "folds"; worse, a
+kappa station inside the smear zone reads the spike as plateau
+and explains the kink away (cone-side kappa read 0.907 vs
+honest ~0); at d=0.4 the shoulder out-folded the kink 0.34 vs
+0.13 rad.  Function deleted; do not rebuild it.  (3) SCALE
+DIVERGENCE (kmax at h=0.05 vs h=0.1; kink ~ theta/2h diverges,
+C1 step saturates - clean theory, right primitive) - reads
+1.001 EVERYWHERE because the ridge projector converges ~0.5 sp
+AWAY from the kink onto smooth torus (candidates z~15.475 vs
+ring z=15.0), and even 0.02-sp station sweeps along kmax-dir
+from there never touch the kink.  ROOT CAUSE TO HUNT NEXT: why
+valley_project ridge mode is displaced half a cell from a real
+13-deg kink (candidate suspects: eigen-direction rotation near
+the kink, the 3-iteration parabola walk, project_points_impl
+pulling along the surface).  Instrument first: dump the kmax
+profile along the meridian through (10.5, z 14.5..16) before
+touching the projector.  The scale-divergence referee is
+WIRED (STIBIUM_DMESH_SCALE_DIV, default 1.4, station sweep
+0.02 sp) and becomes correct the moment candidates land on the
+kink.  Damage context: the unowned ring costs 0.008 sp today
+(sub-floor) - this rung is about zeiss-class shallow-crossing
+coverage, not the bench.
 
 STEP DETECTOR CORE BUILT (2026-07-19 late, 2bfbcd04): hg_from_
 vals + kappa_along (raw Hessian shared), step_project (five
