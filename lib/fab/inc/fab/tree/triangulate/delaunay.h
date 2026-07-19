@@ -221,4 +221,13 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
 bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
                         volatile int* halt, DMesh* out);
 
+/*  Seam-closure-consistent pinch split (slicer hygiene): makes
+ *  every index edge <= 2-incident by duplicating vertices per
+ *  sheet (coincident copies, zero vertex motion) and midpoint-
+ *  subdividing seams whose sheets merge at both ends.  Run at
+ *  the EXPORT tail, strictly after optional simplification.
+ *  Gated on STIBIUM_DMESH_PINCHSPLIT; returns copies minted.  */
+uint64_t dmesh_split_pinches(std::vector<float>& verts,
+                             std::vector<uint32_t>& tris);
+
 #endif

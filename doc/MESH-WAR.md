@@ -195,6 +195,42 @@ SEPARATION FORMALLY DEAD (nearby-weld ladder climbs ~0.02 mm,
 fuses real walls).  Fan-claim guard STAYS (prusa's 3MF manifold
 test is topological only).
 
+SEAM-CLOSURE PINCH-SPLIT ***LANDED*** (2026-07-18 night, the
+manifold=yes finish line).  Three-part design in
+dmesh_split_pinches (public, export-tail):
+1. MATERIAL-WEDGE PAIRING: at each nm edge, radial-sort the
+   incident faces around the edge axis; a b->a-wound face has
+   material on its CCW side, an a->b face on its clockwise side,
+   so each material wedge runs dir- -> next dir+ CCW (zero-width
+   wedges skipped - doubled-sheet kisses put faces at coincident
+   angles and a noise pairing glues the sheets).  The pairs
+   COUNT as fan connectivity in the vertex union-find, so sheets
+   re-close by construction: 0 boundary edges minted anywhere
+   (naive barrier split: 2,202).
+2. FROZEN-SNAPSHOT ROUNDS: all reads from a per-round copy of
+   the index array; the live-read pattern let later vertices see
+   rewritten ids as unknown edges -> spurious barriers.
+3. MIDPOINT SUBDIVISION for stuck seams (bino: 157/274 edges
+   whose sheets reconnect through BOTH endpoint fans - no vertex
+   partition can separate them): cut the edge at its collinear
+   midpoint (zero geometric deviation); the fresh vertex is
+   entangled with nothing but the seam and splits next round.
+   Endpoints stay fused = bowtie vertices, legal manifold-test
+   topology.
+POSITION: export tail, STRICTLY after QEM - meshopt tears
+coincident copies into real boundary holes if the split runs
+first, and its collapses mint fresh pinches of their own (bino
+274 -> 325 nm).  Tail position cures both.  SCORE (3MF, r1):
+screws no/8-open -> MANIFOLD=YES 0/0 parts=1, hist pure
+{2: 8448}; bino no/73-open/274 nm -> MANIFOLD=YES, 0 boundary,
+1 residual nm (one non-alternating 3.8-degree kiss fan);
+bino+QEM0.01 no/80-open/325 nm -> MANIFOLD=YES, 0 boundary, 10
+residual nm.  Geometric welded 0/0/0 on all finals (odd-
+incidence census); suite 627,666 green.  Instrument:
+tools/idxedges.py (index-edge incidence histogram on 3MF - the
+hygiene referee).  STILL OPT-IN (STIBIUM_DMESH_PINCHSPLIT=1);
+default flip is Nate's call, on the desk.
+
 TIER A SESSION VERDICTS (2026-07-18 day, autonomous run - the
 plan met reality and reality won several rounds):
 - PINCH-SPLIT: built, works (index-nm 274 -> 0), but coincident
