@@ -333,6 +333,48 @@ chip; separate hunt.  AND: the exported 3MF (pinch split now
 default) reads incidence {2: 809676} PURE - **prusa
 MANIFOLD=YES on the FULL ZEISS**, the whole hygiene arc closed
 end-to-end.
+
+QUALITY ROUND 2 - THE WIREFRAME SPLOTCH CASE ***CRACKED***
+(2026-07-18 late night; Nate's lead: quilted low-tri polygonal
+patches, random on cylinder walls).  Instrument:
+tools/areamap.py (per-pixel front-triangle area heatmap; red =
+big).  TWO mechanisms separated by A/B, THREE theories buried:
+- Big irregular plates: decimate_flats merging TRUE FLATS
+  (dihedral autopsy 0.000 deg, axis/45-deg normals) - legal and
+  correct, NOT the splotch.  A curvature VETO now caps plate
+  growth on curved surface anyway (batched Hessian at each
+  candidate; refuse when fan-span sagitta kappa*L^2/8 beats
+  STIBIUM_DMESH_DECCURVE*mesh_edge, default 0.05; flats merge
+  freely).  Bino vetoes 10.2K, tris +2K.
+- THE SPLOTCH: TANGLE-DEMOTION SPECKLE.  Bino is blanket
+  level-2 (1,562/1,665 @2) but 404 leaves tangle-demote to
+  level 1 wherever the per-leaf sep reading (min over corner
+  pairs - noisy) flickers across the 0.7-cell bar on thin
+  walls: isolated 2x-coarse islands = the polygonal splotches.
+  CURE: DESPECKLE - a real tangle band is contiguous (its
+  neighbors demote too, majority filter leaves it alone); only
+  isolated level-1 islands with >= 5 touching level-2 neighbors
+  re-promote.  Bino: 102 islands -> map fully uniform @2,
+  splotches GONE in areamap, worst 0.093 held, 0 open, +2K
+  tris.  Buried theories: live=0 pockets (bino has exactly 2
+  smooth leaves), leaf-corner mindot trigger (thin walls put
+  both sheets in every leaf, mindot pegs -1 - measured on
+  lamp).
+- CHAINLESS-CURVATURE TRIGGER (density campaign 2 of 3) landed
+  with the honest signal: PROJECTED Hessian probe at the leaf
+  (leaf_curve_theta - project center to surface on the BASE
+  tape, kappa*cell = facet angle/cell).  Band bar-to-25deg
+  (STIBIUM_DMESH_CURVEBAR, default 3 deg/cell; ceiling =
+  crease grade).  Bino 158 flags / lamp 84 - mostly subsumed
+  by blanket coverage today; the trigger matters where coverage
+  is sparse.  Smooth-pocket fill also in (live=0 leaves
+  recorded + filled; rare - bino 2).
+- LAMP CONE VERDICT: already blanket level-1/2 at r1 - the
+  residual quilt needs LEVEL 3 (the queued MAX=3 referee), not
+  a new trigger.
+- Dense-knob smoke test isolated from the trigger (CURVEBAR=0
+  around the DENSE=1 smoke; bench pitch legitimately reads
+  several deg/cell).
 8. OPEN-EDGE PREDICTOR for retreat (perf 1b, gate on a stability
    instrument first): doomed attempts skip the repair tail,
    ~3 min off the full assembly.

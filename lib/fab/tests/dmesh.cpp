@@ -222,12 +222,19 @@ TEST_CASE("Delaunay stage A: surface points sit on the surface",
     {
         DeckRegion d(MODELS[3], 48, 1.1f);
         volatile int halt = 0;
+        /*  Isolate the DENSE-knob machinery from the chainless-
+         *  curvature trigger: at bench pitch every curved
+         *  surface reads several degrees per cell and the
+         *  trigger fires legitimately, but this smoke test
+         *  referees the knob, not the trigger.  */
+        setenv("STIBIUM_DMESH_CURVEBAR", "0", 1);
         const DSoup base = delaunay_sample(d.deck, d.r, &halt);
         setenv("STIBIUM_DMESH_DENSE", "1", 1);
         const DSoup dense = delaunay_sample(d.deck, d.r, &halt);
         DeckRegion ds(MODELS[0], 48, 1.1f);
         const DSoup sphere = delaunay_sample(ds.deck, ds.r, &halt);
         unsetenv("STIBIUM_DMESH_DENSE");
+        unsetenv("STIBIUM_DMESH_CURVEBAR");
         WARN("dense smoke: csg " << base.dense_blocks << " -> "
              << dense.dense_blocks << " dense blocks, "
              << base.samples.size() << " -> " << dense.samples.size()
