@@ -228,8 +228,8 @@ bino+QEM0.01 no/80-open/325 nm -> MANIFOLD=YES, 0 boundary, 10
 residual nm.  Geometric welded 0/0/0 on all finals (odd-
 incidence census); suite 627,666 green.  Instrument:
 tools/idxedges.py (index-edge incidence histogram on 3MF - the
-hygiene referee).  STILL OPT-IN (STIBIUM_DMESH_PINCHSPLIT=1);
-default flip is Nate's call, on the desk.
+hygiene referee).  DEFAULT ON (Nate's call, 2026-07-18 night;
+STIBIUM_DMESH_PINCHSPLIT=0 disables).
 
 TIER A SESSION VERDICTS (2026-07-18 day, autonomous run - the
 plan met reality and reality won several rounds):
