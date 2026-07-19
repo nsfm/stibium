@@ -6904,6 +6904,25 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                             bool curved_ok = false;
                             static const char* cc_env = getenv(
                                     "STIBIUM_DMESH_CHURN_CURVE");
+                            /*  CALIBRATION HUNT OPEN (Nate's
+                             *  eyes on curve-r1: a few fresh
+                             *  chips along small steps, a few of
+                             *  the same class cleaned - net
+                             *  visually neutral, metrics way up).
+                             *  Two separators REFUTED trying to
+                             *  exclude the step class: kappa
+                             *  ceiling 2/lsp (blend fillets are
+                             *  SUB-CELL radius and read as sharp
+                             *  as steps; saves 875 -> 13, worst
+                             *  back to 0.170) and law-routing
+                             *  (screws' step-base saves are
+                             *  UNTRACED-routed 183/186, while the
+                             *  deepest bino cure - worst 0.170 ->
+                             *  0.093 at the (-2.7, 37.1, 61.7)
+                             *  mystery site - is LAW-routed).
+                             *  Next move needs eye-referee
+                             *  coordinates of an actual fresh
+                             *  step chip.  */
                             if ((!cc_env || atoi(cc_env) != 0) &&
                                 th >= 0.005f * soup.spacing)
                             {
