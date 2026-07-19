@@ -472,6 +472,25 @@ ordering.  Note: the MESH is unaffected throughout - contact
 chains feed only the snap pass and the tangency chips are
 sub-floor; the tracer is an instrument still earning its
 delivery mechanism (full #4 constraints).
+
+STEP DETECTOR CORE BUILT (2026-07-19 late, 2bfbcd04): hg_from_
+vals + kappa_along (raw Hessian shared), step_project (five
+kappa stations across the march frame, strict d(kappa)/ds peak,
+prominence bar STIBIUM_DMESH_STEP_K default 0.05/sp), tracer
+step mode with mean-curvature-gradient seeding (basis-free).
+SEED-SOURCE VERDICT (the on-axis control, third referee round
+in a row to teach something): contact boxes are the WRONG DOOR
+for fillet junctions - the oracle flags tangencies and hidden
+things, but a fillet boundary is ORDINARY SAMPLED SURFACE and
+never becomes a hidden candidate.  Buried-ring seeds Newton-
+project straight up to featureless flats (all 28 land on z=15,
+gradient exactly 0; walk-toward-box is the zero vector after
+tangent projection).  NEXT: seed step-marches from the SHALLOW
+channel (soup.tseeds) - on-surface QEF points in exactly the
+sub-feature-grade curvature band a fillet boundary occupies;
+they already exist and are already positioned.  Bino referee:
+step mode mints no false seams (9 valley chains only) - the
+strict rules hold.
 8. OPEN-EDGE PREDICTOR for retreat (perf 1b, gate on a stability
    instrument first): doomed attempts skip the repair tail,
    ~3 min off the full assembly.
