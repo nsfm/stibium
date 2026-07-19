@@ -842,14 +842,16 @@ void sample_block(Collector& c, const Region& r, Tape* tape,
             else if (contact)
             {
                 ++c.hidden_contact;
-                /*  Reach-collapse density (experiment,
-                 *  STIBIUM_DMESH_HIDDEN_CONTACT=<level>, default
-                 *  off): contact verdicts mark tangency loci -
-                 *  density cannot cure a tangency but may damp
-                 *  the sliver scale.  Measured before defaulted.  */
+                /*  Reach-collapse density (STIBIUM_DMESH_HIDDEN_
+                 *  CONTACT=<level>, DEFAULT 2 - Nate's call
+                 *  2026-07-19: sliver metrics 4.2 -> 1.2% at the
+                 *  off-axis tangency, visually marginal but
+                 *  cheap, "leave it enabled for the sake of our
+                 *  metrics").  Density damps tangency damage;
+                 *  the cure is strategy-doc #4.  0 disables.  */
                 static const char* hc_env =
                         getenv("STIBIUM_DMESH_HIDDEN_CONTACT");
-                const int hc = hc_env ? atoi(hc_env) : 0;
+                const int hc = hc_env ? atoi(hc_env) : 2;
                 if (hc > 0)
                 {
                     int& lv = c.want_dense[leaf_key];
