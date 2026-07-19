@@ -406,6 +406,31 @@ detectors into one LFS estimate (plan as a refereed
 recalibration campaign, NOT a neutral refactor); #3 interval
 prefix eval (tape surgery) gated on the arc proving out; #4
 contact-as-constraint last.
+
+#4a CONTACT TRACER LANDED (2026-07-19, Nate's go - the snap-
+target on-ramp): trace_contact_chains - seeds from contact
+verdicts, pulled onto the curvature-extremum line by
+valley_project, marched predictor-corrector (predictor
+n x t_min, corrector = valley_project; the clause system
+double-roots at contact but curvature stays finite).  PROVEN:
+off-axis rim traced as 10 chains/5,200 pts (laps its loops -
+closure detection TODO), bino 28 chains/492 pts from 1,077
+contact boxes, ~5 s cost.  Chains join the snap law;
+STIBIUM_DMESH_DUMP_CONTACT=path dumps them as fat tubes.
+DELIVERY REFEREE'D HONEST: the off-axis air-chord class reads
+SECOND-ORDER field depth (a tangency chord hovers ON the
+surface while crossing the seam LINE) - below every snap
+floor.  Wart admission built (warts near contact chains enter
+the snap sweep) and correctly admits ZERO there.  VERTEX RAIL
+built (chain points as plain DT vertices,
+STIBIUM_DMESH_CONTACT_POINTS=1, OPT-IN: near-site skinny 1.2 ->
+2.0%, eye verdict pending).  CONCLUSION: output surgery cannot
+own the tangency class - the seam must be IN the triangulation.
+Full #4 (contact chains as CCDT constraints) is the cure, now
+DE-RISKED: the marcher is battle-tested, only constraint
+insertion remains, gated behind #3 per the strategy doc.  Ctx
+lesson: collector ctxs die at the descent merge - post-merge
+passes make their own.
 8. OPEN-EDGE PREDICTOR for retreat (perf 1b, gate on a stability
    instrument first): doomed attempts skip the repair tail,
    ~3 min off the full assembly.
