@@ -1274,7 +1274,12 @@ constexpr uint64_t LEAF_VOXELS = 64;
  *  pitch - second differences divide by h^2, so it must sit well
  *  above eval noise (0.1 sp; 0.01 sp measured as pure static).
  *  False on degenerate gradient / non-finite readings.  */
-struct KOut { float k, kmax; float tx, ty, tz; };
+struct KOut
+{
+    float k, kmax;
+    float tx, ty, tz;   // kappa_min tangent eigendirection
+    float sx, sy, sz;   // kappa_max tangent eigendirection
+};
 static const int K_SO[19][3] = {
     { 0, 0, 0 },
     { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 },
@@ -1809,6 +1814,11 @@ static bool kout_from_vals(const float* v, float h, KOut* o)
     o->tx = e1*ux + e2*wx;
     o->ty = e1*uy + e2*wy;
     o->tz = e1*uz + e2*wz;
+    /*  kappa_max's eigendirection: the tangent-plane
+     *  perpendicular of kappa_min's.  */
+    o->sx = -e2*ux + e1*wx;
+    o->sy = -e2*uy + e1*wy;
+    o->sz = -e2*uz + e1*wz;
     return true;
 }
 
@@ -1829,16 +1839,28 @@ static bool curvature_probe(const Deck* deck, TapeCtx* ctx,
 
 static uint64_t g_vly_try = 0, g_vly_proj = 0, g_vly_floor = 0;
 static float g_vly_kmin = 1e30f;
+/*  ridge = false: follow kappa_min CONCAVE extremum lines (blend
+ *  valleys).  ridge = true: follow kappa_max CONVEX extremum
+ *  lines - the fading-crease class (a rim meeting a face at
+ *  grazing incidence is a RIDGE whose sharpness fades; it has no
+ *  valley to find).  */
 static bool valley_project(const Deck* deck, TapeCtx* ctx,
                            float sp, float lsp,
-                           float& X, float& Y, float& Z)
+                           float& X, float& Y, float& Z,
+                           float kcoef = -1.f,
+                           bool ridge = false)
 {
     ++g_vly_try;
     /*  Curvature floor in 1/sp units: fire only where the blend
      *  radius is under ~1/bar cells - beyond that the surface is
-     *  visually flat and a tent is churn, not cure.  */
+     *  visually flat and a tent is churn, not cure.  kcoef >= 0
+     *  overrides the env coefficient (the contact tracer follows
+     *  FADING creases - at a grazing-incidence rim the effective
+     *  blend radius grows exactly where the defects live, and
+     *  the default floor is deaf there).  */
     static const char* kb_env = getenv("STIBIUM_DMESH_VALLEY_K");
-    const float kbar = (kb_env ? float(atof(kb_env)) : 0.02f)
+    const float kbar = (kcoef >= 0 ? kcoef
+                        : kb_env ? float(atof(kb_env)) : 0.02f)
                        / std::max(sp, 1e-20f);
     /*  Second-difference stencils divide by h^2: at 0.01 sp the
      *  denominator sits at float-eval noise and kappa reads pure
@@ -1861,40 +1883,51 @@ static bool valley_project(const Deck* deck, TapeCtx* ctx,
         KOut k0;
         if (!curvature_probe(deck, ctx, h, px2, py2, pz2, &k0))
             { ++g_vly_proj; return false; }
-        /*  Concavity + floor gate on the CENTER reading.  */
-        if (it == 0)
+        /*  Floor gate on the CENTER reading: concave for
+         *  valleys, convex for ridges.  */
+        if (it == 0 && !ridge)
             g_vly_kmin = std::min(g_vly_kmin, k0.k * sp);
-        if (!(k0.k < -kbar))
+        const float v0 = ridge ? k0.kmax : k0.k;
+        if (ridge ? !(v0 > kbar) : !(v0 < -kbar))
             { ++g_vly_floor; return false; }
-        /*  Two cross-valley probes; the span rides the local
-         *  pitch - the valley line is at most a chip-edge
+        const float cdx = ridge ? k0.sx : k0.tx,
+                    cdy = ridge ? k0.sy : k0.ty,
+                    cdz = ridge ? k0.sz : k0.tz;
+        /*  Two cross-line probes; the span rides the local
+         *  pitch - the extremum line is at most a chip-edge
          *  away.  */
         const float delta = 0.35f * lsp;
         KOut km, kp;
         if (!curvature_probe(deck, ctx, h,
-                px2 - delta*k0.tx, py2 - delta*k0.ty,
-                pz2 - delta*k0.tz, &km) ||
+                px2 - delta*cdx, py2 - delta*cdy,
+                pz2 - delta*cdz, &km) ||
             !curvature_probe(deck, ctx, h,
-                px2 + delta*k0.tx, py2 + delta*k0.ty,
-                pz2 + delta*k0.tz, &kp))
+                px2 + delta*cdx, py2 + delta*cdy,
+                pz2 + delta*cdz, &kp))
             return false;
-        /*  Parabola through (-d, km) (0, k0) (+d, kp): extremum
-         *  at d/2 (km - kp) / (km - 2 k0 + kp).  A positive
-         *  denominator means kappa_min has a minimum across here
-         *  (the valley floor); otherwise walk downhill.  */
-        const float denom = km.k - 2*k0.k + kp.k;
+        /*  Parabola through (-d, vm) (0, v0) (+d, vp2):
+         *  stationary point at d/2 (vm - vp2) / denom.  The
+         *  denominator sign says whether the stationary point is
+         *  the extremum this mode seeks (minimum of kappa_min
+         *  for valleys, maximum of kappa_max for ridges);
+         *  otherwise walk toward it.  */
+        const float vm = ridge ? km.kmax : km.k;
+        const float vp2 = ridge ? kp.kmax : kp.k;
+        const float denom = vm - 2*v0 + vp2;
         float step;
-        if (denom > 0)
+        if (ridge ? denom < 0 : denom > 0)
         {
-            step = 0.5f * delta * (km.k - kp.k) / denom;
+            step = 0.5f * delta * (vm - vp2) / denom;
             step = step < -delta ? -delta
                  : step >  delta ?  delta : step;
         }
+        else if (ridge)
+            step = (vp2 > vm ? 0.5f : -0.5f) * delta;
         else
-            step = (kp.k < km.k ? 0.5f : -0.5f) * delta;
-        px2 += step * k0.tx;
-        py2 += step * k0.ty;
-        pz2 += step * k0.tz;
+            step = (vp2 < vm ? 0.5f : -0.5f) * delta;
+        px2 += step * cdx;
+        py2 += step * cdy;
+        pz2 += step * cdz;
     }
     /*  Final pull onto the surface.  */
     std::vector<float> sx{ px2 }, sy{ py2 }, sz{ pz2 },
@@ -1969,17 +2002,52 @@ static void trace_contact_chains(const Deck* deck, float sp,
         n[0] /= l;  n[1] /= l;  n[2] /= l;
         return true;
     };
+    /*  Sign-cross filter (the buried-sheet lesson, 2026-07-19:
+     *  coincident CSG faces leave INTERNAL f = 0 sheets - the
+     *  off-axis bench carries a whole buried disk where its two
+     *  cylinders meet, and the tracer faithfully marched it
+     *  instead of the defect rim).  A REAL surface point has
+     *  opposite field signs a step along +/- its normal; an
+     *  interior zero-sheet touches zero from one side only.  */
+    static int dbg_sheet = 0;
+    const auto real_surface = [&](float x, float y, float z) {
+        float n[3];
+        if (!normal_at(x, y, z, n))
+            return false;
+        const float h = 0.25f * sp;
+        std::vector<float> xs{ x + h*n[0], x - h*n[0] },
+                ys{ y + h*n[1], y - h*n[1] },
+                zs{ z + h*n[2], z - h*n[2] }, v;
+        eval_points(deck_base(deck), ctx, xs, ys, zs, v);
+        const bool ok = std::isfinite(v[0]) &&
+                std::isfinite(v[1]) && v[0] > 0 && v[1] < 0;
+        if (!ok && dbg_sheet < 6 &&
+            getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+        {
+            ++dbg_sheet;
+            fprintf(stderr, "  SHEETDBG land=(%.3f,%.3f,%.3f) "
+                    "n=(%.2f,%.2f,%.2f) f(+h)=%.4f f(-h)=%.4f\n",
+                    x, y, z, n[0], n[1], n[2], v[0], v[1]);
+        }
+        return ok;
+    };
     const auto march = [&](float px, float py, float pz,
                            float dx, float dy, float dz,
+                           bool ridge,
                            std::vector<std::array<float, 3>>* pts)
     {
         for (int i = 0; i < 300; ++i)
         {
             float nx2 = px + step*dx, ny2 = py + step*dy,
                   nz2 = pz + step*dz;
+            /*  0.002: contact traces follow FADING creases -
+             *  the default valley floor is deaf exactly at
+             *  grazing incidence.  */
             if (!valley_project(deck, ctx, sp, sp,
-                                nx2, ny2, nz2))
+                                nx2, ny2, nz2, 0.002f, ridge))
                 break;
+            if (!real_surface(nx2, ny2, nz2))
+                break;      /* wandered onto a buried sheet */
             const float mx = nx2 - px, my2 = ny2 - py,
                         mz2 = nz2 - pz;
             const float ml = sqrtf(mx*mx + my2*my2 + mz2*mz2);
@@ -1995,6 +2063,8 @@ static void trace_contact_chains(const Deck* deck, float sp,
         }
     };
     size_t nchains = 0, npts = 0;
+    size_t r_vp = 0, r_sheet = 0, r_claim = 0, r_probe = 0,
+           r_tang = 0, r_short = 0;
     for (const auto& b : boxes)
     {
         if (nchains >= 256)
@@ -2002,31 +2072,48 @@ static void trace_contact_chains(const Deck* deck, float sp,
         float sx = 0.5f * (b[0] + b[3]),
               sy = 0.5f * (b[1] + b[4]),
               sz = 0.5f * (b[2] + b[5]);
-        if (!valley_project(deck, ctx, sp, sp, sx, sy, sz))
-            continue;
+        /*  Valley first (blend seams), ridge fallback (fading
+         *  convex creases - the grazing-incidence rim class).  */
+        bool ridge = false;
+        if (!valley_project(deck, ctx, sp, sp, sx, sy, sz,
+                            0.002f))
+        {
+            sx = 0.5f * (b[0] + b[3]);
+            sy = 0.5f * (b[1] + b[4]);
+            sz = 0.5f * (b[2] + b[5]);
+            if (!valley_project(deck, ctx, sp, sp, sx, sy, sz,
+                                0.002f, true))
+                { ++r_vp; continue; }
+            ridge = true;
+        }
+        if (!real_surface(sx, sy, sz))
+            { ++r_sheet; continue; }
         if (is_claimed(sx, sy, sz))
-            continue;
+            { ++r_claim; continue; }
         KOut k0;
         if (!curvature_probe(deck, ctx, 0.1f * sp,
                              sx, sy, sz, &k0))
-            continue;
+            { ++r_probe; continue; }
         float n[3];
         if (!normal_at(sx, sy, sz, n))
-            continue;
-        float ax = n[1]*k0.tz - n[2]*k0.ty,
-              ay = n[2]*k0.tx - n[0]*k0.tz,
-              az = n[0]*k0.ty - n[1]*k0.tx;
+            { ++r_probe; continue; }
+        const float cdx = ridge ? k0.sx : k0.tx,
+                    cdy = ridge ? k0.sy : k0.ty,
+                    cdz = ridge ? k0.sz : k0.tz;
+        float ax = n[1]*cdz - n[2]*cdy,
+              ay = n[2]*cdx - n[0]*cdz,
+              az = n[0]*cdy - n[1]*cdx;
         const float al = sqrtf(ax*ax + ay*ay + az*az);
         if (!(al > 0.5f))
-            continue;       /* t_min not tangent here: bad seed */
+            { ++r_tang; continue; }
         ax /= al;  ay /= al;  az /= al;
         std::vector<std::array<float, 3>> fwd, bwd;
         fwd.push_back({ sx, sy, sz });
         claim(sx, sy, sz);
-        march(sx, sy, sz, ax, ay, az, &fwd);
-        march(sx, sy, sz, -ax, -ay, -az, &bwd);
+        march(sx, sy, sz, ax, ay, az, ridge, &fwd);
+        march(sx, sy, sz, -ax, -ay, -az, ridge, &bwd);
         if (fwd.size() + bwd.size() < 4)
-            continue;
+            { ++r_short; continue; }
         std::vector<std::array<float, 3>> chain(bwd.rbegin(),
                                                 bwd.rend());
         chain.insert(chain.end(), fwd.begin(), fwd.end());
@@ -2034,11 +2121,14 @@ static void trace_contact_chains(const Deck* deck, float sp,
         out->push_back(std::move(chain));
         ++nchains;
     }
-    if (nchains && (getenv("STIBIUM_DMESH_TIME") ||
-                    getenv("STIBIUM_DMESH_CHIP_DEBUG")))
+    if (getenv("STIBIUM_DMESH_TIME") ||
+        getenv("STIBIUM_DMESH_CHIP_DEBUG"))
         fprintf(stderr, "CONTACT: %zu chains traced (%zu points) "
-                "from %zu contact boxes\n",
-                nchains, npts, boxes.size());
+                "from %zu contact boxes (rejects: %zu vproj, "
+                "%zu sheet, %zu claimed, %zu probe, %zu tangent, "
+                "%zu short)\n",
+                nchains, npts, boxes.size(), r_vp, r_sheet,
+                r_claim, r_probe, r_tang, r_short);
     tape_ctx_free(ctx);
 }
 
