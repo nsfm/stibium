@@ -427,8 +427,14 @@ TEST_CASE("Thin feature below the lattice: the stage-D case",
          << " surface pts, " << soup.hidden_candidates
          << " hidden-feature candidate blocks of "
          << soup.leaf_blocks);
-    CHECK(soup.surface.empty());          // invisible to point sampling
-    CHECK(soup.hidden_candidates > 0);    // visible to the intervals
+    /*  Day one this asserted surface.empty(): point sampling
+     *  cannot see the plate, only the interval bound can, and
+     *  the candidate counter was the unexploited trigger.  The
+     *  certify arc (2026-07-19) closed the loop: candidates are
+     *  interval-certified (proven opposite-sign sub-box) and
+     *  drill-down RESOLVES the plate - the once-invisible
+     *  feature now arrives as real surface.  */
+    CHECK(!soup.surface.empty());
 }
 
 TEST_CASE("Delaunay showcase STLs at higher resolution", "[.dmeshSTL]")
