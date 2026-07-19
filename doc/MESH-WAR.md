@@ -431,6 +431,26 @@ DE-RISKED: the marcher is battle-tested, only constraint
 insertion remains, gated behind #3 per the strategy doc.  Ctx
 lesson: collector ctxs die at the descent merge - post-merge
 passes make their own.
+
+TRACER ROUND 2 (2026-07-19, d8365c8f - Nate's tube inspection
+cracked it): the traced ring was a BURIED ZERO-SHEET - CSG-
+coincident faces leave internal f=0 surfaces (the cylinders'
+interface disk + the tilted cylinder's wall persisting inside
+the union) that samplers never see and intervals honestly
+cannot decide.  FIXES: (1) SIGN-CROSS filter - real surface
+reads opposite signs at +/-0.25sp along the normal, buried
+sheets touch zero one-sided; applied per seed + per march step
+(off-axis: 106/122 seeds provably buried, bino: 278/1,077).
+The contact dump is now ALSO a CSG-coincidence hygiene
+instrument.  (2) RIDGE MODE in valley_project (kappa_max
+extremum lines) - the defect rim is a fading CONVEX crease
+with no valley to find; contact traces try valley then ridge
+at a 10x lower floor.  Verified: off-axis 2 lip ridges, bino
+43 chains.  REMAINING GAP: graze-azimuth seeds Newton-project
+onto the adjacent flat, outside the extremum capture radius -
+next increment is ENDPOINT SEEDING (the crease tracer stops
+exactly where the rim fades; its open chain endpoints are
+perfect ridge-mode seeds - continuation, not discovery).
 8. OPEN-EDGE PREDICTOR for retreat (perf 1b, gate on a stability
    instrument first): doomed attempts skip the repair tail,
    ~3 min off the full assembly.
