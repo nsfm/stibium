@@ -285,6 +285,54 @@ TIER B - quality marathon core (1-2 days each):
    its double root.  Build the Hessian stencil once; then
 7. chainless-curvature density trigger (cone quilting) + per-
    curvature churn-gate recalibration (quality P2/P3).
+
+QUALITY ROUND 1 - CURVATURE STENCIL + CHURN CARVE-OUT LANDED
+(2026-07-18 night).  The stencil: curvature_probe() - 19-point
+second-difference Hessian on the field oracle, principal
+curvatures + kappa_min eigendirection.  PITCH LESSON (measured):
+h=0.01 sp reads pure static (h^2 denominator at float-eval
+noise; 0 of 993 valley attempts survived); h=0.1 sp is the
+working pitch.
+ANATOMY CORRECTION (SNAP_DUMP instrument, bino r1): the quality
+report's FAR model was WRONG for bino - the 993 "FAR" chips are
+sub-floor depth noise (median 0.006, max exactly 0.0100 sp = the
+floor boundary; surf projection almost never overshoots).  The
+DEEP skipped populations are CHURN (2,123 of 2,680 >= 0.01 sp,
+bunched at 0.012-0.019 RIGHT UNDER the 0.02 bar - a gate
+artifact: on a curved blend a chord's sagitta L^2*kappa/8 reads
+0.01-0.03 sp, real bend geometry) and damage (672 of 733).
+THE CARVE-OUT: churn refusals re-judged by measured curvature -
+allow the tent when apex height <= 2x the chord sagitta at the
+probed kappa (flats read kappa~0 and still refuse; 0.005 sp
+absolute floor stays; saved tents still face the damage
+referee).  STIBIUM_DMESH_CHURN_CURVE=0 disables.
+BINO SCORE: worst depth 0.170 -> **0.093 sp** (UNDER the 0.1
+product bar; better than the 0.097 no-THIN baseline - THIN's
+whole quality cost recovered).  Snapped 795 -> 1,495 (875 churn
+refusals saved, 173 pushed to damage - the referee chain works).
+GUARDRAILS: fightpix +z 17 -> 14 (down!), +x/+y flat 0/1
+unchanged, screws fightpix 0, screws tilt 4.03 -> 4.20% area
+(+0.17pp, stall-trade scale), screws worst 0.125 held, suite
+627,666 green.
+VALLEY SNAP: implemented (valley_project - surface-project,
+kappa_min eigendirection, cross-valley parabola to the OBS04
+extremum, iterate x3; polyline-attribution acap; damage/churn
+refereed; STIBIUM_DMESH_SNAP_VALLEY=0 disables) but IDLE at bino
+r1 - no deep FAR population exists there.  The dish is zeiss
+(FAR divots 0.01-0.59 sp per the surf-floor measurement).
+Instruments: STIBIUM_DMESH_SNAP_DUMP=path (per-chip outcome +
+depth), VALLEY counter line under CHIP_DEBUG.
+ZEISS r1 VALIDATION (curve-r1, 13.9 min / 3.52 GB): 3,297 churn
+refusals saved by curvature (collar-texture cure at scale);
+VALLEY verdict: 24 attempts, 1 genuine deep-FAR valley cure, 20
+floor-rejects - SNAP_SURF + the carve-out own the deep
+population now; the valley path stays as the safety net for
+true blend-throat divots (costs nothing when idle).  Worst
+0.364 sp UNCHANGED at (4.15, 15.94, 89.01) - not a churn-class
+chip; separate hunt.  AND: the exported 3MF (pinch split now
+default) reads incidence {2: 809676} PURE - **prusa
+MANIFOLD=YES on the FULL ZEISS**, the whole hygiene arc closed
+end-to-end.
 8. OPEN-EDGE PREDICTOR for retreat (perf 1b, gate on a stability
    instrument first): doomed attempts skip the repair tail,
    ~3 min off the full assembly.

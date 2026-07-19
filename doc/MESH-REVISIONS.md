@@ -29,6 +29,7 @@ referee.  Update this table with EVERY rev handed over for review.
 | autod31 | c0de2ff6 | law delivery + local snap + flat-fan decimation (new defaults) | 727K | 0 | 152 | 27.0K | 0.465* | HALF of autod29, under 1M for the first time; 16.0 GB peak / 42 min measured; *depth at eyepiece collar needs Nate's eyes (site has flapped before) |
 | autod32 | (validation) | THIN default + snap gates + fold fix + P5 threading + stall exit + femto guard | 540K | 0 | 294 | 27.0K | 0.364 | **13.1 min / 3.31 GB** (was 42 min / 16 GB); constraints identical to autod31 (law preserved); retreat ran 3 attempts (2 extra B+C passes ~6 min - the new biggest wall item); worst site (4.15, 15.94, 89.01) awaits Nate's eyes |
 | autod33 | (tier A, r2) | BEAUTIFUL preset validation: hygiene + tier-A stack at resolution 2 | 1.61M | 0 | 1643 | 54.2K | n/a* | **26.7 min / 10.78 GB** at r2 (Nate's app run: 29 min); bit-exact welder 0/0; prusa 1,488 open (pinch-seam class at r2 scale) + 18 reversed; constrained doubled vs r1 (law scales); *depth instrument omitted - rerun with _CHIP_DEBUG when it matters |
+| curve-r1 | (quality rd 1) churn curvature carve-out + valley snap + default pinch split | 539K | 0 | 407* | 27.0K | 0.364 | 13.9 min / 3.52 GB; 3,297 churn refusals saved by curvature (the collar-texture cure); valley snap: 1 genuine deep-FAR cure, 20 floor-rejects (surf+carve-out own the class now); worst site unchanged (4.15, 15.94, 89.01 - not churn-class, still awaits eyes); *nm pre-split - the exported 3MF reads incidence {2: 809676} PURE, **prusa MANIFOLD=YES on the FULL ZEISS** |
 
 ## Bino referee (examples/torture/zeiss_id02_bino.sb, fast loop)
 
@@ -53,6 +54,7 @@ referee.  Update this table with EVERY rev handed over for review.
 | p3-base-gated | gates on the default path (no THIN) | 135K | 0 | 352 | 12042 | 0.097 | 170 s; gates cost baseline nothing (0.092 -> 0.097); nm rise = churn tents were papering pinches (geometric 0-open holds) |
 | r2-thin-gated | resolution 2 + THIN + gates | 427K | 0 | 1201 | 24675 | 0.110(r2 sp) | **198 s / 1.77 GB** - r2 was impossible pre-THIN (15.4M witnesses dropped, 928K kept; the untinned DT would take 16M points).  New profile: extract+repair 74 s, insert points 52 s now lead |
 | pinch-r1 | seam-closure pinch split at export tail (PINCHSPLIT=1, 3MF) | 129K | 0 | 274->1* | 12042 | - | **prusa MANIFOLD=YES** (was no/73-open); 0 boundary minted; *raw nm 274, post-split 1 (non-alternating kiss fan); with QEM 0.01 first: 325 nm -> 10, still manifold=yes; geometric welded 0/0/0; zero vertex motion (copies coincident, midpoints collinear) |
+| curve-r1 | churn-gate curvature carve-out (Hessian stencil, quality round 1) | 128K | 0 | 276 | 12042 | **0.093** | UNDER the 0.1 sp product bar; beats the 0.097 no-THIN baseline (THIN's cost recovered); snapped 795 -> 1,495 (875 churn saves, damage-refereed); fightpix +z 17 -> 14, screws tilt +0.17pp, screws worst 0.125 held; awaits Nate's eyes |
 
 ## Perf round ledger (2026-07-17 evening, Nate's B-then-A vote)
 
