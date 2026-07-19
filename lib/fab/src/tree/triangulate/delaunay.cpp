@@ -1915,14 +1915,27 @@ static bool valley_project(const Deck* deck, TapeCtx* ctx,
         const float vp2 = ridge ? kp.kmax : kp.k;
         const float denom = vm - 2*v0 + vp2;
         float step;
-        if (ridge ? denom < 0 : denom > 0)
+        if (ridge)
+        {
+            /*  STRICT: a genuine ridge is a local MAXIMUM of
+             *  kappa_max across the line.  A uniform cylinder
+             *  wall passes the magnitude floor (kappa_max = 1/r
+             *  everywhere) but has no extremum - the old
+             *  walk-uphill branch chased probe noise across it
+             *  (Nate's "curvy chaotic lines", measured).  No
+             *  max, no ridge, march ends.  */
+            if (!(v0 > vm && v0 > vp2) || !(denom < 0))
+                return false;
+            step = 0.5f * delta * (vm - vp2) / denom;
+            step = step < -delta ? -delta
+                 : step >  delta ?  delta : step;
+        }
+        else if (denom > 0)
         {
             step = 0.5f * delta * (vm - vp2) / denom;
             step = step < -delta ? -delta
                  : step >  delta ?  delta : step;
         }
-        else if (ridge)
-            step = (vp2 > vm ? 0.5f : -0.5f) * delta;
         else
             step = (vp2 < vm ? 0.5f : -0.5f) * delta;
         px2 += step * cdx;
