@@ -473,6 +473,34 @@ chains feed only the snap pass and the tangency chips are
 sub-floor; the tracer is an instrument still earning its
 delivery mechanism (full #4 constraints).
 
+NEXT-SESSION ENTRY POINT - TSEED STEP-TRACING (read this, then
+go): seed step-marches from soup.tseeds (the shallow channel:
+QEF points from crease-leaf cells with normal spread between
+~14 and ~25 degrees - fillet-boundary territory; minted in
+feature_points, carried on DSoup, currently consumed only by
+delaunay_trace as tracer seeds).  Plan: in trace_contact_chains
+(or a sibling running AFTER delaunay_trace so tchains can claim
+their cells first), seed step-mode marches from tseeds not yet
+claimed by crease chains: project7 -> grad_at -> step_project
+-> march both ways (all built, 2bfbcd04).  Keep the claim map
+across both passes so crease law and step law never double-
+cover.  ACCEPTANCE (pre-agreed with Nate): the ON-AXIS
+stacked_cylinders_torus_lip lip junction must trace a FULL ring
+(24/24 azimuth bins in the tube dump census), and the OFF-AXIS
+variant must trace its full tilted ring too - that is the
+orientation-independence referee, executable.  Then the
+off-axis defect rim (Nate's box39 azimuth, (-12.8, 4.1, -7.8)).
+Gotchas already paid for: make your own TapeCtx (collector ctxs
+die at the merge); sign-cross filter stays on every step
+(buried sheets); loop-closure detection still TODO (chains lap
+today); the vertex RAIL is PARKED (oa_rail verdict: it railed
+the buried ring - the pre-filter chains; revisit only with true
+chains).  Instruments: CONTACT/STEP counter lines under
+CHIP_DEBUG, STIBIUM_DMESH_DUMP_CONTACT=path tubes, tools/
+areamap.py.  Nate's standing verdicts: cylinder walls
+"pleasingly smooth" (despeckle era); oa_ct visually identical
+to oa_hc2.
+
 STEP DETECTOR CORE BUILT (2026-07-19 late, 2bfbcd04): hg_from_
 vals + kappa_along (raw Hessian shared), step_project (five
 kappa stations across the march frame, strict d(kappa)/ds peak,
