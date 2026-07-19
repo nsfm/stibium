@@ -375,6 +375,37 @@ big).  TWO mechanisms separated by A/B, THREE theories buried:
 - Dense-knob smoke test isolated from the trigger (CURVEBAR=0
   around the DENSE=1 smoke; bench pitch legitimately reads
   several deg/cell).
+
+INTERVAL ARC OPENED (2026-07-19, strategy doc: doc/reviews/
+2026-07-18-interval-certify-reach-locus.md - "cull -> certify",
+one enemy = reach collapse; Nate's go).  MOVE-1 CHEAP HALF
+LANDED: certify_hidden - the graze-vs-feature oracle the HIDDEN
+flag always needed (named missing by two prior reviews + the
+code comment).  Interval subdivision on the leaf's pushed tape
+via tape_eval_i_batch (batch mode records no push state = safe
+mid-pipeline).  VERDICT RULE, refined by the first referee
+round: "ambiguous at pitch/2" MISFIRES on internal tangencies
+(the stacked_cylinders 18-leaf control stays ambiguous at every
+depth - material kissing material never decides) - so
+FEATURE_PRESENT iff subdivision PROVES a sub-box of the sign
+OPPOSITE the lattice's unanimous read (a hidden feature is,
+by definition, missed opposite-sign volume).  Tangency shells,
+loose bounds, and sub-pitch/8 unrecoverables resolve EMPTY.
+SCORE: stacked_cylinders 18 -> 0 features/18 proven grazes (the
+2026-07-16 killer population, dismissed by proof); off-axis lip
+144 -> 3 honest features; knob 51 -> 0 (caps taper below
+pitch/8 - consistent with "still hidden at 4x"; tip cure is
+explicit geometry, not density); bino 1,188 -> 5 features.
+STIBIUM_DMESH_HIDDEN: 2 = oracle (DEFAULT ON), 1 = legacy
+blind, 0 = off.  Instrument (Nate's wish): STIBIUM_DMESH_
+DUMP_HIDDEN=prefix writes verdict boxes as STLs
+(prefix_feature.stl / prefix_graze.stl - viewable beside the
+mesh like the chain tubes).  Down payment on the guarantees
+d(S->M) coverage rung.  Next in the arc: #2 collapse the reach
+detectors into one LFS estimate (plan as a refereed
+recalibration campaign, NOT a neutral refactor); #3 interval
+prefix eval (tape surgery) gated on the arc proving out; #4
+contact-as-constraint last.
 8. OPEN-EDGE PREDICTOR for retreat (perf 1b, gate on a stability
    instrument first): doomed attempts skip the repair tail,
    ~3 min off the full assembly.
