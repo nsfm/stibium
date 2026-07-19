@@ -149,8 +149,10 @@ struct Collector
     /*  Hidden-feature oracle verdicts + (env-gated) verdict
      *  boxes for the STL dump.  */
     uint64_t hidden_feature = 0, hidden_graze = 0;
+    uint64_t hidden_contact = 0;     // reach-collapse markers
     std::vector<std::array<float, 6>> hidden_feat_boxes;
     std::vector<std::array<float, 6>> hidden_graze_boxes;
+    std::vector<std::array<float, 6>> hidden_contact_boxes;
     uint64_t curve_flagged = 0;      // chainless-curvature trigger
     uint64_t curve_seen = 0, curve_cross = 0;
     float curve_theta_max = 0.f;     // worst facet angle seen (deg)
@@ -473,9 +475,17 @@ float box_dense_factor(const DSoup& soup, float x, float y, float z);
  *  pipeline use is safe); decided octants terminate
  *  immediately, so cost tracks the ambiguous shell.  */
 bool autodense();
+/*  contact out-param: true when ambiguity PERSISTED to the
+ *  subdivision floor without deciding - a loose bound resolves
+ *  once subdivided, a (near-)tangency never does.  Persistent
+ *  ambiguity kissing the surface is a REACH-COLLAPSE marker
+ *  (Nate's meshlab find, 2026-07-19: the one close-touching
+ *  graze box on the off-axis bench sat on a 5.7x sliver
+ *  hotspot).  */
 static bool certify_hidden(const Tape* sub, TapeCtx* ctx,
                            const float lo[3], const float hi[3],
-                           float pitch, bool lat_inside)
+                           float pitch, bool lat_inside,
+                           bool* contact)
 {
     struct HB { float lo[3], hi[3]; };
     std::vector<HB> work;
@@ -518,7 +528,10 @@ static bool certify_hidden(const Tape* sub, TapeCtx* ctx,
             const HB& b = batch[i];
             const float ex = b.hi[0] - b.lo[0];
             if (ex <= 0.125f * pitch || budget < 8)
-                continue;               /* ambiguity floor */
+            {
+                *contact = true;        /* persisted to the floor */
+                continue;
+            }
             budget -= 8;
             for (int o = 0; o < 8; ++o)
             {
@@ -816,20 +829,39 @@ void sample_block(Collector& c, const Region& r, Tape* tape,
         {
             const float blo[3] = { r.X[0], r.Y[0], r.Z[0] };
             const float bhi[3] = { r.X[ni], r.Y[nj], r.Z[nk] };
+            bool contact = false;
             const bool feat = certify_hidden(tape, c.ctx, blo,
                                              bhi, r.X[1] - r.X[0],
-                                             any_in);
+                                             any_in, &contact);
             if (feat)
             {
                 ++c.hidden_feature;
                 int& lv = c.want_dense[leaf_key];
                 lv = std::max(lv, 2);
             }
+            else if (contact)
+            {
+                ++c.hidden_contact;
+                /*  Reach-collapse density (experiment,
+                 *  STIBIUM_DMESH_HIDDEN_CONTACT=<level>, default
+                 *  off): contact verdicts mark tangency loci -
+                 *  density cannot cure a tangency but may damp
+                 *  the sliver scale.  Measured before defaulted.  */
+                static const char* hc_env =
+                        getenv("STIBIUM_DMESH_HIDDEN_CONTACT");
+                const int hc = hc_env ? atoi(hc_env) : 0;
+                if (hc > 0)
+                {
+                    int& lv = c.want_dense[leaf_key];
+                    lv = std::max(lv, hc);
+                }
+            }
             else
                 ++c.hidden_graze;
             if (getenv("STIBIUM_DMESH_DUMP_HIDDEN"))
                 (feat ? c.hidden_feat_boxes
-                      : c.hidden_graze_boxes).push_back(
+                 : contact ? c.hidden_contact_boxes
+                           : c.hidden_graze_boxes).push_back(
                         { blo[0], blo[1], blo[2],
                           bhi[0], bhi[1], bhi[2] });
         }
@@ -2695,10 +2727,13 @@ static void merge_collector(Collector& c, Collector& w)
     c.tangle_suppressed += w.tangle_suppressed;
     c.hidden_feature += w.hidden_feature;
     c.hidden_graze += w.hidden_graze;
+    c.hidden_contact += w.hidden_contact;
     for (const auto& b : w.hidden_feat_boxes)
         c.hidden_feat_boxes.push_back(b);
     for (const auto& b : w.hidden_graze_boxes)
         c.hidden_graze_boxes.push_back(b);
+    for (const auto& b : w.hidden_contact_boxes)
+        c.hidden_contact_boxes.push_back(b);
     c.curve_flagged += w.curve_flagged;
     c.curve_seen += w.curve_seen;
     c.curve_cross += w.curve_cross;
@@ -2872,13 +2907,16 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
      *  mesh exactly like the chain tubes
      *  (STIBIUM_DMESH_DUMP_HIDDEN=prefix ->
      *  prefix_feature.stl / prefix_graze.stl).  */
-    if ((c.hidden_feature || c.hidden_graze) &&
+    if ((c.hidden_feature || c.hidden_graze ||
+         c.hidden_contact) &&
         (census.on || getenv("STIBIUM_DMESH_TIME") ||
          getenv("STIBIUM_DMESH_CHIP_DEBUG")))
         fprintf(stderr, "HIDDEN: %llu candidates -> %llu "
-                "certified features, %llu proven grazes\n",
+                "certified features, %llu contact (reach-"
+                "collapse), %llu proven grazes\n",
                 (unsigned long long)c.soup.hidden_candidates,
                 (unsigned long long)c.hidden_feature,
+                (unsigned long long)c.hidden_contact,
                 (unsigned long long)c.hidden_graze);
     if (const char* hp = getenv("STIBIUM_DMESH_DUMP_HIDDEN"))
     {
@@ -2918,11 +2956,15 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
         };
         wboxes(std::string(hp) + "_feature.stl",
                c.hidden_feat_boxes);
+        wboxes(std::string(hp) + "_contact.stl",
+               c.hidden_contact_boxes);
         wboxes(std::string(hp) + "_graze.stl",
                c.hidden_graze_boxes);
-        fprintf(stderr, "HIDDEN dump: %zu feature + %zu graze "
-                "boxes -> %s_{feature,graze}.stl\n",
+        fprintf(stderr, "HIDDEN dump: %zu feature + %zu contact "
+                "+ %zu graze boxes -> "
+                "%s_{feature,contact,graze}.stl\n",
                 c.hidden_feat_boxes.size(),
+                c.hidden_contact_boxes.size(),
                 c.hidden_graze_boxes.size(), hp);
     }
     if (autodense() && !c.want_dense.empty() && !(*halt))
