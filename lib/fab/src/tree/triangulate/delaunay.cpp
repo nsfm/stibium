@@ -860,10 +860,16 @@ void sample_block(Collector& c, const Region& r, Tape* tape,
             }
             else
                 ++c.hidden_graze;
-            if (getenv("STIBIUM_DMESH_DUMP_HIDDEN"))
+            /*  Contact boxes are ALWAYS recorded - they seed the
+             *  #4a contact tracer; feature/graze boxes only under
+             *  the dump env.  */
+            if (contact && !feat)
+                c.hidden_contact_boxes.push_back(
+                        { blo[0], blo[1], blo[2],
+                          bhi[0], bhi[1], bhi[2] });
+            else if (getenv("STIBIUM_DMESH_DUMP_HIDDEN"))
                 (feat ? c.hidden_feat_boxes
-                 : contact ? c.hidden_contact_boxes
-                           : c.hidden_graze_boxes).push_back(
+                      : c.hidden_graze_boxes).push_back(
                         { blo[0], blo[1], blo[2],
                           bhi[0], bhi[1], bhi[2] });
         }
@@ -1898,6 +1904,142 @@ static bool valley_project(const Deck* deck, TapeCtx* ctx,
         { ++g_vly_proj; return false; }
     X = sx[0]; Y = sy[0]; Z = sz[0];
     return true;
+}
+
+/*  Strategy-doc #4a: the contact-curve tracer.  The clause
+ *  system {f_A = f_B, f = 0} has a DOUBLE ROOT at tangent
+ *  contact (graveyard: Newton cannot march it) - but the contact
+ *  locus is a curvature-extremum line, and curvature stays
+ *  finite straight through the tangency.  So: seed from the
+ *  hidden oracle's contact verdicts (persistent interval
+ *  ambiguity = reach collapse), pull each seed onto the extremum
+ *  line with valley_project, then march with a predictor-
+ *  corrector - predictor steps along n x t_min (the along-curve
+ *  tangent), corrector is valley_project itself.  Output:
+ *  world-space polylines, SNAP TARGETS ONLY (never CCDT
+ *  constraints - the crossing-suppression tombstones stay
+ *  honored; if the marcher proves itself the full #4 constraint
+ *  version is the next rung).  STIBIUM_DMESH_CONTACT_TRACE=0
+ *  disables.  */
+static void trace_contact_chains(const Deck* deck, float sp,
+        const std::vector<std::array<float, 6>>& boxes,
+        std::vector<std::vector<std::array<float, 3>>>* out)
+{
+    const char* env = getenv("STIBIUM_DMESH_CONTACT_TRACE");
+    if ((env && atoi(env) == 0) || boxes.empty() || sp <= 0)
+        return;
+    /*  Own context: the collector's per-worker ctxs are freed
+     *  after the descent merge (measured the hard way).  */
+    TapeCtx* ctx = tape_ctx_new(deck);
+    const float step = 0.5f * sp;
+    const float cell = 0.5f * sp;
+    std::unordered_set<uint64_t> claimed;
+    const auto ckey = [&](float x, float y, float z) {
+        return coord_hash(floorf(x / cell), floorf(y / cell),
+                          floorf(z / cell));
+    };
+    const auto claim = [&](float x, float y, float z) {
+        claimed.insert(ckey(x, y, z));
+    };
+    const auto is_claimed = [&](float x, float y, float z) {
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dy = -1; dy <= 1; ++dy)
+                for (int dz = -1; dz <= 1; ++dz)
+                    if (claimed.count(ckey(x + dx*cell,
+                                           y + dy*cell,
+                                           z + dz*cell)))
+                        return true;
+        return false;
+    };
+    /*  Outward normal via a 7-point gradient probe.  */
+    const auto normal_at = [&](float x, float y, float z,
+                               float n[3]) {
+        const float h = 0.01f * sp;
+        std::vector<float> xs(7, x), ys(7, y), zs(7, z), v;
+        xs[1] += h;  xs[2] -= h;
+        ys[3] += h;  ys[4] -= h;
+        zs[5] += h;  zs[6] -= h;
+        eval_points(deck_base(deck), ctx, xs, ys, zs, v);
+        n[0] = v[1] - v[2];
+        n[1] = v[3] - v[4];
+        n[2] = v[5] - v[6];
+        const float l = sqrtf(n[0]*n[0] + n[1]*n[1] + n[2]*n[2]);
+        if (!(l > 0) || !std::isfinite(l))
+            return false;
+        n[0] /= l;  n[1] /= l;  n[2] /= l;
+        return true;
+    };
+    const auto march = [&](float px, float py, float pz,
+                           float dx, float dy, float dz,
+                           std::vector<std::array<float, 3>>* pts)
+    {
+        for (int i = 0; i < 300; ++i)
+        {
+            float nx2 = px + step*dx, ny2 = py + step*dy,
+                  nz2 = pz + step*dz;
+            if (!valley_project(deck, ctx, sp, sp,
+                                nx2, ny2, nz2))
+                break;
+            const float mx = nx2 - px, my2 = ny2 - py,
+                        mz2 = nz2 - pz;
+            const float ml = sqrtf(mx*mx + my2*my2 + mz2*mz2);
+            /*  Stalled, jumped, or reversed: the extremum line
+             *  ended (or the corrector left the curve).  */
+            if (ml < 0.05f * sp || ml > 2.f * sp ||
+                mx*dx + my2*dy + mz2*dz < 0)
+                break;
+            dx = mx / ml;  dy = my2 / ml;  dz = mz2 / ml;
+            px = nx2;  py = ny2;  pz = nz2;
+            pts->push_back({ px, py, pz });
+            claim(px, py, pz);
+        }
+    };
+    size_t nchains = 0, npts = 0;
+    for (const auto& b : boxes)
+    {
+        if (nchains >= 256)
+            break;
+        float sx = 0.5f * (b[0] + b[3]),
+              sy = 0.5f * (b[1] + b[4]),
+              sz = 0.5f * (b[2] + b[5]);
+        if (!valley_project(deck, ctx, sp, sp, sx, sy, sz))
+            continue;
+        if (is_claimed(sx, sy, sz))
+            continue;
+        KOut k0;
+        if (!curvature_probe(deck, ctx, 0.1f * sp,
+                             sx, sy, sz, &k0))
+            continue;
+        float n[3];
+        if (!normal_at(sx, sy, sz, n))
+            continue;
+        float ax = n[1]*k0.tz - n[2]*k0.ty,
+              ay = n[2]*k0.tx - n[0]*k0.tz,
+              az = n[0]*k0.ty - n[1]*k0.tx;
+        const float al = sqrtf(ax*ax + ay*ay + az*az);
+        if (!(al > 0.5f))
+            continue;       /* t_min not tangent here: bad seed */
+        ax /= al;  ay /= al;  az /= al;
+        std::vector<std::array<float, 3>> fwd, bwd;
+        fwd.push_back({ sx, sy, sz });
+        claim(sx, sy, sz);
+        march(sx, sy, sz, ax, ay, az, &fwd);
+        march(sx, sy, sz, -ax, -ay, -az, &bwd);
+        if (fwd.size() + bwd.size() < 4)
+            continue;
+        std::vector<std::array<float, 3>> chain(bwd.rbegin(),
+                                                bwd.rend());
+        chain.insert(chain.end(), fwd.begin(), fwd.end());
+        npts += chain.size();
+        out->push_back(std::move(chain));
+        ++nchains;
+    }
+    if (nchains && (getenv("STIBIUM_DMESH_TIME") ||
+                    getenv("STIBIUM_DMESH_CHIP_DEBUG")))
+        fprintf(stderr, "CONTACT: %zu chains traced (%zu points) "
+                "from %zu contact boxes\n",
+                nchains, npts, boxes.size());
+    tape_ctx_free(ctx);
 }
 
 /*  Keeter step 3: sharp-feature points.  For every candidate cell,
@@ -2969,6 +3111,14 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
                 c.hidden_contact_boxes.size(),
                 c.hidden_graze_boxes.size(), hp);
     }
+    /*  #4a: march the contact curves (snap targets + the vertex
+     *  rail injected later, after delaunay_trace - injecting
+     *  here would land inside the crease tracer's seed-tail
+     *  window and die with pass-1's soup anyway).  */
+    if (!(*halt))
+        trace_contact_chains(c.deck, c.soup.spacing,
+                             c.hidden_contact_boxes,
+                             &c.soup.contact_chains);
     if (autodense() && !c.want_dense.empty() && !(*halt))
     {
         const bool dbg = census.on ||
@@ -3206,6 +3356,9 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
                     "after drill-down\n", c2.want_dense.size());
         if (census.dump)
             fclose(census.dump);
+        /*  Contact chains were traced on the pass-1 collector;
+         *  the drill-down soup is the one that ships.  */
+        c2.soup.contact_chains = std::move(c.soup.contact_chains);
         return std::move(c2.soup);
     }
 
@@ -3630,6 +3783,10 @@ static void write_stl_raw(const char* path,
                           const std::vector<float>& V,
                           const std::vector<uint32_t>& T);
 static void dump_chains_stl(const char* path, const DSoup& soup);
+static void emit_tube(std::vector<float>& V,
+                      std::vector<uint32_t>& T,
+                      const float A[3], const float B[3],
+                      float rr);
 
 bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
                     volatile int* halt)
@@ -6905,7 +7062,17 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
          *  position anyway.  */
         static const char* rep_env2 = getenv("STIBIUM_DMESH_REPAIR");
         const int rmode2 = rep_env2 ? atoi(rep_env2) : 2;
-        if (snap_on && snap_va.empty() && !soup.tchains.empty() &&
+        /*  Runs as the classic stash-sweep fallback when the
+         *  per-round list is empty, AND in warts-only mode when
+         *  contact chains exist (the per-round list records
+         *  chips; air-chords over contact seams are warts and
+         *  need their own sweep).  */
+        const bool warts_only = !snap_va.empty();
+        uint64_t wart_admitted = 0;
+        if (snap_on &&
+            (snap_va.empty() || !soup.contact_chains.empty()) &&
+            (!soup.tchains.empty() ||
+             !soup.contact_chains.empty()) &&
             rmode2 >= 2 && !*halt)
         {
             std::unordered_map<uint64_t,
@@ -6963,6 +7130,41 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             if (!keys.empty())
                 eval_points_mt(deck, ctx, gxs, gys, gzs,
                             gv);
+            /*  #4a wart admission: air-chords at contact loci
+             *  read f >= 0 at their midpoints (chord spans AIR
+             *  over the tangent seam) and were always filtered
+             *  out of snap - repair's territory, except repair
+             *  has no law there either.  Admit a WART edge only
+             *  when a contact chain runs within one chord length
+             *  of its midpoint; everywhere else the chips-only
+             *  gate stands.  */
+            std::vector<std::array<float, 6>> csegs;
+            for (const auto& ch : soup.contact_chains)
+                for (size_t i = 0; i + 1 < ch.size(); ++i)
+                    csegs.push_back({ ch[i][0], ch[i][1],
+                                      ch[i][2], ch[i+1][0],
+                                      ch[i+1][1], ch[i+1][2] });
+            const auto near_contact = [&](float mx, float my,
+                                          float mz, float rr) {
+                const float r2 = rr * rr;
+                for (const auto& s : csegs)
+                {
+                    const float bx2 = s[3]-s[0], by2 = s[4]-s[1],
+                                bz2 = s[5]-s[2];
+                    const float bb = bx2*bx2 + by2*by2 + bz2*bz2;
+                    float t2 = bb > 0
+                            ? ((mx-s[0])*bx2 + (my-s[1])*by2 +
+                               (mz-s[2])*bz2) / bb
+                            : 0;
+                    t2 = t2 < 0 ? 0 : t2 > 1 ? 1 : t2;
+                    const float dx = mx - (s[0] + t2*bx2),
+                                dy = my - (s[1] + t2*by2),
+                                dz = mz - (s[2] + t2*bz2);
+                    if (dx*dx + dy*dy + dz*dz <= r2)
+                        return true;
+                }
+                return false;
+            };
             for (size_t i = 0; i < keys.size(); ++i)
             {
                 const float f = gv[i*7];
@@ -6971,7 +7173,14 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 const float gy = (gv[i*7+3]-gv[i*7+4]) / h2;
                 const float gz = (gv[i*7+5]-gv[i*7+6]) / h2;
                 const float gl = sqrtf(gx*gx + gy*gy + gz*gz);
-                if (!(gl > 0) || !std::isfinite(f) || f >= 0)
+                if (!(gl > 0) || !std::isfinite(f))
+                    continue;
+                if (f < 0 && warts_only)
+                    continue;   /* chips already stashed per-round */
+                if (f >= 0 &&
+                    (csegs.empty() ||
+                     !near_contact(qxs[i], qys[i], qzs[i],
+                                   qlen[i])))
                     continue;
                 const float dist = fabsf(f) / gl;
                 if (dist <= qlen[i] * 0.03f ||
@@ -6982,10 +7191,21 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 snap_t1.push_back(fem[keys[i]].first);
                 snap_t2.push_back(fem[keys[i]].second);
                 snap_d.push_back(dist);
+                if (f >= 0)
+                    ++wart_admitted;
             }
+            if (getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+                fprintf(stderr, "SWEEP: %zu edges scanned, %zu "
+                        "contact segs, %llu warts admitted "
+                        "(warts_only=%d)\n",
+                        keys.size(), csegs.size(),
+                        (unsigned long long)wart_admitted,
+                        int(warts_only));
             pt.sub("snap: stash sweep");
         }
-        if (snap_on && !snap_va.empty() && !soup.tchains.empty())
+        if (snap_on && !snap_va.empty() &&
+            (!soup.tchains.empty() ||
+             !soup.contact_chains.empty()))
         {
             struct Seg { float ax, ay, az, bx, by, bz; };
             std::vector<Seg> segs;
@@ -7005,6 +7225,13 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     segs.push_back({ a.x, a.y, a.z, b.x, b.y, b.z });
                 }
             }
+            /*  #4a: contact chains join the snap law - same
+             *  attribution cap, same referees, no constraints.  */
+            for (const auto& ch : soup.contact_chains)
+                for (size_t i = 0; i + 1 < ch.size(); ++i)
+                    segs.push_back({ ch[i][0], ch[i][1],
+                                     ch[i][2], ch[i+1][0],
+                                     ch[i+1][1], ch[i+1][2] });
             const auto pos_eq = [&](uint32_t v, const float* p) {
                 return out->verts[3*v] == p[0] &&
                        out->verts[3*v + 1] == p[1] &&
@@ -9468,6 +9695,52 @@ static void write_stl_raw(const char* path,
 
 /*  Traced polylines as thin triangular tubes - visible in any
  *  STL viewer next to the mesh (STIBIUM_DMESH_DUMP_CHAINS).  */
+static void emit_tube(std::vector<float>& V,
+                      std::vector<uint32_t>& T,
+                      const float A[3], const float B[3],
+                      float rr)
+{
+    float d[3] = { B[0]-A[0], B[1]-A[1], B[2]-A[2] };
+    const float l = sqrtf(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]);
+    if (!(l > 0))
+        return;
+    for (int q = 0; q < 3; ++q)
+        d[q] /= l;
+    float u[3] = { fabsf(d[0]) < 0.9f ? 1.f : 0.f,
+                   fabsf(d[0]) < 0.9f ? 0.f : 1.f, 0 };
+    float w[3] = { d[1]*u[2]-d[2]*u[1],
+                   d[2]*u[0]-d[0]*u[2],
+                   d[0]*u[1]-d[1]*u[0] };
+    const float wl = sqrtf(w[0]*w[0] + w[1]*w[1] + w[2]*w[2]);
+    for (int q = 0; q < 3; ++q)
+        w[q] /= wl > 0 ? wl : 1;
+    float v2[3] = { d[1]*w[2]-d[2]*w[1],
+                    d[2]*w[0]-d[0]*w[2],
+                    d[0]*w[1]-d[1]*w[0] };
+    const uint32_t base = uint32_t(V.size() / 3);
+    for (int end = 0; end < 2; ++end)
+        for (int k = 0; k < 3; ++k)
+        {
+            const float ang = float(k) * 2.0944f;
+            const float cx2 = cosf(ang), sx2 = sinf(ang);
+            const float* P = end ? B : A;
+            V.push_back(P[0] + rr * (cx2*w[0] + sx2*v2[0]));
+            V.push_back(P[1] + rr * (cx2*w[1] + sx2*v2[1]));
+            V.push_back(P[2] + rr * (cx2*w[2] + sx2*v2[2]));
+        }
+    for (int k = 0; k < 3; ++k)
+    {
+        const uint32_t a0 = base + k;
+        const uint32_t a1 = base + (k + 1) % 3;
+        const uint32_t b0 = base + 3 + k;
+        const uint32_t b1 = base + 3 + (k + 1) % 3;
+        T.insert(T.end(), { a0, b0, a1 });
+        T.insert(T.end(), { a1, b0, b1 });
+    }
+    T.insert(T.end(), { base, base + 1, base + 2 });
+    T.insert(T.end(), { base + 3, base + 5, base + 4 });
+}
+
 static void dump_chains_stl(const char* path, const DSoup& soup)
 {
     std::vector<float> V;
@@ -9482,49 +9755,9 @@ static void dump_chains_stl(const char* path, const DSoup& soup)
             const DSurfPoint& A = soup.surface[ch[j]];
             const DSurfPoint& B =
                     soup.surface[ch[(j + 1) % ch.size()]];
-            float d[3] = { B.x-A.x, B.y-A.y, B.z-A.z };
-            const float l = sqrtf(d[0]*d[0] + d[1]*d[1] +
-                                  d[2]*d[2]);
-            if (!(l > 0))
-                continue;
-            for (int q = 0; q < 3; ++q)
-                d[q] /= l;
-            float u[3] = { fabsf(d[0]) < 0.9f ? 1.f : 0.f,
-                           fabsf(d[0]) < 0.9f ? 0.f : 1.f, 0 };
-            float w[3] = { d[1]*u[2]-d[2]*u[1],
-                           d[2]*u[0]-d[0]*u[2],
-                           d[0]*u[1]-d[1]*u[0] };
-            const float wl = sqrtf(w[0]*w[0] + w[1]*w[1] +
-                                   w[2]*w[2]);
-            for (int q = 0; q < 3; ++q)
-                w[q] /= wl > 0 ? wl : 1;
-            float v2[3] = { d[1]*w[2]-d[2]*w[1],
-                            d[2]*w[0]-d[0]*w[2],
-                            d[0]*w[1]-d[1]*w[0] };
-            const uint32_t base = uint32_t(V.size() / 3);
-            for (int end = 0; end < 2; ++end)
-                for (int k = 0; k < 3; ++k)
-                {
-                    const float ang = float(k) * 2.0944f;
-                    const float cx2 = cosf(ang), sx2 = sinf(ang);
-                    V.push_back((end ? B.x : A.x) +
-                            rr * (cx2*w[0] + sx2*v2[0]));
-                    V.push_back((end ? B.y : A.y) +
-                            rr * (cx2*w[1] + sx2*v2[1]));
-                    V.push_back((end ? B.z : A.z) +
-                            rr * (cx2*w[2] + sx2*v2[2]));
-                }
-            for (int k = 0; k < 3; ++k)
-            {
-                const uint32_t a0 = base + k;
-                const uint32_t a1 = base + (k + 1) % 3;
-                const uint32_t b0 = base + 3 + k;
-                const uint32_t b1 = base + 3 + (k + 1) % 3;
-                T.insert(T.end(), { a0, b0, a1 });
-                T.insert(T.end(), { a1, b0, b1 });
-            }
-            T.insert(T.end(), { base, base + 1, base + 2 });
-            T.insert(T.end(), { base + 3, base + 5, base + 4 });
+            const float pa[3] = { A.x, A.y, A.z };
+            const float pb[3] = { B.x, B.y, B.z };
+            emit_tube(V, T, pa, pb, rr);
         }
     }
     write_stl_raw(path, V, T);
@@ -9628,8 +9861,56 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                 have_carry = true;
             }
         }
+        /*  #4a VERTEX RAIL: the part that actually kills seam-
+         *  crossing air-chords (measured on the off-axis rim:
+         *  tangency warts read second-order field depth, below
+         *  every snap floor - snap cannot own this class).
+         *  Every traced contact point is an exact f = 0 point;
+         *  injected as PLAIN surface vertices - never
+         *  constraints, never tracer seeds (we are past
+         *  delaunay_trace here) - they give Delaunay a rail of
+         *  sites along the seam, and chords across it lose to
+         *  the rail on the empty-circumball test.
+         *  STIBIUM_DMESH_CONTACT_POINTS=0 keeps the rail off.  */
+        {
+            /*  OPT-IN (first referee round: off-axis near-site
+             *  skinny 1.2 -> 2.0% - the rail-to-lattice tris
+             *  are thin by construction; seam-crossing verdict
+             *  awaits the eye referee).  */
+            const char* cp_env =
+                    getenv("STIBIUM_DMESH_CONTACT_POINTS");
+            if (cp_env && atoi(cp_env) != 0 &&
+                !soup.contact_chains.empty())
+            {
+                size_t injected = 0;
+                for (const auto& ch : soup.contact_chains)
+                    for (const auto& p : ch)
+                    {
+                        soup.surface.push_back(
+                                { p[0], p[1], p[2] });
+                        ++injected;
+                    }
+                if (getenv("STIBIUM_DMESH_TIME") ||
+                    getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+                    fprintf(stderr, "CONTACT: %zu rail vertices "
+                            "injected\n", injected);
+            }
+        }
         if (const char* cp = getenv("STIBIUM_DMESH_DUMP_CHAINS"))
             dump_chains_stl(cp, soup);
+        /*  #4a viz: contact chains as slightly fatter tubes
+         *  (distinguishable beside the crease tubes).  */
+        if (const char* cc = getenv("STIBIUM_DMESH_DUMP_CONTACT"))
+        {
+            std::vector<float> V;
+            std::vector<uint32_t> T;
+            for (const auto& ch : soup.contact_chains)
+                for (size_t i = 0; i + 1 < ch.size(); ++i)
+                    emit_tube(V, T, ch[i].data(),
+                              ch[i + 1].data(),
+                              0.1f * soup.spacing);
+            write_stl_raw(cc, V, T);
+        }
         /*  Close-ring strip cores (the additive-joint diagnosis):
          *  chain pairs closer than ~3 dense pitches bound a strip
          *  of REAL sub-articulation geometry (two parts' rims at
