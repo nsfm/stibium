@@ -6822,6 +6822,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 {
                     if (done[s])
                         continue;
+                    bool tent_curved = false;
                     const float A2[3] = {
                             out->verts[3*snap_va[s]],
                             out->verts[3*snap_va[s] + 1],
@@ -7156,7 +7157,21 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                              *  Next move needs eye-referee
                              *  coordinates of an actual fresh
                              *  step chip.  */
+                            /*  DEPTH floor 0.02 sp (the step-row
+                             *  autopsy, Nate's coordinate
+                             *  (-5.88, 48.79, 70.53)): the
+                             *  carve-out was saving tents on
+                             *  0.009 sp chips along step bases -
+                             *  3-micron divots nobody can see,
+                             *  cured by lone off-plane slivers
+                             *  everybody can.  The 0.093 sp win
+                             *  came from the deep tail (0.05-
+                             *  0.17 sp) alone.  Depth separates
+                             *  what three geometric separators
+                             *  (kappa ceiling, law routing,
+                             *  distance) could not.  */
                             if ((!cc_env || atoi(cc_env) != 0) &&
+                                snap_d[s] >= 0.02f * soup.spacing &&
                                 th >= 0.005f * soup.spacing)
                             {
                                 KOut kc;
@@ -7178,7 +7193,10 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                 }
                             }
                             if (curved_ok)
+                            {
                                 ++churn_saved;
+                                tent_curved = true;
+                            }
                             else
                             {
                                 done[s] = 1;
@@ -7272,8 +7290,11 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     done[s] = 1;
                     ++snapped;
                     if (sdump)
-                        fprintf(sdump, "tent %.4f %.4f %.4f "
-                                "%.4f\n", mx, my, mz,
+                        fprintf(sdump, "%s %.4f %.4f %.4f "
+                                "%.4f\n",
+                                tent_curved ? "tent-curved"
+                                            : "tent",
+                                mx, my, mz,
                                 snap_d[s] / soup.spacing);
                     progress = true;
                 }
