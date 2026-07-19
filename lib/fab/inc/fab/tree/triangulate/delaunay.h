@@ -113,6 +113,16 @@ struct DSoup
     std::vector<std::vector<uint32_t>> tchains;
     std::vector<uint8_t> tclosed;    // parallel to tchains
     uint64_t traced = 0;
+
+    /*  Contact-curve chains (strategy-doc #4a, 2026-07-19):
+     *  tangency/contact loci seeded from the hidden oracle's
+     *  contact verdicts and marched along the curvature-extremum
+     *  line (the clause system has a double root at contact and
+     *  cannot be marched; curvature stays finite).  SNAP TARGETS
+     *  ONLY - never CCDT constraints, never surface vertices:
+     *  pure output surgery, same contract as the crease and
+     *  valley snaps.  World-space polylines.  */
+    std::vector<std::vector<std::array<float, 3>>> contact_chains;
 };
 
 /*  Stage A: collect the point soup for a region.  demote maps
