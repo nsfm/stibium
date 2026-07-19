@@ -146,6 +146,11 @@ struct Collector
      *  class).  Box only; no survey.  */
     std::unordered_map<uint64_t, LeafBox> smooth_leaves;
     uint64_t tangle_suppressed = 0;
+    /*  Hidden-feature oracle verdicts + (env-gated) verdict
+     *  boxes for the STL dump.  */
+    uint64_t hidden_feature = 0, hidden_graze = 0;
+    std::vector<std::array<float, 6>> hidden_feat_boxes;
+    std::vector<std::array<float, 6>> hidden_graze_boxes;
     uint64_t curve_flagged = 0;      // chainless-curvature trigger
     uint64_t curve_seen = 0, curve_cross = 0;
     float curve_theta_max = 0.f;     // worst facet angle seen (deg)
@@ -439,6 +444,99 @@ void eval_points_mt(const Deck* deck, TapeCtx* ctx,
  *  tangent grazes read hidden too, and they never need density).  */
 float box_dense_factor(const DSoup& soup, float x, float y, float z);
 
+/*  Interval-subdivision hidden-feature oracle (cull -> certify
+ *  move 1, doc/reviews/2026-07-18-interval-certify-reach-locus.md
+ *  sec 5): at a leaf whose root interval straddles zero but whose
+ *  lattice samples are sign-unanimous, subdivide with the SOUND
+ *  bound the mesher already trusts for culling.  Interval
+ *  arithmetic is conservative: a decided sign is a PROOF, so
+ *  "every sub-box decided" proves no surface here (a tangent
+ *  graze / loose bound - the class that killed the old blind
+ *  HIDDEN flag), while a box still ambiguous at half the lattice
+ *  pitch is a real sub-lattice feature and earns density.  The
+ *  VERDICT RULE (refined by the first referee round: the
+ *  stacked-cylinders tangent rings - the exact 18-leaf
+ *  population that killed the blind flag - stay ambiguous at
+ *  EVERY depth, because an internal tangency touches zero from
+ *  one side and the interval can never decide it): a hidden
+ *  feature means, by definition, that the lattice missed
+ *  OPPOSITE-SIGN volume.  So FEATURE_PRESENT iff subdivision
+ *  PROVES a sub-box of the sign opposite the lattice's
+ *  unanimous read - a proof, so a flag is never wasted on
+ *  contact loci.  Persistent single-sign ambiguity (tangency
+ *  shells, loose bounds, walls far below any achievable
+ *  density) resolves EMPTY: nothing meshable at the densities
+ *  the trigger can buy.  Miss floor: features thinner than
+ *  pitch/8 read EMPTY - 8x below lattice is unrecoverable at
+ *  level 2 anyway.  Batched through tape_eval_i_batch (64
+ *  boxes/pass; batch mode records no push state, so mid-
+ *  pipeline use is safe); decided octants terminate
+ *  immediately, so cost tracks the ambiguous shell.  */
+bool autodense();
+static bool certify_hidden(const Tape* sub, TapeCtx* ctx,
+                           const float lo[3], const float hi[3],
+                           float pitch, bool lat_inside)
+{
+    struct HB { float lo[3], hi[3]; };
+    std::vector<HB> work;
+    work.push_back({ { lo[0], lo[1], lo[2] },
+                     { hi[0], hi[1], hi[2] } });
+    /*  Box budget: past it, give up WITHOUT a feature verdict -
+     *  an opposite-sign proof never arrived, and unbounded
+     *  digging in a tangency shell buys nothing.  */
+    size_t budget = 4096;
+    Interval Xs[TAPE_BATCH], Ys[TAPE_BATCH], Zs[TAPE_BATCH],
+             out[TAPE_BATCH];
+    while (!work.empty())
+    {
+        const int n = int(std::min(work.size(),
+                                   size_t(TAPE_BATCH)));
+        for (int i = 0; i < n; ++i)
+        {
+            const HB& b = work[work.size() - n + i];
+            Xs[i] = { b.lo[0], b.hi[0] };
+            Ys[i] = { b.lo[1], b.hi[1] };
+            Zs[i] = { b.lo[2], b.hi[2] };
+        }
+        std::vector<HB> batch(work.end() - n, work.end());
+        work.resize(work.size() - n);
+        tape_eval_i_batch(sub, ctx, Xs, Ys, Zs, out, n);
+        for (int i = 0; i < n; ++i)
+        {
+            if (out[i].lower > 0)       /* proven AIR */
+            {
+                if (lat_inside)
+                    return true;        /* opposite sign: FEATURE */
+                continue;
+            }
+            if (out[i].upper < 0)       /* proven MATERIAL */
+            {
+                if (!lat_inside)
+                    return true;        /* opposite sign: FEATURE */
+                continue;
+            }
+            const HB& b = batch[i];
+            const float ex = b.hi[0] - b.lo[0];
+            if (ex <= 0.125f * pitch || budget < 8)
+                continue;               /* ambiguity floor */
+            budget -= 8;
+            for (int o = 0; o < 8; ++o)
+            {
+                HB h2;
+                for (int a = 0; a < 3; ++a)
+                {
+                    const float mid = 0.5f * (b.lo[a] +
+                                              b.hi[a]);
+                    h2.lo[a] = (o >> a) & 1 ? mid : b.lo[a];
+                    h2.hi[a] = (o >> a) & 1 ? b.hi[a] : mid;
+                }
+                work.push_back(h2);
+            }
+        }
+    }
+    return false;              /* no opposite-sign volume: EMPTY */
+}
+
 void sample_block(Collector& c, const Region& r, Tape* tape,
                   uint64_t leaf_key, bool crease_leaf)
 {
@@ -701,20 +799,39 @@ void sample_block(Collector& c, const Region& r, Tape* tape,
     if (!(any_in && any_out))
     {
         ++c.soup.hidden_candidates;   // interval said maybe; samples say no
-        /*  Hidden trigger (STIBIUM_DMESH_HIDDEN=1, default OFF):
-         *  a crease-suspect leaf whose samples all agree is where a
-         *  sub-lattice feature could vanish whole.  Measured
-         *  2026-07-16: on the sharp control this fires on tangent
-         *  GRAZES (18 leaves, still hidden at 4x, dilating them
-         *  4x'd the triangle count for zero depth gain), while the
-         *  partially-visible features the smear complains about are
-         *  already caught by the residual trigger.  Needs a
-         *  graze-vs-feature oracle before it can be default.  */
-        static const char* hid_env = getenv("STIBIUM_DMESH_HIDDEN");
-        if (crease_leaf && hid_env && atoi(hid_env) != 0)
+        /*  Hidden trigger, now WITH the graze-vs-feature oracle
+         *  it always needed (certify_hidden above; the 2026-07-16
+         *  measurement killed the blind version because tangent
+         *  grazes fired it - 18 leaves, 4x tris, zero depth).
+         *  STIBIUM_DMESH_HIDDEN: 2 = interval oracle (DEFAULT),
+         *  1 = legacy blind promote (the old opt-in), 0 = off.  */
+        const char* hid_env = getenv("STIBIUM_DMESH_HIDDEN");
+        const int hid = hid_env ? atoi(hid_env) : 2;
+        if (hid == 1 && crease_leaf)
         {
             int& lv = c.want_dense[leaf_key];
             lv = std::max(lv, 2);
+        }
+        else if (hid >= 2 && !c.dense_map && autodense())
+        {
+            const float blo[3] = { r.X[0], r.Y[0], r.Z[0] };
+            const float bhi[3] = { r.X[ni], r.Y[nj], r.Z[nk] };
+            const bool feat = certify_hidden(tape, c.ctx, blo,
+                                             bhi, r.X[1] - r.X[0],
+                                             any_in);
+            if (feat)
+            {
+                ++c.hidden_feature;
+                int& lv = c.want_dense[leaf_key];
+                lv = std::max(lv, 2);
+            }
+            else
+                ++c.hidden_graze;
+            if (getenv("STIBIUM_DMESH_DUMP_HIDDEN"))
+                (feat ? c.hidden_feat_boxes
+                      : c.hidden_graze_boxes).push_back(
+                        { blo[0], blo[1], blo[2],
+                          bhi[0], bhi[1], bhi[2] });
         }
     }
 
@@ -2576,6 +2693,12 @@ static void merge_collector(Collector& c, Collector& w)
     c.soup.welded += w.soup.welded;
     c.soup.thinned += w.soup.thinned;
     c.tangle_suppressed += w.tangle_suppressed;
+    c.hidden_feature += w.hidden_feature;
+    c.hidden_graze += w.hidden_graze;
+    for (const auto& b : w.hidden_feat_boxes)
+        c.hidden_feat_boxes.push_back(b);
+    for (const auto& b : w.hidden_graze_boxes)
+        c.hidden_graze_boxes.push_back(b);
     c.curve_flagged += w.curve_flagged;
     c.curve_seen += w.curve_seen;
     c.curve_cross += w.curve_cross;
@@ -2743,6 +2866,65 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
      *  level.  One drill-down round (the level formula already
      *  predicts the need from the residual magnitude); leftover
      *  pass-2 requests are reported, not chased.  */
+    /*  Hidden-oracle verdicts: counter line + (env) the verdict
+     *  boxes as STL - certified sub-lattice features in one
+     *  file, proven grazes in the other, viewable next to the
+     *  mesh exactly like the chain tubes
+     *  (STIBIUM_DMESH_DUMP_HIDDEN=prefix ->
+     *  prefix_feature.stl / prefix_graze.stl).  */
+    if ((c.hidden_feature || c.hidden_graze) &&
+        (census.on || getenv("STIBIUM_DMESH_TIME") ||
+         getenv("STIBIUM_DMESH_CHIP_DEBUG")))
+        fprintf(stderr, "HIDDEN: %llu candidates -> %llu "
+                "certified features, %llu proven grazes\n",
+                (unsigned long long)c.soup.hidden_candidates,
+                (unsigned long long)c.hidden_feature,
+                (unsigned long long)c.hidden_graze);
+    if (const char* hp = getenv("STIBIUM_DMESH_DUMP_HIDDEN"))
+    {
+        const auto wboxes = [](const std::string& path,
+                const std::vector<std::array<float, 6>>& bs) {
+            FILE* f = fopen(path.c_str(), "wb");
+            if (!f)
+                return;
+            char hdr[80] = { 0 };
+            fwrite(hdr, 1, 80, f);
+            const uint32_t nt = uint32_t(bs.size() * 12);
+            fwrite(&nt, 4, 1, f);
+            static const int F[12][3][3] = {
+                /* corner bit order: x=1, y=2, z=4 */
+                { {0,0,0},{0,1,1},{0,0,1} }, { {0,0,0},{0,1,0},{0,1,1} },
+                { {1,0,0},{1,0,1},{1,1,1} }, { {1,0,0},{1,1,1},{1,1,0} },
+                { {0,0,0},{1,0,1},{1,0,0} }, { {0,0,0},{0,0,1},{1,0,1} },
+                { {0,1,0},{1,1,0},{1,1,1} }, { {0,1,0},{1,1,1},{0,1,1} },
+                { {0,0,0},{1,0,0},{1,1,0} }, { {0,0,0},{1,1,0},{0,1,0} },
+                { {0,0,1},{0,1,1},{1,1,1} }, { {0,0,1},{1,1,1},{1,0,1} },
+            };
+            for (const auto& b : bs)
+                for (int t = 0; t < 12; ++t)
+                {
+                    float rec[12] = { 0, 0, 0 };
+                    for (int v = 0; v < 3; ++v)
+                    {
+                        rec[3 + v*3]     = F[t][v][0] ? b[3] : b[0];
+                        rec[3 + v*3 + 1] = F[t][v][1] ? b[4] : b[1];
+                        rec[3 + v*3 + 2] = F[t][v][2] ? b[5] : b[2];
+                    }
+                    fwrite(rec, 4, 12, f);
+                    const uint16_t attr = 0;
+                    fwrite(&attr, 2, 1, f);
+                }
+            fclose(f);
+        };
+        wboxes(std::string(hp) + "_feature.stl",
+               c.hidden_feat_boxes);
+        wboxes(std::string(hp) + "_graze.stl",
+               c.hidden_graze_boxes);
+        fprintf(stderr, "HIDDEN dump: %zu feature + %zu graze "
+                "boxes -> %s_{feature,graze}.stl\n",
+                c.hidden_feat_boxes.size(),
+                c.hidden_graze_boxes.size(), hp);
+    }
     if (autodense() && !c.want_dense.empty() && !(*halt))
     {
         const bool dbg = census.on ||
