@@ -179,6 +179,22 @@ round2, bino-hygiene-autopsy, perf-round3-design, guarantees-
 research}.md.  Fleet's own fixes already landed: TRACE=0 unbraced-
 if bug, fresh dialog-knob reads, weld_slivers fan-claim.
 
+PRUSA INTERNALS VERDICT (2026-07-18, doc/reviews/2026-07-18-
+prusa-internals.md - the case cracked): prusa runs TWO judges by
+format.  STL -> admesh bit-exact weld + orientation flood (the
+150 "reversed" = pure flood artifact, 0 on 3MF; the weld re-fuses
+our coincident splits).  3MF -> index-preserving, no weld, no
+flood - it TRUSTS our topology (bino: 292/150 STL vs 73/0 3MF,
+and its residual nm there is honest self-contact).  REFEREE
+PROTOCOL CHANGE: slicer-hygiene checks run on 3MF.  Path to
+manifold=yes/0/0: ship 3MF (app default already!), then
+SEAM-CLOSURE-CONSISTENT pinch-split on the indexed rep (sheet
+labels walked along seam chains so sheets re-close; naive split
+in 3MF minted 2,202 boundary opens - measured).  EPSILON
+SEPARATION FORMALLY DEAD (nearby-weld ladder climbs ~0.02 mm,
+fuses real walls).  Fan-claim guard STAYS (prusa's 3MF manifold
+test is topological only).
+
 TIER A SESSION VERDICTS (2026-07-18 day, autonomous run - the
 plan met reality and reality won several rounds):
 - PINCH-SPLIT: built, works (index-nm 274 -> 0), but coincident
