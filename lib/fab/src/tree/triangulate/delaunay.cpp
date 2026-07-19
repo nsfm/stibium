@@ -139,7 +139,16 @@ struct Collector
         float sep;
     };
     std::unordered_map<uint64_t, LeafBox> crease_leaves;
+    /*  Smooth (live = 0) surface leaves: recorded so the density
+     *  dilation can SEE them - they are invisible to the flood
+     *  (which walks crease_leaves only), leaving level-0 pockets
+     *  inside promoted neighborhoods (the wireframe splotch
+     *  class).  Box only; no survey.  */
+    std::unordered_map<uint64_t, LeafBox> smooth_leaves;
     uint64_t tangle_suppressed = 0;
+    uint64_t curve_flagged = 0;      // chainless-curvature trigger
+    uint64_t curve_seen = 0, curve_cross = 0;
+    float curve_theta_max = 0.f;     // worst facet angle seen (deg)
 
     void add_sample(float x, float y, float z, bool inside,
                     bool on_surface = false)
@@ -902,6 +911,19 @@ bool autodense()
     return (!env || atoi(env) != 0) && dense_levels() == 0;
 }
 
+/*  Chainless-curvature trigger bar (STIBIUM_DMESH_CURVEBAR,
+ *  facet angle per CELL in degrees; 0 disables): the visible-
+ *  quilting threshold.  Leaves whose projected level-set
+ *  curvature turns more than the bar per cell promote level 1,
+ *  more than twice the bar level 2 (ceiling 25 deg/cell =
+ *  crease grade, law territory).  Density campaign trigger 2
+ *  of 3.  */
+float curve_bar_deg()
+{
+    const char* env = getenv("STIBIUM_DMESH_CURVEBAR");
+    return env ? float(atof(env)) : 3.f;
+}
+
 /*  Local band factor at a point: the densest recorded drill-down
  *  box containing it (1 outside all bands).  Crease-local radii
  *  divide by max(global knob, this) - the density round measured
@@ -1084,6 +1106,86 @@ void leaf_census(Collector& c, const Region& r, Tape* sub)
  *  few eval_r batches.  */
 constexpr uint64_t LEAF_VOXELS = 64;
 
+/*  Principal curvatures of the level set at a point, from a
+ *  19-point second-difference stencil on the field oracle (the
+ *  shared dependency under valley snap, the churn-gate curvature
+ *  carve-out, and the curvature-density trigger - built once per
+ *  quality-research P1).  k = kappa_min with its tangent
+ *  eigendirection (tx,ty,tz); kmax = kappa_max.  Sign
+ *  convention: gradient is outward, so convex reads positive and
+ *  a concave blend throat reads kappa_min < 0.  h is the stencil
+ *  pitch - second differences divide by h^2, so it must sit well
+ *  above eval noise (0.1 sp; 0.01 sp measured as pure static).
+ *  False on degenerate gradient / non-finite readings.  */
+struct KOut { float k, kmax; float tx, ty, tz; };
+static const int K_SO[19][3] = {
+    { 0, 0, 0 },
+    { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 },
+    { 0, 0, 1 }, { 0, 0, -1 },
+    { 1, 1, 0 }, { 1, -1, 0 }, { -1, 1, 0 }, { -1, -1, 0 },
+    { 1, 0, 1 }, { 1, 0, -1 }, { -1, 0, 1 }, { -1, 0, -1 },
+    { 0, 1, 1 }, { 0, 1, -1 }, { 0, -1, 1 }, { 0, -1, -1 },
+};
+static bool kout_from_vals(const float* v, float h, KOut* o);
+
+/*  Facet angle per CELL at a leaf, from a PROJECTED Hessian
+ *  probe (density campaign 2 of 3): leaf-level corner-normal
+ *  spread cannot read one-sided curvature on thin geometry -
+ *  a shade wall thinner than the leaf puts both sheets in every
+ *  leaf and mindot pegs at -1 (measured on lamp).  Project the
+ *  leaf center onto the surface (base tape - the point may exit
+ *  the leaf box) and read the level set's own curvature there;
+ *  kappa * cell_pitch is the facet angle the eye sees.
+ *  Single-threaded evals only: descend runs inside worker
+ *  threads.  */
+static bool leaf_curve_theta(Collector& c, const Region& r,
+                             float* deg)
+{
+    const Tape* base = deck_base(c.deck);
+    const float cell = r.X[1] - r.X[0];
+    float px = 0.5f * (r.X[0] + r.X[r.ni]),
+          py = 0.5f * (r.Y[0] + r.Y[r.nj]),
+          pz = 0.5f * (r.Z[0] + r.Z[r.nk]);
+    const float clamp = 1.5f * cell * float(r.ni);
+    const float h = 0.01f * c.spacing;
+    for (int it = 0; it < 2; ++it)
+    {
+        std::vector<float> xs(7, px), ys(7, py), zs(7, pz), v;
+        xs[1] += h;  xs[2] -= h;
+        ys[3] += h;  ys[4] -= h;
+        zs[5] += h;  zs[6] -= h;
+        eval_points(base, c.ctx, xs, ys, zs, v);
+        const float f = v[0];
+        const float gx = (v[1]-v[2]) / (2*h),
+                    gy = (v[3]-v[4]) / (2*h),
+                    gz = (v[5]-v[6]) / (2*h);
+        const float g2 = gx*gx + gy*gy + gz*gz;
+        if (!(g2 > 0) || !std::isfinite(g2) || !std::isfinite(f))
+            return false;
+        float sx2 = -f * gx / g2, sy2 = -f * gy / g2,
+              sz2 = -f * gz / g2;
+        const float sl = sqrtf(sx2*sx2 + sy2*sy2 + sz2*sz2);
+        if (sl > clamp)
+            return false;   /* projection left the neighborhood */
+        px += sx2;  py += sy2;  pz += sz2;
+    }
+    const float hh = 0.1f * c.spacing;
+    std::vector<float> xs(19), ys(19), zs(19), v;
+    for (int q = 0; q < 19; ++q)
+    {
+        xs[q] = px + K_SO[q][0]*hh;
+        ys[q] = py + K_SO[q][1]*hh;
+        zs[q] = pz + K_SO[q][2]*hh;
+    }
+    eval_points(base, c.ctx, xs, ys, zs, v);
+    KOut kd;
+    if (!kout_from_vals(v.data(), hh, &kd))
+        return false;
+    const float kmag = std::max(fabsf(kd.k), fabsf(kd.kmax));
+    *deg = kmag * cell * (180.f / 3.14159265f);
+    return true;
+}
+
 void descend(Collector& c, const Region& r, Tape* tape)
 {
     if (*c.halt)
@@ -1221,6 +1323,62 @@ void descend(Collector& c, const Region& r, Tape* tape)
                 int& lv = c.want_dense[key];
                 lv = std::max(lv, tangle ? 1 : want);
             }
+            /*  Chainless-curvature trigger (density campaign 2
+             *  of 3, 2026-07-18): cones quilt and curved walls
+             *  carry random level-0 holes because gentle
+             *  curvature is invisible to every other trigger -
+             *  the QEF residual is near-zero on developable
+             *  walls and live-pair crowding keys on clause
+             *  count, not bending.  Leaf-level normal spread
+             *  cannot see it either (thin shade walls put both
+             *  sheets in one leaf, mindot pegs at -1 -
+             *  measured); the honest signal is the level set's
+             *  own curvature at a PROJECTED probe point.
+             *  BAND: below the bar is visually flat; above 25
+             *  degrees/cell is crease-grade (sub-cell fillets,
+             *  law territory - the probe cannot tell a crease
+             *  from a tight blend and both are handled
+             *  elsewhere).  Tangles keep their demotion; the
+             *  surface must CROSS the leaf.  */
+            if (autodense() && curve_bar_deg() > 0)
+            {
+                bool pos = false, neg = false;
+                for (int a2 = 0; a2 < 8; ++a2)
+                    if (std::isfinite(g[a2].v))
+                        ((g[a2].v < 0) ? neg : pos) = true;
+                ++c.curve_seen;
+                const bool tangle2 =
+                        sep < autod_sep_bar() * c.spacing;
+                if (pos && neg && !tangle2)
+                {
+                    ++c.curve_cross;
+                    float th = 0;
+                    if (leaf_curve_theta(c, r, &th))
+                    {
+                        c.curve_theta_max =
+                                std::max(c.curve_theta_max, th);
+                        if (th > curve_bar_deg() && th < 25.f)
+                        {
+                            const int want2 =
+                                    th > 2 * curve_bar_deg()
+                                            ? 2 : 1;
+                            int& lv = c.want_dense[key];
+                            lv = std::max(lv, want2);
+                            ++c.curve_flagged;
+                        }
+                    }
+                }
+            }
+        }
+
+        else if (!crease_leaf && !c.dense_map && autodense())
+        {
+            /*  Box only - so the smooth-pocket fill can see
+             *  leaves the flood cannot walk.  */
+            c.smooth_leaves[key] = {
+                    { r.X[0], r.Y[0], r.Z[0] },
+                    { r.X[r.ni], r.Y[r.nj], r.Z[r.nk] },
+                    0, 1.f, HUGE_VALF };
         }
 
         /*  Crease-band density: the push rewrites every DECIDED
@@ -1436,38 +1594,8 @@ void project_points_impl(const Deck* deck, TapeCtx* ctx,
  *  Returns false where no credible valley lives: kappa_min must
  *  read concave beyond a curvature floor (third-order quantities
  *  are noise on flats - the floor keeps the pass silent there).  */
-/*  Principal curvatures of the level set at a point, from a
- *  19-point second-difference stencil on the field oracle (the
- *  shared dependency under valley snap, the churn-gate curvature
- *  carve-out, and the future curvature-density trigger - built
- *  once per quality-research P1).  k = kappa_min with its
- *  tangent eigendirection (tx,ty,tz); kmax = kappa_max.  Sign
- *  convention: gradient is outward, so convex reads positive and
- *  a concave blend throat reads kappa_min < 0.  h is the stencil
- *  pitch - second differences divide by h^2, so it must sit well
- *  above eval noise (0.1 sp; 0.01 sp measured as pure static).
- *  False on degenerate gradient / non-finite readings.  */
-struct KOut { float k, kmax; float tx, ty, tz; };
-static bool curvature_probe(const Deck* deck, TapeCtx* ctx,
-                            float h, float X, float Y, float Z,
-                            KOut* o)
+static bool kout_from_vals(const float* v, float h, KOut* o)
 {
-    static const int SO[19][3] = {
-        { 0, 0, 0 },
-        { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 },
-        { 0, 0, 1 }, { 0, 0, -1 },
-        { 1, 1, 0 }, { 1, -1, 0 }, { -1, 1, 0 }, { -1, -1, 0 },
-        { 1, 0, 1 }, { 1, 0, -1 }, { -1, 0, 1 }, { -1, 0, -1 },
-        { 0, 1, 1 }, { 0, 1, -1 }, { 0, -1, 1 }, { 0, -1, -1 },
-    };
-    std::vector<float> xs(19), ys(19), zs(19), v;
-    for (int q = 0; q < 19; ++q)
-    {
-        xs[q] = X + SO[q][0]*h;
-        ys[q] = Y + SO[q][1]*h;
-        zs[q] = Z + SO[q][2]*h;
-    }
-    eval_points_mt(deck, ctx, xs, ys, zs, v);
     const float gx = (v[1] - v[2]) / (2*h),
                 gy = (v[3] - v[4]) / (2*h),
                 gz = (v[5] - v[6]) / (2*h);
@@ -1525,6 +1653,21 @@ static bool curvature_probe(const Deck* deck, TapeCtx* ctx,
     o->ty = e1*uy + e2*wy;
     o->tz = e1*uz + e2*wz;
     return true;
+}
+
+static bool curvature_probe(const Deck* deck, TapeCtx* ctx,
+                            float h, float X, float Y, float Z,
+                            KOut* o)
+{
+    std::vector<float> xs(19), ys(19), zs(19), v;
+    for (int q = 0; q < 19; ++q)
+    {
+        xs[q] = X + K_SO[q][0]*h;
+        ys[q] = Y + K_SO[q][1]*h;
+        zs[q] = Z + K_SO[q][2]*h;
+    }
+    eval_points_mt(deck, ctx, xs, ys, zs, v);
+    return kout_from_vals(v.data(), h, o);
 }
 
 static uint64_t g_vly_try = 0, g_vly_proj = 0, g_vly_floor = 0;
@@ -2433,6 +2576,13 @@ static void merge_collector(Collector& c, Collector& w)
     c.soup.welded += w.soup.welded;
     c.soup.thinned += w.soup.thinned;
     c.tangle_suppressed += w.tangle_suppressed;
+    c.curve_flagged += w.curve_flagged;
+    c.curve_seen += w.curve_seen;
+    c.curve_cross += w.curve_cross;
+    c.curve_theta_max = std::max(c.curve_theta_max,
+                                 w.curve_theta_max);
+    for (const auto& [k, b] : w.smooth_leaves)
+        c.smooth_leaves.emplace(k, b);
     if (c.spacing == 0)
         c.spacing = w.spacing;
 }
@@ -2667,6 +2817,79 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
                 l2 = std::max(l2, lvl);
             }
         }
+        /*  Smooth-pocket fill (the wireframe splotch class,
+         *  2026-07-18): a live = 0 leaf is invisible to the
+         *  flood - it walks crease_leaves only - so smooth
+         *  pockets inside promoted neighborhoods stay level 0
+         *  and render as coarse polygonal splotches on curved
+         *  walls.  Promote any smooth leaf touching >= 3
+         *  promoted leaves to the MIN touching level (contrast
+         *  removal, not extra detail); boundary strips of big
+         *  smooth regions touch fewer and stay untouched.  */
+        {
+            std::vector<std::pair<uint64_t, int>> fills;
+            for (const auto& [k2, b2] : c.smooth_leaves)
+            {
+                int cnt = 0, lvmin = INT_MAX;
+                for (const auto& [k3, l3v] : dilated)
+                {
+                    const auto it3 = c.crease_leaves.find(k3);
+                    if (it3 == c.crease_leaves.end() ||
+                        !touches(it3->second, b2))
+                        continue;
+                    ++cnt;
+                    lvmin = std::min(lvmin, std::max(1, l3v));
+                }
+                if (cnt >= 3)
+                    fills.push_back({ k2, lvmin });
+            }
+            for (const auto& [k2, lv2] : fills)
+                dilated[k2] = lv2;
+            if (dbg && !fills.empty())
+                fprintf(stderr, "AUTOD smooth-fill: %zu of %zu "
+                        "level-0 pockets promoted\n",
+                        fills.size(), c.smooth_leaves.size());
+        }
+        /*  Tangle-demotion DESPECKLE (the wireframe splotch
+         *  class, cracked 2026-07-18): bino is blanket level-2
+         *  yet walls carry random polygonal 2x-coarse patches -
+         *  they are tangle-demoted islands (404 on bino), minted
+         *  wherever the per-leaf sep reading (a min over corner
+         *  pairs - noisy) flickers across the bar on a thin
+         *  wall.  A REAL tangle band is contiguous: its
+         *  neighbors demote too, and a majority filter leaves it
+         *  alone.  Only isolated speckles - level-1 leaves with
+         *  >= 5 touching level-2 neighbors - re-promote.  Runs
+         *  before the retreat demote so convictions still land
+         *  on top.  */
+        {
+            std::vector<uint64_t> speckle;
+            for (const auto& [k2, l2v] : dilated)
+            {
+                if (l2v >= 2)
+                    continue;
+                const auto it2 = c.crease_leaves.find(k2);
+                if (it2 == c.crease_leaves.end())
+                    continue;
+                int hi2 = 0;
+                for (const auto& [k3, l3v] : dilated)
+                {
+                    if (l3v < 2 || k3 == k2)
+                        continue;
+                    const auto it3 = c.crease_leaves.find(k3);
+                    if (it3 != c.crease_leaves.end() &&
+                        touches(it3->second, it2->second))
+                        ++hi2;
+                }
+                if (hi2 >= 5)
+                    speckle.push_back(k2);
+            }
+            for (const uint64_t k2 : speckle)
+                dilated[k2] = 2;
+            if (dbg && !speckle.empty())
+                fprintf(stderr, "AUTOD despeckle: %zu demoted "
+                        "islands re-promoted\n", speckle.size());
+        }
         /*  Close-ring strip promotion (level 3 between paired
          *  rims) lands before the demote cap so retreat can still
          *  roll a torn strip back.  */
@@ -2694,11 +2917,21 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
             size_t l1 = 0, l2 = 0, l3 = 0;
             for (const auto& [k, l] : dilated)
                 ++(l >= 3 ? l3 : l >= 2 ? l2 : l1);
-            fprintf(stderr, "AUTOD drill-down: %zu leaves flagged, "
+            fprintf(stderr, "CURVE: %llu seen, %llu probed, "
+                    "%llu flagged, max theta %.2f deg/cell "
+                    "(bar %.2f)\n",
+                    (unsigned long long)c.curve_seen,
+                    (unsigned long long)c.curve_cross,
+                    (unsigned long long)c.curve_flagged,
+                    c.curve_theta_max, curve_bar_deg());
+            fprintf(stderr, "AUTOD drill-down: %zu leaves flagged "
+                    "(%llu curve), "
                     "%zu after flood+cores (%zu @1, %zu @2, "
                     "%zu @3), %llu tangle-demoted, "
                     "%llu phantom QEF\n",
-                    c.want_dense.size(), dilated.size(), l1, l2,
+                    c.want_dense.size(),
+                    (unsigned long long)c.curve_flagged,
+                    dilated.size(), l1, l2,
                     l3, (unsigned long long)c.tangle_suppressed,
                     (unsigned long long)c.phantom_rejected);
         }
@@ -7470,6 +7703,8 @@ static void decimate_flats(const Deck* deck, DMesh* out)
     auto vp = [&](uint32_t v, int q) {
         return out->verts[3 * v + q];
     };
+    uint64_t dk_veto = 0, dk_fail = 0;
+    float dk_kmax_seen = 0;
     for (int pass = 0; pass < 30; ++pass)
     {
         /*  Incident-triangle lists  */
@@ -7687,6 +7922,87 @@ static void decimate_flats(const Deck* deck, DMesh* out)
                 cand_t.resize(kept);
             }
         }
+        /*  CURVATURE veto (cylinder quilting, 2026-07-18: the
+         *  wireframe splotches - big coplanar plates tiling
+         *  cylinder walls - are legal merges by the bit-tight
+         *  flatness test, because extraction facets the cylinder
+         *  into exactly-planar patches.  Normals cannot see the
+         *  underlying curvature; the FIELD can.  Batched Hessian
+         *  stencil at each candidate: refuse the collapse when
+         *  the merged fan's chord sagitta (kappa * span^2 / 8)
+         *  exceeds the bar - a flat reads kappa ~ 0 and merges
+         *  freely, a cylinder wall caps its plate size at the
+         *  radius the bar allows.  STIBIUM_DMESH_DECCURVE sets
+         *  the bar in mesh-edge units (default 0.05; 0
+         *  disables).  */
+        static const char* dk_env =
+                getenv("STIBIUM_DMESH_DECCURVE");
+        const float dk_bar = (dk_env ? float(atof(dk_env))
+                                     : 0.05f) * mesh_edge;
+        if (dk_bar > 0 && wctx && !cand_v.empty())
+        {
+            const float kh = 0.1f * mesh_edge;
+            std::vector<float> kx(cand_v.size() * 19),
+                    ky(cand_v.size() * 19),
+                    kz(cand_v.size() * 19), kv;
+            std::vector<float> span2(cand_v.size(), 0.f);
+            for (size_t ci = 0; ci < cand_v.size(); ++ci)
+            {
+                const uint32_t v2 = cand_v[ci];
+                for (int q = 0; q < 19; ++q)
+                {
+                    kx[ci*19+q] = vp(v2,0) + K_SO[q][0]*kh;
+                    ky[ci*19+q] = vp(v2,1) + K_SO[q][1]*kh;
+                    kz[ci*19+q] = vp(v2,2) + K_SO[q][2]*kh;
+                }
+                /*  Post-collapse span: max pairwise distance
+                 *  among the fan's vertices.  */
+                std::vector<uint32_t> fv;
+                for (const uint32_t t : inc[v2])
+                    for (int e = 0; e < 3; ++e)
+                        fv.push_back(T[t + e]);
+                std::sort(fv.begin(), fv.end());
+                fv.erase(std::unique(fv.begin(), fv.end()),
+                         fv.end());
+                float s2 = 0;
+                for (size_t i = 0; i < fv.size(); ++i)
+                    for (size_t j = i + 1; j < fv.size(); ++j)
+                    {
+                        const float dx = vp(fv[i],0)-vp(fv[j],0),
+                                dy = vp(fv[i],1)-vp(fv[j],1),
+                                dz = vp(fv[i],2)-vp(fv[j],2);
+                        s2 = std::max(s2,
+                                dx*dx + dy*dy + dz*dz);
+                    }
+                span2[ci] = s2;
+            }
+            eval_points_mt(deck, wctx, kx, ky, kz, kv);
+            size_t kept = 0;
+            for (size_t ci = 0; ci < cand_v.size(); ++ci)
+            {
+                KOut kd;
+                bool keep_c = true;
+                if (kout_from_vals(&kv[ci*19], kh, &kd))
+                {
+                    const float kmag = std::max(fabsf(kd.k),
+                                                fabsf(kd.kmax));
+                    dk_kmax_seen = std::max(dk_kmax_seen, kmag);
+                    keep_c = 0.125f * kmag * span2[ci] <= dk_bar;
+                }
+                else
+                    ++dk_fail;
+                if (keep_c)
+                {
+                    cand_v[kept] = cand_v[ci];
+                    cand_t[kept] = cand_t[ci];
+                    ++kept;
+                }
+                else
+                    ++dk_veto;
+            }
+            cand_v.resize(kept);
+            cand_t.resize(kept);
+        }
         for (size_t ci = 0; ci < cand_v.size(); ++ci)
         {
             remap[cand_v[ci]] = cand_t[ci];
@@ -7709,6 +8025,13 @@ static void decimate_flats(const Deck* deck, DMesh* out)
         }
         T.resize(w2);
     }
+    if ((dk_veto || dk_fail) && (getenv("STIBIUM_DMESH_TIME") ||
+                                 getenv("STIBIUM_DMESH_CHIP_DEBUG")))
+        fprintf(stderr, "DECCURVE: %llu vetoed, %llu probe-fail, "
+                "kmax %.4f, edge %.4f\n",
+                (unsigned long long)dk_veto,
+                (unsigned long long)dk_fail,
+                dk_kmax_seen, mesh_edge);
     if (wctx)
         tape_ctx_free(wctx);
 }
