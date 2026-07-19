@@ -8165,68 +8165,174 @@ static void repair_winding(const Deck* deck, DMesh* out)
                 (unsigned long long)maj_flips);
 }
 
-/*  Edge-pinch split (MARATHON 2 Tier A cure 2, the "0
- *  auto-repairs" finish line): the bino autopsy proved the
- *  residual prusa opens are NOT holes - they are 318 REAL pinch
- *  seams (4- and 6-incident edges, net winding 0) where thin
- *  features self-contact.  Slicer manifold builders choke on
- *  them.  Resolution: treat any edge with > 2 incident facets as
- *  a BARRIER in vertex-fan connectivity; a vertex whose fan then
- *  decomposes into multiple components gets one coincident copy
- *  per extra component (the manifold pass's own semantics,
- *  applied at the tail where seal cannot re-fuse them - seal
- *  runs BEFORE this pass by construction).  Geometry is
- *  byte-identical; sheets become independently 2-manifold.
- *  STIBIUM_DMESH_PINCHSPLIT=0 disables.  */
-static void split_edge_pinches(DMesh* out, float sp)
+/*  Edge-pinch split, SEAM-CLOSURE-CONSISTENT (the "0
+ *  auto-repairs" finish line; design per doc/reviews/
+ *  2026-07-18-prusa-internals.md sec 4.2): residual prusa opens
+ *  are REAL pinch seams (4-/6-incident edges, net winding 0)
+ *  where thin features self-contact.  The naive split (nm edges
+ *  as pure barriers in vertex-fan connectivity) un-shares each
+ *  seam without re-closing the sheets: the two faces that should
+ *  stay partners across a seam edge land in different vertex
+ *  copies, so every seam half-edge becomes a boundary (bino:
+ *  274 nm -> 2,202 open, measured).  Cure: PAIR the incident
+ *  faces at each nm edge - radial sort around the edge axis,
+ *  then couple each b->a-wound face with the next a->b-wound
+ *  face counterclockwise (the two faces bounding each MATERIAL
+ *  wedge; winding is trustworthy - repair_winding runs first) -
+ *  and let those pairs COUNT as fan connectivity alongside clean
+ *  (2-incident) edges.  Each sheet then re-closes by
+ *  construction: paired faces share both endpoint copies, so
+ *  every split edge copy keeps exactly 2 opposite-wound faces.
+ *  Copies are COINCIDENT (zero vertex motion - geometric welded
+ *  counters unchanged, watertight law intact); the split lives
+ *  at the index level, which 3MF preserves (STL welds it away).
+ *  Runs from the EXPORT path, strictly AFTER optional QEM:
+ *  meshopt tears coincident copies into real boundary holes if
+ *  the split runs first, and its collapses mint fresh pinches
+ *  of their own (bino 274 -> 325 nm, measured) - last position
+ *  cures both.  STIBIUM_DMESH_PINCHSPLIT=0 disables.  */
+uint64_t dmesh_split_pinches(std::vector<float>& V,
+                             std::vector<uint32_t>& T)
 {
-    /*  DEFAULT OFF (2026-07-18 referee verdict): coincident
-     *  copies zero the mesher's index-nm counter but make
-     *  prusa's exact-position welder WORSE (screws manifold
-     *  yes -> no, 0 -> 68 open) - slicers re-fuse the copies and
-     *  their repair walk then trips on the re-found pinches.
-     *  Opt-in until the seam-consistent epsilon-separation
-     *  design lands (sheet labels propagated along pinch
-     *  CURVES; the per-vertex nudge opened 2,198 geometric
-     *  edges - watertight is law).  */
-    static const char* env = getenv("STIBIUM_DMESH_PINCHSPLIT");
+    const char* env = getenv("STIBIUM_DMESH_PINCHSPLIT");
     if (!env || atoi(env) == 0)
-        return;
-    /*  Epsilon-separation is DISABLED pending seam-consistent
-     *  sheet labeling (measured 2026-07-18: nudged copies improve
-     *  prusa 292 -> 134 but per-vertex-independent components can
-     *  disagree between a seam edge's endpoints - self-contacting
-     *  sheets reconnect through the far fan - opening 2,198
-     *  geometric edges.  WATERTIGHT IS LAW.)  Coincident copies
-     *  still zero the mesher's own nm counter and improve prusa
-     *  336 -> 292; full slicer-manifold needs sheet labels
-     *  propagated along pinch CURVES, queued in MESH-WAR.  */
-    const float nudge = 0.f * sp;
-    std::vector<uint32_t>& T = out->tris;
+        return 0;
     const auto ekey = [](uint32_t a, uint32_t b) {
         return (uint64_t(std::min(a, b)) << 32) | std::max(a, b);
     };
     uint64_t total_split = 0;
-    for (int round = 0; round < 4; ++round)
+    uint32_t first_mid = UINT32_MAX;
+    for (int round = 0; round < 8; ++round)
     {
-        const size_t nv = out->verts.size() / 3;
+        const size_t nv = V.size() / 3;
+        /*  All reads this round come from a FROZEN snapshot; the
+         *  live array only receives index rewrites.  Each slot is
+         *  owned by its original vertex, so it is written at most
+         *  once per round and every lookup key stays valid (the
+         *  old read-the-live-array pattern made later vertices
+         *  see already-rewritten ids as unknown edges ->
+         *  spurious barriers).  */
+        const std::vector<uint32_t> T0 = T;
         std::unordered_map<uint64_t, uint32_t> ecount;
-        ecount.reserve(T.size());
-        for (size_t t = 0; t < T.size(); t += 3)
+        ecount.reserve(T0.size());
+        for (size_t t = 0; t < T0.size(); t += 3)
             for (int e = 0; e < 3; ++e)
-                ++ecount[ekey(T[t + e], T[t + (e + 1) % 3])];
+                ++ecount[ekey(T0[t + e], T0[t + (e + 1) % 3])];
+        /*  Face lists for nm (>2-incident) edges, then the
+         *  material-wedge pairing per edge.  */
+        std::unordered_map<uint64_t, std::vector<uint32_t>> nmf;
+        for (uint32_t t = 0; t < T0.size(); t += 3)
+            for (int e = 0; e < 3; ++e)
+            {
+                const uint32_t a = T0[t + e],
+                               b = T0[t + (e + 1) % 3];
+                if (a == b)
+                    continue;
+                const uint64_t k = ekey(a, b);
+                if (ecount[k] > 2)
+                    nmf[k].push_back(t);
+            }
+        std::unordered_map<uint64_t,
+                std::vector<std::pair<uint32_t, uint32_t>>> nmpair;
+        for (const auto& [k, faces] : nmf)
+        {
+            const uint32_t A = uint32_t(k >> 32),
+                           B = uint32_t(k & 0xffffffffu);
+            const float* pa = &V[3 * A];
+            const float* pb = &V[3 * B];
+            float dx = pb[0]-pa[0], dy = pb[1]-pa[1],
+                  dz = pb[2]-pa[2];
+            const float dl = sqrtf(dx*dx + dy*dy + dz*dz);
+            if (dl <= 0)
+                continue;
+            dx /= dl; dy /= dl; dz /= dl;
+            /*  Radial basis (e1, e2) perpendicular to the edge;
+             *  CCW angle = right-hand rotation about a->b.  */
+            float e1x, e1y, e1z;
+            if (fabsf(dx) <= fabsf(dy) && fabsf(dx) <= fabsf(dz))
+                { e1x = 0; e1y = -dz; e1z = dy; }
+            else if (fabsf(dy) <= fabsf(dz))
+                { e1x = dz; e1y = 0; e1z = -dx; }
+            else
+                { e1x = -dy; e1y = dx; e1z = 0; }
+            const float e1l = sqrtf(e1x*e1x + e1y*e1y + e1z*e1z);
+            e1x /= e1l; e1y /= e1l; e1z /= e1l;
+            const float e2x = dy*e1z - dz*e1y,
+                        e2y = dz*e1x - dx*e1z,
+                        e2z = dx*e1y - dy*e1x;
+            struct RF { float ang; uint32_t t; int dir; };
+            std::vector<RF> rf;
+            rf.reserve(faces.size());
+            for (const uint32_t t : faces)
+            {
+                int dir = 0;
+                uint32_t w = 0;
+                for (int e = 0; e < 3; ++e)
+                {
+                    const uint32_t p = T0[t + e],
+                                   q = T0[t + (e + 1) % 3];
+                    if (p == A && q == B)
+                        { dir = 1; w = T0[t + (e + 2) % 3]; }
+                    else if (p == B && q == A)
+                        { dir = -1; w = T0[t + (e + 2) % 3]; }
+                }
+                if (!dir)
+                    continue;
+                const float rx = V[3*w]   - pa[0],
+                            ry = V[3*w+1] - pa[1],
+                            rz = V[3*w+2] - pa[2];
+                rf.push_back({ atan2f(rx*e2x + ry*e2y + rz*e2z,
+                                      rx*e1x + ry*e1y + rz*e1z),
+                               t, dir });
+            }
+            std::sort(rf.begin(), rf.end(),
+                    [](const RF& x, const RF& y)
+                    { return x.ang < y.ang; });
+            /*  A dir- face has material on its CCW side, a dir+
+             *  face on its clockwise side: each material wedge
+             *  runs from a dir- face to the next dir+ face CCW.
+             *  ZERO-width wedges are skipped: at a doubled-sheet
+             *  kiss two walls' faces sit at angularly COINCIDENT
+             *  positions, so sort order between them is float
+             *  noise - a noise pairing couples wall A to wall B
+             *  (a material wedge with no volume) and the fan
+             *  union then glues both sheets, blocking the split.
+             *  Greedy nearest-CCW past the eps keeps degenerate
+             *  (odd-count) fans safe; leftovers stay barriers.  */
+            std::vector<char> used(rf.size(), 0);
+            auto& prs = nmpair[k];
+            for (size_t s = 0; s < rf.size(); ++s)
+            {
+                if (used[s] || rf[s].dir != -1)
+                    continue;
+                for (size_t j = 1; j < rf.size(); ++j)
+                {
+                    const size_t c = (s + j) % rf.size();
+                    if (used[c] || rf[c].dir != 1)
+                        continue;
+                    float dw = rf[c].ang - rf[s].ang;
+                    if (dw < 0)
+                        dw += 2.f * float(M_PI);
+                    if (dw < 1e-3f)
+                        continue;
+                    prs.push_back({ rf[s].t, rf[c].t });
+                    used[s] = used[c] = 1;
+                    break;
+                }
+            }
+        }
         std::vector<std::vector<uint32_t>> inc(nv);
-        for (uint32_t t = 0; t < T.size(); t += 3)
+        for (uint32_t t = 0; t < T0.size(); t += 3)
             for (int e = 0; e < 3; ++e)
-                inc[T[t + e]].push_back(t);
+                inc[T0[t + e]].push_back(t);
         uint64_t split = 0;
         for (size_t v = 0; v < nv; ++v)
         {
             const auto& fan = inc[v];
             if (fan.size() < 2)
                 continue;
-            /*  Union facets sharing a CLEAN (2-incident) edge
-             *  at v.  */
+            /*  Union facets sharing a CLEAN (2-incident) edge at
+             *  v, plus PAIRED facets across nm edges at v.  */
             int ncomp = 0;
             std::vector<int> parent(fan.size());
             for (size_t i = 0; i < fan.size(); ++i)
@@ -8238,24 +8344,43 @@ static void split_edge_pinches(DMesh* out, float sp)
             };
             std::unordered_map<uint64_t,
                     std::vector<size_t>> at_v;
+            std::unordered_map<uint32_t, size_t> fanidx;
+            std::vector<uint64_t> nm_at_v;
             for (size_t i = 0; i < fan.size(); ++i)
             {
                 const uint32_t t = fan[i];
+                fanidx[t] = i;
                 for (int e = 0; e < 3; ++e)
                 {
-                    const uint32_t a = T[t + e],
-                                   b = T[t + (e + 1) % 3];
+                    const uint32_t a = T0[t + e],
+                                   b = T0[t + (e + 1) % 3];
                     if (a != v && b != v)
                         continue;
                     const uint64_t k = ekey(a, b);
                     if (ecount[k] == 2)
                         at_v[k].push_back(i);
+                    else if (ecount[k] > 2)
+                        nm_at_v.push_back(k);
                 }
             }
             for (const auto& [k, lst] : at_v)
                 for (size_t j = 1; j < lst.size(); ++j)
                     parent[find(int(lst[0]))] =
                             find(int(lst[j]));
+            for (const uint64_t k : nm_at_v)
+            {
+                const auto it = nmpair.find(k);
+                if (it == nmpair.end())
+                    continue;
+                for (const auto& pr : it->second)
+                {
+                    const auto ia = fanidx.find(pr.first);
+                    const auto ib = fanidx.find(pr.second);
+                    if (ia != fanidx.end() && ib != fanidx.end())
+                        parent[find(int(ia->second))] =
+                                find(int(ib->second));
+                }
+            }
             std::unordered_map<int, int> roots;
             for (size_t i = 0; i < fan.size(); ++i)
             {
@@ -8266,36 +8391,14 @@ static void split_edge_pinches(DMesh* out, float sp)
             if (ncomp <= 1)
                 continue;
             /*  Component 0 keeps v; each further component gets
-             *  a coincident copy.  */
+             *  a coincident copy (zero vertex motion).  */
             std::vector<uint32_t> copy_of(ncomp, uint32_t(v));
-            /*  Mean facet normal per component (for the nudge).  */
-            std::vector<std::array<float, 3>> cn(ncomp,
-                    { 0, 0, 0 });
-            for (size_t i = 0; i < fan.size(); ++i)
-            {
-                const int c2 = roots[find(int(i))];
-                const uint32_t t = fan[i];
-                const uint32_t a = T[t], b = T[t+1], c3 = T[t+2];
-                const float ux = out->verts[3*b]-out->verts[3*a],
-                        uy = out->verts[3*b+1]-out->verts[3*a+1],
-                        uz = out->verts[3*b+2]-out->verts[3*a+2];
-                const float wx = out->verts[3*c3]-out->verts[3*a],
-                        wy = out->verts[3*c3+1]-out->verts[3*a+1],
-                        wz = out->verts[3*c3+2]-out->verts[3*a+2];
-                cn[c2][0] += uy*wz - uz*wy;
-                cn[c2][1] += uz*wx - ux*wz;
-                cn[c2][2] += ux*wy - uy*wx;
-            }
             for (int c2 = 1; c2 < ncomp; ++c2)
             {
-                copy_of[c2] = uint32_t(out->verts.size() / 3);
-                float nx = cn[c2][0], ny = cn[c2][1],
-                      nz = cn[c2][2];
-                const float nl = sqrtf(nx*nx + ny*ny + nz*nz);
-                const float f2 = nl > 0 ? nudge / nl : 0;
-                out->verts.push_back(out->verts[3*v] + nx*f2);
-                out->verts.push_back(out->verts[3*v+1] + ny*f2);
-                out->verts.push_back(out->verts[3*v+2] + nz*f2);
+                copy_of[c2] = uint32_t(V.size() / 3);
+                V.push_back(V[3*v]);
+                V.push_back(V[3*v+1]);
+                V.push_back(V[3*v+2]);
                 ++split;
             }
             for (size_t i = 0; i < fan.size(); ++i)
@@ -8305,18 +8408,80 @@ static void split_edge_pinches(DMesh* out, float sp)
                     continue;
                 const uint32_t t = fan[i];
                 for (int e = 0; e < 3; ++e)
-                    if (T[t + e] == v)
+                    if (T0[t + e] == v)
                         T[t + e] = copy_of[c2];
             }
         }
         total_split += split;
+        /*  Stuck seams (bino: 157/274, measured): the two sheets
+         *  reconnect through BOTH endpoint fans - the seam
+         *  terminates where the surfaces merge, so no vertex
+         *  partition separates the edge without tearing clean
+         *  edges.  But the slicer manifold test is per-EDGE, not
+         *  per-vertex: subdivide the stuck edge at its MIDPOINT
+         *  (collinear - zero geometric deviation) and the new
+         *  vertex, whose fan is entangled with nothing but the
+         *  seam itself, splits cleanly by the pairing next
+         *  round.  Endpoints stay fused (bowtie vertices are
+         *  legal manifold-test topology).  Midpoint edges never
+         *  re-subdivide; a face carrying TWO nm edges defers the
+         *  second to the next stall round (its corner moved when
+         *  the first was cut); anything stuck at the round cap
+         *  is honest residue.  */
         if (!split)
-            break;
+        {
+            uint64_t cut = 0;
+            for (const auto& [k, faces] : nmf)
+            {
+                const uint32_t A = uint32_t(k >> 32),
+                               B = uint32_t(k & 0xffffffffu);
+                if (A >= first_mid || B >= first_mid)
+                    continue;
+                bool intact = true;
+                for (const uint32_t t : faces)
+                {
+                    bool ha = false, hb = false;
+                    for (int e = 0; e < 3; ++e)
+                    {
+                        ha |= T[t + e] == A;
+                        hb |= T[t + e] == B;
+                    }
+                    intact &= ha && hb;
+                }
+                if (!intact)
+                    continue;
+                const uint32_t M = uint32_t(V.size() / 3);
+                first_mid = std::min(first_mid, M);
+                V.push_back((V[3*A] + V[3*B]) * 0.5f);
+                V.push_back((V[3*A+1] + V[3*B+1]) * 0.5f);
+                V.push_back((V[3*A+2] + V[3*B+2]) * 0.5f);
+                for (const uint32_t t : faces)
+                {
+                    /*  (.., A, B, ..) -> in-place copy with B
+                     *  := M, plus appended copy with A := M -
+                     *  pure index substitution, winding kept;
+                     *  the (M, w) diagonal is shared opposite-
+                     *  wound by the two halves.  */
+                    uint32_t half[3];
+                    for (int e = 0; e < 3; ++e)
+                    {
+                        half[e] = T[t + e] == A ? M : T[t + e];
+                        if (T[t + e] == B)
+                            T[t + e] = M;
+                    }
+                    T.insert(T.end(), half, half + 3);
+                }
+                ++cut;
+            }
+            if (!cut)
+                break;
+        }
     }
     if (total_split && (getenv("STIBIUM_DMESH_TIME") ||
                         getenv("STIBIUM_DMESH_CHIP_DEBUG")))
         fprintf(stderr, "PINCHSPLIT: %llu sheet copies minted at "
                 "pinch seams\n", (unsigned long long)total_split);
+    return total_split;
 }
 
 static void recount_quality(DMesh* out)
@@ -8683,8 +8848,9 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                 pt.sub("decimate_flats");
                 seal_seams(out, soup.spacing);
                 repair_winding(deck, out);
-                split_edge_pinches(out, soup.spacing);
-                pt.sub("seal+winding+pinchsplit");
+                /*  Pinch split moved to the EXPORT tail (post-
+                 *  QEM): dmesh_split_pinches.  */
+                pt.sub("seal+winding");
                 recount_quality(out);
                 pt.sub("recount_quality");
                 pt.mark("fix stages");
@@ -8803,8 +8969,9 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
             fixpt.sub("decimate_flats");
             seal_seams(out, r.X[1] - r.X[0]);
             repair_winding(deck, out);
-            split_edge_pinches(out, r.X[1] - r.X[0]);
-            fixpt.sub("seal+winding+pinchsplit");
+            /*  Pinch split moved to the EXPORT tail (post-QEM):
+             *  dmesh_split_pinches.  */
+            fixpt.sub("seal+winding");
             recount_quality(out);
             fixpt.sub("recount_quality");
             fixpt.mark("fix stages");

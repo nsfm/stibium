@@ -315,6 +315,20 @@ void ExportMeshWorker::async()
                     .arg(verts.size() / 3);
     }
 
+    /*  Pinch split LAST (strictly after QEM): meshopt tears
+     *  coincident sheet copies into real boundary holes if the
+     *  split runs first, and its collapses mint fresh pinches of
+     *  their own (bino 274 -> 325 nm edges, measured) - the tail
+     *  position cures both.  Zero vertex motion; index-level
+     *  only, which 3MF preserves.  */
+    if (_mesher == 0 && indices.size() >= 3 && !halt)
+    {
+        const uint64_t copies = dmesh_split_pinches(verts, indices);
+        if (copies && !_stats.isEmpty())
+            _stats += QString("<br>pinch seams split: %1 sheet "
+                              "copies").arg(copies);
+    }
+
     progress_phase = PHASE_WRITING;
 
     // Format follows the file extension; STL is the fallback for
