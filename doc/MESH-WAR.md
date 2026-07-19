@@ -451,6 +451,27 @@ onto the adjacent flat, outside the extremum capture radius -
 next increment is ENDPOINT SEEDING (the crease tracer stops
 exactly where the rim fades; its open chain endpoints are
 perfect ridge-mode seeds - continuation, not discovery).
+
+TRACER ROUND 3 - THE PRIMITIVE VERDICT (2026-07-19, Nate's
+semicircle question + the on-axis control): ridge-as-PEAK is
+the WRONG detector for fillet boundaries.  The on-axis lip
+traces ZERO chains (28/28 vproj-rejected): both surfaces are
+constant-curvature plateaus (torus meridians included) and the
+junction is a curvature STEP the stencil smears into a
+monotonic ramp - no local max exists ANYWHERE on the honest
+geometry.  The off-axis semicircle was tilt-created kappa
+peaks, not the junction.  Nate's instinct ("shouldn't this be
+a ridge no matter how it's tilted?") was right twice: the
+eigen-ordering also swaps with tilt (kappa_max direction
+rotates 90 deg where 1/R_local crosses 1/r_tube).  NEXT
+PRIMITIVE (fresh session): a curvature-STEP detector - march
+the extremum of d(kappa)/ds across the line (the ramp's
+steepest point), sampled from the same stencil; cross
+direction from the MARCH FRAME (n x dir), never from eigen
+ordering.  Note: the MESH is unaffected throughout - contact
+chains feed only the snap pass and the tangency chips are
+sub-floor; the tracer is an instrument still earning its
+delivery mechanism (full #4 constraints).
 8. OPEN-EDGE PREDICTOR for retreat (perf 1b, gate on a stability
    instrument first): doomed attempts skip the repair tail,
    ~3 min off the full assembly.
