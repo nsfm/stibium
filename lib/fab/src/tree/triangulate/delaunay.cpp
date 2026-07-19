@@ -8194,8 +8194,11 @@ static void repair_winding(const Deck* deck, DMesh* out)
 uint64_t dmesh_split_pinches(std::vector<float>& V,
                              std::vector<uint32_t>& T)
 {
+    /*  DEFAULT ON (2026-07-18, Nate's call after the referee
+     *  matrix: prusa manifold=yes on screws/bino/bino+QEM, zero
+     *  vertex motion, geometric welded counters unchanged).  */
     const char* env = getenv("STIBIUM_DMESH_PINCHSPLIT");
-    if (!env || atoi(env) == 0)
+    if (env && atoi(env) == 0)
         return 0;
     const auto ekey = [](uint32_t a, uint32_t b) {
         return (uint64_t(std::min(a, b)) << 32) | std::max(a, b);
