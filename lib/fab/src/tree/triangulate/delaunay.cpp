@@ -1756,22 +1756,49 @@ void project_points_impl(const Deck* deck, TapeCtx* ctx,
  *  Returns false where no credible valley lives: kappa_min must
  *  read concave beyond a curvature floor (third-order quantities
  *  are noise on flats - the floor keeps the pass silent there).  */
-static bool kout_from_vals(const float* v, float h, KOut* o)
+/*  Raw Hessian + gradient from a 19-point stencil's values.
+ *  H packed [xx, yy, zz, xy, xz, yz].  */
+static bool hg_from_vals(const float* v, float h,
+                         float H[6], float g[3])
 {
-    const float gx = (v[1] - v[2]) / (2*h),
-                gy = (v[3] - v[4]) / (2*h),
-                gz = (v[5] - v[6]) / (2*h);
-    const float gl = sqrtf(gx*gx + gy*gy + gz*gz);
+    g[0] = (v[1] - v[2]) / (2*h);
+    g[1] = (v[3] - v[4]) / (2*h);
+    g[2] = (v[5] - v[6]) / (2*h);
+    const float gl = sqrtf(g[0]*g[0] + g[1]*g[1] + g[2]*g[2]);
     if (!(gl > 0) || !std::isfinite(gl))
         return false;
-    const float hxx = (v[1] - 2*v[0] + v[2]) / (h*h),
-                hyy = (v[3] - 2*v[0] + v[4]) / (h*h),
-                hzz = (v[5] - 2*v[0] + v[6]) / (h*h),
-                hxy = (v[7] - v[8] - v[9] + v[10]) / (4*h*h),
-                hxz = (v[11] - v[12] - v[13] + v[14]) / (4*h*h),
-                hyz = (v[15] - v[16] - v[17] + v[18]) / (4*h*h);
-    if (!std::isfinite(hxx + hyy + hzz + hxy + hxz + hyz))
+    H[0] = (v[1] - 2*v[0] + v[2]) / (h*h);
+    H[1] = (v[3] - 2*v[0] + v[4]) / (h*h);
+    H[2] = (v[5] - 2*v[0] + v[6]) / (h*h);
+    H[3] = (v[7] - v[8] - v[9] + v[10]) / (4*h*h);
+    H[4] = (v[11] - v[12] - v[13] + v[14]) / (4*h*h);
+    H[5] = (v[15] - v[16] - v[17] + v[18]) / (4*h*h);
+    return std::isfinite(H[0] + H[1] + H[2] + H[3] + H[4] +
+                         H[5]);
+}
+
+/*  Normal curvature along a unit tangent direction c:
+ *  kappa_c = (c^T H c) / |grad|.  */
+static float kappa_along(const float H[6], const float g[3],
+                         const float c[3])
+{
+    const float gl = sqrtf(g[0]*g[0] + g[1]*g[1] + g[2]*g[2]);
+    const float q = c[0]*c[0]*H[0] + c[1]*c[1]*H[1] +
+                    c[2]*c[2]*H[2] +
+                    2*(c[0]*c[1]*H[3] + c[0]*c[2]*H[4] +
+                       c[1]*c[2]*H[5]);
+    return q / (gl > 0 ? gl : 1.f);
+}
+
+static bool kout_from_vals(const float* v, float h, KOut* o)
+{
+    float H[6], g[3];
+    if (!hg_from_vals(v, h, H, g))
         return false;
+    const float gx = g[0], gy = g[1], gz = g[2];
+    const float gl = sqrtf(gx*gx + gy*gy + gz*gz);
+    const float hxx = H[0], hyy = H[1], hzz = H[2],
+                hxy = H[3], hxz = H[4], hyz = H[5];
     const float nx = gx/gl, ny = gy/gl, nz = gz/gl;
     /*  Tangent basis (u, w) perpendicular to the normal.  */
     float ux, uy, uz;
@@ -1952,6 +1979,134 @@ static bool valley_project(const Deck* deck, TapeCtx* ctx,
     return true;
 }
 
+/*  Curvature-STEP corrector (tracer round 3 - the primitive
+ *  verdict): a fillet boundary is two constant-curvature
+ *  plateaus joined by a JUMP the stencil smears into a ramp -
+ *  no curvature peak exists anywhere on the honest geometry
+ *  (on-axis lip control: ridge mode 0/28).  The junction line
+ *  is the ramp's STEEPEST point: sample normal curvature at
+ *  five stations across the march frame (c = n x dir - never
+ *  eigen ordering, which tilt rotates), take the derivative at
+ *  three, and center on the strict peak of |d kappa / ds| via
+ *  the parabola vertex.  Prominence bar: the plateau-to-plateau
+ *  jump |kappa(+2d) - kappa(-2d)| must beat STIBIUM_DMESH_
+ *  STEP_K / sp (default 0.05: fillets to ~20 cells).  */
+static uint64_t g_stp[6] = { 0, 0, 0, 0, 0, 0 };
+/*  g_stp: 0 proj, 1 hess, 2 cdir, 3 prominence, 4 peak, 5 ok  */
+static bool step_project(const Deck* deck, TapeCtx* ctx,
+                         float sp, const float dirv[3],
+                         float& X, float& Y, float& Z)
+{
+    static const char* sk_env = getenv("STIBIUM_DMESH_STEP_K");
+    const float kstep = (sk_env ? float(atof(sk_env)) : 0.05f)
+                        / std::max(sp, 1e-20f);
+    const float hh = 0.1f * sp;
+    const float delta = 0.35f * sp;
+    float px = X, py = Y, pz = Z;
+    /*  Newton pull onto the surface.  */
+    const auto project = [&](float& x, float& y, float& z) {
+        const float h = 0.01f * sp;
+        for (int it = 0; it < 2; ++it)
+        {
+            std::vector<float> xs(7, x), ys(7, y), zs(7, z), v;
+            xs[1] += h;  xs[2] -= h;
+            ys[3] += h;  ys[4] -= h;
+            zs[5] += h;  zs[6] -= h;
+            eval_points(deck_base(deck), ctx, xs, ys, zs, v);
+            const float f = v[0];
+            const float gx = (v[1]-v[2]) / (2*h),
+                        gy = (v[3]-v[4]) / (2*h),
+                        gz = (v[5]-v[6]) / (2*h);
+            const float g2 = gx*gx + gy*gy + gz*gz;
+            if (!(g2 > 0) || !std::isfinite(g2) ||
+                !std::isfinite(f))
+                return false;
+            float sx2 = -f*gx/g2, sy2 = -f*gy/g2, sz2 = -f*gz/g2;
+            const float sl = sqrtf(sx2*sx2 + sy2*sy2 + sz2*sz2);
+            if (sl > 0.75f * sp)
+                return false;
+            x += sx2;  y += sy2;  z += sz2;
+        }
+        return true;
+    };
+    if (!project(px, py, pz))
+        { ++g_stp[0]; return false; }
+    /*  Center stencil: normal + the march-frame cross
+     *  direction.  */
+    std::vector<float> xs(5 * 19), ys(5 * 19), zs(5 * 19), v;
+    for (int q = 0; q < 19; ++q)
+    {
+        xs[2*19 + q] = px + K_SO[q][0]*hh;
+        ys[2*19 + q] = py + K_SO[q][1]*hh;
+        zs[2*19 + q] = pz + K_SO[q][2]*hh;
+    }
+    {
+        std::vector<float> cx(xs.begin() + 2*19,
+                              xs.begin() + 3*19),
+                cy(ys.begin() + 2*19, ys.begin() + 3*19),
+                cz(zs.begin() + 2*19, zs.begin() + 3*19), cv;
+        eval_points(deck_base(deck), ctx, cx, cy, cz, cv);
+        float H[6], g[3];
+        if (!hg_from_vals(cv.data(), hh, H, g))
+            { ++g_stp[1]; return false; }
+        const float gl = sqrtf(g[0]*g[0] + g[1]*g[1] +
+                               g[2]*g[2]);
+        const float n[3] = { g[0]/gl, g[1]/gl, g[2]/gl };
+        float c[3] = { n[1]*dirv[2] - n[2]*dirv[1],
+                       n[2]*dirv[0] - n[0]*dirv[2],
+                       n[0]*dirv[1] - n[1]*dirv[0] };
+        const float cl = sqrtf(c[0]*c[0] + c[1]*c[1] +
+                               c[2]*c[2]);
+        if (!(cl > 0.5f))
+            { ++g_stp[2]; return false; }
+        c[0] /= cl;  c[1] /= cl;  c[2] /= cl;
+        /*  Five stations across; all stencils in one batch.  */
+        for (int s2 = 0; s2 < 5; ++s2)
+        {
+            if (s2 == 2)
+                continue;
+            const float off = (s2 - 2) * delta;
+            for (int q = 0; q < 19; ++q)
+            {
+                xs[s2*19 + q] = px + off*c[0] + K_SO[q][0]*hh;
+                ys[s2*19 + q] = py + off*c[1] + K_SO[q][1]*hh;
+                zs[s2*19 + q] = pz + off*c[2] + K_SO[q][2]*hh;
+            }
+        }
+        eval_points(deck_base(deck), ctx, xs, ys, zs, v);
+        float kap[5];
+        for (int s2 = 0; s2 < 5; ++s2)
+        {
+            float H2[6], g2[3];
+            if (!hg_from_vals(v.data() + s2*19, hh, H2, g2))
+                { ++g_stp[1]; return false; }
+            kap[s2] = kappa_along(H2, g2, c);
+        }
+        /*  Prominence: a real step jumps plateau to plateau.  */
+        if (fabsf(kap[4] - kap[0]) < kstep)
+            { ++g_stp[3]; return false; }
+        /*  Derivative stations; sign-normalize; strict peak.  */
+        const float gm = (kap[2] - kap[0]) / (2*delta),
+                    g0 = (kap[3] - kap[1]) / (2*delta),
+                    gp = (kap[4] - kap[2]) / (2*delta);
+        const float sgn = g0 >= 0 ? 1.f : -1.f;
+        const float Gm = gm*sgn, G0 = g0*sgn, Gp = gp*sgn;
+        const float denom = Gm - 2*G0 + Gp;
+        if (!(G0 > Gm) || !(G0 > Gp) || !(denom < 0))
+            { ++g_stp[4]; return false; }
+        float st = 0.5f * delta * (Gm - Gp) / denom;
+        st = st < -delta ? -delta : st > delta ? delta : st;
+        px += st * c[0];
+        py += st * c[1];
+        pz += st * c[2];
+    }
+    if (!project(px, py, pz))
+        { ++g_stp[0]; return false; }
+    ++g_stp[5];
+    X = px;  Y = py;  Z = pz;
+    return true;
+}
+
 /*  Strategy-doc #4a: the contact-curve tracer.  The clause
  *  system {f_A = f_B, f = 0} has a DOUBLE ROOT at tangent
  *  contact (graveyard: Newton cannot march it) - but the contact
@@ -2046,18 +2201,23 @@ static void trace_contact_chains(const Deck* deck, float sp,
     };
     const auto march = [&](float px, float py, float pz,
                            float dx, float dy, float dz,
-                           bool ridge,
+                           int mode,   /* 0 valley, 1 step */
                            std::vector<std::array<float, 3>>* pts)
     {
         for (int i = 0; i < 300; ++i)
         {
             float nx2 = px + step*dx, ny2 = py + step*dy,
                   nz2 = pz + step*dz;
+            const float d0[3] = { dx, dy, dz };
             /*  0.002: contact traces follow FADING creases -
              *  the default valley floor is deaf exactly at
              *  grazing incidence.  */
-            if (!valley_project(deck, ctx, sp, sp,
-                                nx2, ny2, nz2, 0.002f, ridge))
+            const bool ok2 = mode == 0
+                    ? valley_project(deck, ctx, sp, sp,
+                                     nx2, ny2, nz2, 0.002f)
+                    : step_project(deck, ctx, sp, d0,
+                                   nx2, ny2, nz2);
+            if (!ok2)
                 break;
             if (!real_surface(nx2, ny2, nz2))
                 break;      /* wandered onto a buried sheet */
@@ -2085,19 +2245,136 @@ static void trace_contact_chains(const Deck* deck, float sp,
         float sx = 0.5f * (b[0] + b[3]),
               sy = 0.5f * (b[1] + b[4]),
               sz = 0.5f * (b[2] + b[5]);
-        /*  Valley first (blend seams), ridge fallback (fading
-         *  convex creases - the grazing-incidence rim class).  */
-        bool ridge = false;
+        /*  Valley first (blend seams), then the curvature-STEP
+         *  fallback (fillet boundaries: plateaus joined by a
+         *  jump - no peak exists; seed direction from the
+         *  tangential gradient of MEAN curvature, basis-free).  */
+        int mode = 0;
+        float ax = 0, ay = 0, az = 0;
         if (!valley_project(deck, ctx, sp, sp, sx, sy, sz,
                             0.002f))
         {
             sx = 0.5f * (b[0] + b[3]);
             sy = 0.5f * (b[1] + b[4]);
             sz = 0.5f * (b[2] + b[5]);
-            if (!valley_project(deck, ctx, sp, sp, sx, sy, sz,
-                                0.002f, true))
+            mode = 1;
+            /*  Project the seed, then measure the tangential
+             *  gradient of mean curvature.  Seeds routinely land
+             *  on a featureless flat 1-2 cells from the junction
+             *  (Newton takes the shortest path, not the
+             *  interesting one - measured: every on-axis seed
+             *  lands on the z=15 top flat, gradient EXACTLY
+             *  zero); when that happens, WALK toward the seed's
+             *  own contact box (tangent-projected) until the
+             *  gradient wakes, then center on the step.  */
+            float tx2 = sx, ty2 = sy, tz2 = sz;
+            const auto project7 = [&](float& x, float& y,
+                                      float& z) {
+                const float h = 0.01f * sp;
+                for (int it = 0; it < 2; ++it)
+                {
+                    std::vector<float> xs(7, x), ys(7, y),
+                            zs(7, z), v;
+                    xs[1] += h;  xs[2] -= h;
+                    ys[3] += h;  ys[4] -= h;
+                    zs[5] += h;  zs[6] -= h;
+                    eval_points(deck_base(deck), ctx, xs, ys,
+                                zs, v);
+                    const float f = v[0];
+                    const float gx = (v[1]-v[2]) / (2*h),
+                            gy = (v[3]-v[4]) / (2*h),
+                            gz = (v[5]-v[6]) / (2*h);
+                    const float g2 = gx*gx + gy*gy + gz*gz;
+                    if (!(g2 > 0) || !std::isfinite(g2) ||
+                        !std::isfinite(f))
+                        return false;
+                    x -= f*gx/g2;
+                    y -= f*gy/g2;
+                    z -= f*gz/g2;
+                }
+                return true;
+            };
+            float n2[3], c0[3];
+            float c0l = 0;
+            /*  Mean-curvature tangential gradient at (x,y,z).  */
+            const auto grad_at = [&](float x, float y,
+                                     float z) {
+                KOut kc, ku, kw;
+                if (!normal_at(x, y, z, n2) ||
+                    !curvature_probe(deck, ctx, 0.1f * sp,
+                                     x, y, z, &kc))
+                    return false;
+                float u[3];
+                if (fabsf(n2[0]) <= fabsf(n2[1]) &&
+                    fabsf(n2[0]) <= fabsf(n2[2]))
+                    { u[0] = 0; u[1] = -n2[2]; u[2] = n2[1]; }
+                else if (fabsf(n2[1]) <= fabsf(n2[2]))
+                    { u[0] = n2[2]; u[1] = 0; u[2] = -n2[0]; }
+                else
+                    { u[0] = -n2[1]; u[1] = n2[0]; u[2] = 0; }
+                const float ul = sqrtf(u[0]*u[0] + u[1]*u[1] +
+                                       u[2]*u[2]);
+                u[0] /= ul;  u[1] /= ul;  u[2] /= ul;
+                const float w[3] = { n2[1]*u[2] - n2[2]*u[1],
+                                     n2[2]*u[0] - n2[0]*u[2],
+                                     n2[0]*u[1] - n2[1]*u[0] };
+                const float dp = 0.35f * sp;
+                if (!curvature_probe(deck, ctx, 0.1f * sp,
+                        x + dp*u[0], y + dp*u[1], z + dp*u[2],
+                        &ku) ||
+                    !curvature_probe(deck, ctx, 0.1f * sp,
+                        x + dp*w[0], y + dp*w[1], z + dp*w[2],
+                        &kw))
+                    return false;
+                const float m0 = 0.5f * (kc.k + kc.kmax);
+                const float du = 0.5f * (ku.k + ku.kmax) - m0;
+                const float dw = 0.5f * (kw.k + kw.kmax) - m0;
+                c0[0] = du*u[0] + dw*w[0];
+                c0[1] = du*u[1] + dw*w[1];
+                c0[2] = du*u[2] + dw*w[2];
+                c0l = sqrtf(c0[0]*c0[0] + c0[1]*c0[1] +
+                            c0[2]*c0[2]);
+                return std::isfinite(c0l);
+            };
+            if (!project7(tx2, ty2, tz2))
                 { ++r_vp; continue; }
-            ridge = true;
+            if (!grad_at(tx2, ty2, tz2))
+                { ++r_vp; continue; }
+            /*  Wake bar: a tenth of the step-prominence bar.  */
+            const float cbar = 0.005f / sp;
+            bool alive = c0l > cbar;
+            for (int wk = 0; wk < 8 && !alive; ++wk)
+            {
+                float bx2 = 0.5f * (b[0] + b[3]) - tx2,
+                      by2 = 0.5f * (b[1] + b[4]) - ty2,
+                      bz2 = 0.5f * (b[2] + b[5]) - tz2;
+                const float bn = bx2*n2[0] + by2*n2[1] +
+                                 bz2*n2[2];
+                bx2 -= bn*n2[0];
+                by2 -= bn*n2[1];
+                bz2 -= bn*n2[2];
+                const float bl = sqrtf(bx2*bx2 + by2*by2 +
+                                       bz2*bz2);
+                if (!(bl > 1e-3f * sp))
+                    break;
+                tx2 += 0.5f * sp * bx2 / bl;
+                ty2 += 0.5f * sp * by2 / bl;
+                tz2 += 0.5f * sp * bz2 / bl;
+                if (!project7(tx2, ty2, tz2) ||
+                    !grad_at(tx2, ty2, tz2))
+                    break;
+                alive = c0l > cbar;
+            }
+            if (!alive)
+                { ++r_vp; continue; }
+            c0[0] /= c0l;  c0[1] /= c0l;  c0[2] /= c0l;
+            const float al0[3] = {
+                    n2[1]*c0[2] - n2[2]*c0[1],
+                    n2[2]*c0[0] - n2[0]*c0[2],
+                    n2[0]*c0[1] - n2[1]*c0[0] };
+            sx = tx2;  sy = ty2;  sz = tz2;
+            if (!step_project(deck, ctx, sp, al0, sx, sy, sz))
+                { ++r_vp; continue; }
         }
         if (!real_surface(sx, sy, sz))
             { ++r_sheet; continue; }
@@ -2110,12 +2387,51 @@ static void trace_contact_chains(const Deck* deck, float sp,
         float n[3];
         if (!normal_at(sx, sy, sz, n))
             { ++r_probe; continue; }
-        const float cdx = ridge ? k0.sx : k0.tx,
-                    cdy = ridge ? k0.sy : k0.ty,
-                    cdz = ridge ? k0.sz : k0.tz;
-        float ax = n[1]*cdz - n[2]*cdy,
-              ay = n[2]*cdx - n[0]*cdz,
-              az = n[0]*cdy - n[1]*cdx;
+        float cdx, cdy, cdz;
+        if (mode == 0)
+            { cdx = k0.tx;  cdy = k0.ty;  cdz = k0.tz; }
+        else
+        {
+            /*  Step mode: cross = steepest mean-curvature
+             *  direction at the CENTERED point.  */
+            KOut ku, kw;
+            float u[3];
+            if (fabsf(n[0]) <= fabsf(n[1]) &&
+                fabsf(n[0]) <= fabsf(n[2]))
+                { u[0] = 0; u[1] = -n[2]; u[2] = n[1]; }
+            else if (fabsf(n[1]) <= fabsf(n[2]))
+                { u[0] = n[2]; u[1] = 0; u[2] = -n[0]; }
+            else
+                { u[0] = -n[1]; u[1] = n[0]; u[2] = 0; }
+            const float ul = sqrtf(u[0]*u[0] + u[1]*u[1] +
+                                   u[2]*u[2]);
+            u[0] /= ul;  u[1] /= ul;  u[2] /= ul;
+            const float w[3] = { n[1]*u[2] - n[2]*u[1],
+                                 n[2]*u[0] - n[0]*u[2],
+                                 n[0]*u[1] - n[1]*u[0] };
+            const float dp = 0.35f * sp;
+            if (!curvature_probe(deck, ctx, 0.1f * sp,
+                    sx + dp*u[0], sy + dp*u[1], sz + dp*u[2],
+                    &ku) ||
+                !curvature_probe(deck, ctx, 0.1f * sp,
+                    sx + dp*w[0], sy + dp*w[1], sz + dp*w[2],
+                    &kw))
+                { ++r_probe; continue; }
+            const float m0 = 0.5f * (k0.k + k0.kmax);
+            const float du = 0.5f * (ku.k + ku.kmax) - m0;
+            const float dw = 0.5f * (kw.k + kw.kmax) - m0;
+            cdx = du*u[0] + dw*w[0];
+            cdy = du*u[1] + dw*w[1];
+            cdz = du*u[2] + dw*w[2];
+            const float cl2 = sqrtf(cdx*cdx + cdy*cdy +
+                                    cdz*cdz);
+            if (!(cl2 > 0) || !std::isfinite(cl2))
+                { ++r_tang; continue; }
+            cdx /= cl2;  cdy /= cl2;  cdz /= cl2;
+        }
+        ax = n[1]*cdz - n[2]*cdy;
+        ay = n[2]*cdx - n[0]*cdz;
+        az = n[0]*cdy - n[1]*cdx;
         const float al = sqrtf(ax*ax + ay*ay + az*az);
         if (!(al > 0.5f))
             { ++r_tang; continue; }
@@ -2123,8 +2439,8 @@ static void trace_contact_chains(const Deck* deck, float sp,
         std::vector<std::array<float, 3>> fwd, bwd;
         fwd.push_back({ sx, sy, sz });
         claim(sx, sy, sz);
-        march(sx, sy, sz, ax, ay, az, ridge, &fwd);
-        march(sx, sy, sz, -ax, -ay, -az, ridge, &bwd);
+        march(sx, sy, sz, ax, ay, az, mode, &fwd);
+        march(sx, sy, sz, -ax, -ay, -az, mode, &bwd);
         if (fwd.size() + bwd.size() < 4)
             { ++r_short; continue; }
         std::vector<std::array<float, 3>> chain(bwd.rbegin(),
@@ -2136,12 +2452,22 @@ static void trace_contact_chains(const Deck* deck, float sp,
     }
     if (getenv("STIBIUM_DMESH_TIME") ||
         getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+    {
         fprintf(stderr, "CONTACT: %zu chains traced (%zu points) "
                 "from %zu contact boxes (rejects: %zu vproj, "
                 "%zu sheet, %zu claimed, %zu probe, %zu tangent, "
                 "%zu short)\n",
                 nchains, npts, boxes.size(), r_vp, r_sheet,
                 r_claim, r_probe, r_tang, r_short);
+        fprintf(stderr, "STEP: proj %llu, hess %llu, cdir %llu, "
+                "prominence %llu, peak %llu, ok %llu\n",
+                (unsigned long long)g_stp[0],
+                (unsigned long long)g_stp[1],
+                (unsigned long long)g_stp[2],
+                (unsigned long long)g_stp[3],
+                (unsigned long long)g_stp[4],
+                (unsigned long long)g_stp[5]);
+    }
     tape_ctx_free(ctx);
 }
 
