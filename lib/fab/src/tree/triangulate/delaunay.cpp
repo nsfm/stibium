@@ -1419,6 +1419,193 @@ void project_points_impl(const Deck* deck, TapeCtx* ctx,
     }
 }
 
+/*  Hessian curvature-valley projection (quality P1, doc/reviews/
+ *  2026-07-18-quality-research.md): the FAR snap skips are divots
+ *  on UNTRACED tangent-blend seams - the clause system
+ *  {f_A = f_B, f = 0} has a double root at G1 contact and cannot
+ *  be marched, but the blend throat is still a sharp negative
+ *  extremum of the minimum principal curvature, and curvature
+ *  stays finite straight through the contact [Ohtake-Belyaev-
+ *  Seidel 2004].  Project the chip midpoint onto that valley
+ *  line: surface-project, then walk ACROSS the valley along the
+ *  minimum-curvature eigendirection to the curvature extremum
+ *  (parabola fit on kappa_min - the OBS04 extremality condition
+ *  by differencing), re-project, iterate.  The result is a snap
+ *  TARGET only - no constraint, no CCDT contact ("pure output
+ *  surgery", same contract as SNAP_SURF).
+ *  Returns false where no credible valley lives: kappa_min must
+ *  read concave beyond a curvature floor (third-order quantities
+ *  are noise on flats - the floor keeps the pass silent there).  */
+/*  Principal curvatures of the level set at a point, from a
+ *  19-point second-difference stencil on the field oracle (the
+ *  shared dependency under valley snap, the churn-gate curvature
+ *  carve-out, and the future curvature-density trigger - built
+ *  once per quality-research P1).  k = kappa_min with its
+ *  tangent eigendirection (tx,ty,tz); kmax = kappa_max.  Sign
+ *  convention: gradient is outward, so convex reads positive and
+ *  a concave blend throat reads kappa_min < 0.  h is the stencil
+ *  pitch - second differences divide by h^2, so it must sit well
+ *  above eval noise (0.1 sp; 0.01 sp measured as pure static).
+ *  False on degenerate gradient / non-finite readings.  */
+struct KOut { float k, kmax; float tx, ty, tz; };
+static bool curvature_probe(const Deck* deck, TapeCtx* ctx,
+                            float h, float X, float Y, float Z,
+                            KOut* o)
+{
+    static const int SO[19][3] = {
+        { 0, 0, 0 },
+        { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 },
+        { 0, 0, 1 }, { 0, 0, -1 },
+        { 1, 1, 0 }, { 1, -1, 0 }, { -1, 1, 0 }, { -1, -1, 0 },
+        { 1, 0, 1 }, { 1, 0, -1 }, { -1, 0, 1 }, { -1, 0, -1 },
+        { 0, 1, 1 }, { 0, 1, -1 }, { 0, -1, 1 }, { 0, -1, -1 },
+    };
+    std::vector<float> xs(19), ys(19), zs(19), v;
+    for (int q = 0; q < 19; ++q)
+    {
+        xs[q] = X + SO[q][0]*h;
+        ys[q] = Y + SO[q][1]*h;
+        zs[q] = Z + SO[q][2]*h;
+    }
+    eval_points_mt(deck, ctx, xs, ys, zs, v);
+    const float gx = (v[1] - v[2]) / (2*h),
+                gy = (v[3] - v[4]) / (2*h),
+                gz = (v[5] - v[6]) / (2*h);
+    const float gl = sqrtf(gx*gx + gy*gy + gz*gz);
+    if (!(gl > 0) || !std::isfinite(gl))
+        return false;
+    const float hxx = (v[1] - 2*v[0] + v[2]) / (h*h),
+                hyy = (v[3] - 2*v[0] + v[4]) / (h*h),
+                hzz = (v[5] - 2*v[0] + v[6]) / (h*h),
+                hxy = (v[7] - v[8] - v[9] + v[10]) / (4*h*h),
+                hxz = (v[11] - v[12] - v[13] + v[14]) / (4*h*h),
+                hyz = (v[15] - v[16] - v[17] + v[18]) / (4*h*h);
+    if (!std::isfinite(hxx + hyy + hzz + hxy + hxz + hyz))
+        return false;
+    const float nx = gx/gl, ny = gy/gl, nz = gz/gl;
+    /*  Tangent basis (u, w) perpendicular to the normal.  */
+    float ux, uy, uz;
+    if (fabsf(nx) <= fabsf(ny) && fabsf(nx) <= fabsf(nz))
+        { ux = 0; uy = -nz; uz = ny; }
+    else if (fabsf(ny) <= fabsf(nz))
+        { ux = nz; uy = 0; uz = -nx; }
+    else
+        { ux = -ny; uy = nx; uz = 0; }
+    const float ul = sqrtf(ux*ux + uy*uy + uz*uz);
+    ux /= ul; uy /= ul; uz /= ul;
+    const float wx = ny*uz - nz*uy,
+                wy = nz*ux - nx*uz,
+                wz = nx*uy - ny*ux;
+    /*  Shape operator restricted to the tangent plane:
+     *  S2 = [u w]^T H [u w] / |grad|.  */
+    const float Hux = hxx*ux + hxy*uy + hxz*uz,
+                Huy = hxy*ux + hyy*uy + hyz*uz,
+                Huz = hxz*ux + hyz*uy + hzz*uz;
+    const float Hwx = hxx*wx + hxy*wy + hxz*wz,
+                Hwy = hxy*wx + hyy*wy + hyz*wz,
+                Hwz = hxz*wx + hyz*wy + hzz*wz;
+    const float a = (ux*Hux + uy*Huy + uz*Huz) / gl,
+                b = (wx*Hux + wy*Huy + wz*Huz) / gl,
+                c = (wx*Hwx + wy*Hwy + wz*Hwz) / gl;
+    const float mean = 0.5f * (a + c);
+    const float r = sqrtf(0.25f*(a - c)*(a - c) + b*b);
+    o->k = mean - r;
+    o->kmax = mean + r;
+    /*  Eigenvector of the smaller eigenvalue, in (u, w)
+     *  coordinates - pick the better-conditioned form.  */
+    float e1 = b, e2 = o->k - a;
+    if (fabsf(o->k - c) > fabsf(e2))
+        { e1 = o->k - c; e2 = b; }
+    const float el = sqrtf(e1*e1 + e2*e2);
+    if (el > 0)
+        { e1 /= el; e2 /= el; }
+    else
+        { e1 = 1; e2 = 0; }  /* umbilic: any direction */
+    o->tx = e1*ux + e2*wx;
+    o->ty = e1*uy + e2*wy;
+    o->tz = e1*uz + e2*wz;
+    return true;
+}
+
+static uint64_t g_vly_try = 0, g_vly_proj = 0, g_vly_floor = 0;
+static float g_vly_kmin = 1e30f;
+static bool valley_project(const Deck* deck, TapeCtx* ctx,
+                           float sp, float lsp,
+                           float& X, float& Y, float& Z)
+{
+    ++g_vly_try;
+    /*  Curvature floor in 1/sp units: fire only where the blend
+     *  radius is under ~1/bar cells - beyond that the surface is
+     *  visually flat and a tent is churn, not cure.  */
+    static const char* kb_env = getenv("STIBIUM_DMESH_VALLEY_K");
+    const float kbar = (kb_env ? float(atof(kb_env)) : 0.02f)
+                       / std::max(sp, 1e-20f);
+    /*  Second-difference stencils divide by h^2: at 0.01 sp the
+     *  denominator sits at float-eval noise and kappa reads pure
+     *  static (measured: 0 of 993 valley attempts survived).
+     *  0.1 sp trades locality (well under any visible blend
+     *  radius) for ~100x signal-to-noise.  */
+    const float h = 0.1f * sp;
+    float px2 = X, py2 = Y, pz2 = Z;
+    for (int it = 0; it < 3; ++it)
+    {
+        /*  Pull onto the surface first (the chip midpoint starts
+         *  inside the divot; later iterations re-project after
+         *  the cross-valley step).  */
+        std::vector<float> sx{ px2 }, sy{ py2 }, sz{ pz2 },
+                hs{ 0.01f * sp }, cl{ 0.75f * sp };
+        project_points_impl(deck, ctx, sx, sy, sz, hs, cl);
+        if (!std::isfinite(sx[0] + sy[0] + sz[0]))
+            { ++g_vly_proj; return false; }
+        px2 = sx[0]; py2 = sy[0]; pz2 = sz[0];
+        KOut k0;
+        if (!curvature_probe(deck, ctx, h, px2, py2, pz2, &k0))
+            { ++g_vly_proj; return false; }
+        /*  Concavity + floor gate on the CENTER reading.  */
+        if (it == 0)
+            g_vly_kmin = std::min(g_vly_kmin, k0.k * sp);
+        if (!(k0.k < -kbar))
+            { ++g_vly_floor; return false; }
+        /*  Two cross-valley probes; the span rides the local
+         *  pitch - the valley line is at most a chip-edge
+         *  away.  */
+        const float delta = 0.35f * lsp;
+        KOut km, kp;
+        if (!curvature_probe(deck, ctx, h,
+                px2 - delta*k0.tx, py2 - delta*k0.ty,
+                pz2 - delta*k0.tz, &km) ||
+            !curvature_probe(deck, ctx, h,
+                px2 + delta*k0.tx, py2 + delta*k0.ty,
+                pz2 + delta*k0.tz, &kp))
+            return false;
+        /*  Parabola through (-d, km) (0, k0) (+d, kp): extremum
+         *  at d/2 (km - kp) / (km - 2 k0 + kp).  A positive
+         *  denominator means kappa_min has a minimum across here
+         *  (the valley floor); otherwise walk downhill.  */
+        const float denom = km.k - 2*k0.k + kp.k;
+        float step;
+        if (denom > 0)
+        {
+            step = 0.5f * delta * (km.k - kp.k) / denom;
+            step = step < -delta ? -delta
+                 : step >  delta ?  delta : step;
+        }
+        else
+            step = (kp.k < km.k ? 0.5f : -0.5f) * delta;
+        px2 += step * k0.tx;
+        py2 += step * k0.ty;
+        pz2 += step * k0.tz;
+    }
+    /*  Final pull onto the surface.  */
+    std::vector<float> sx{ px2 }, sy{ py2 }, sz{ pz2 },
+            hs{ 0.01f * sp }, cl{ 0.75f * sp };
+    project_points_impl(deck, ctx, sx, sy, sz, hs, cl);
+    if (!std::isfinite(sx[0] + sy[0] + sz[0]))
+        { ++g_vly_proj; return false; }
+    X = sx[0]; Y = sy[0]; Z = sz[0];
+    return true;
+}
+
 /*  Keeter step 3: sharp-feature points.  For every candidate cell,
  *  probe normals at its crossing points (batched central
  *  differences); if the normals disagree enough, the cell straddles
@@ -6243,6 +6430,13 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         uint64_t snapped = 0, snap_skipped = 0;
         uint64_t skip_far = 0, skip_hits = 0, snap_surf = 0;
         uint64_t skip_damage = 0, skip_churn = 0;
+        uint64_t snap_valley = 0, churn_saved = 0;
+        /*  Instrument: per-chip outcome + depth (sp units) to a
+         *  file - the skip-class anatomy (which population is
+         *  actually deep) drives the valley-snap calibration.  */
+        FILE* sdump = nullptr;
+        if (const char* sd_env = getenv("STIBIUM_DMESH_SNAP_DUMP"))
+            sdump = fopen(sd_env, "w");
         /*  Self-feeding stash (zeiss run, 2026-07-15): when the
          *  repair loop exhausts MAX_REPAIR (real models churn), the
          *  per-round stash is stale and was cleared - but the chips
@@ -6521,13 +6715,61 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                 ++snap_surf;
                             }
                         }
+                        /*  Surface projection overshot the cap
+                         *  (concave-throat gradients under-read -
+                         *  the historical 993 FAR skips).  Last
+                         *  chance: project onto the CURVATURE
+                         *  VALLEY of the blend (quality P1) and
+                         *  judge it by the POLYLINE attribution
+                         *  cap - a valley line is a feature line,
+                         *  same semantics as a traced crease.
+                         *  STIBIUM_DMESH_SNAP_VALLEY=0 reverts to
+                         *  skipping.  */
                         if (!surf_ok)
                         {
-                            done[s] = 1;
-                            ++snap_skipped;
-                            ++skip_far;
-                            far_pts.push_back({ mx, my, mz });
-                            continue;
+                            static const char* vy_env = getenv(
+                                    "STIBIUM_DMESH_SNAP_VALLEY");
+                            bool val_ok = (!vy_env ||
+                                           atoi(vy_env) != 0) &&
+                                    snap_d[s] >=
+                                        0.01f * soup.spacing;
+                            if (val_ok)
+                            {
+                                float vx2 = mx, vy2 = my,
+                                      vz2 = mz;
+                                val_ok = valley_project(deck, ctx,
+                                        soup.spacing, lsp,
+                                        vx2, vy2, vz2);
+                                if (val_ok)
+                                {
+                                    const float dxv = vx2 - mx,
+                                                dyv = vy2 - my,
+                                                dzv = vz2 - mz;
+                                    val_ok = dxv*dxv + dyv*dyv +
+                                             dzv*dzv <=
+                                             acap * acap;
+                                }
+                                if (val_ok)
+                                {
+                                    px = vx2;
+                                    py = vy2;
+                                    pz = vz2;
+                                    ++snap_valley;
+                                }
+                            }
+                            if (!val_ok)
+                            {
+                                done[s] = 1;
+                                ++snap_skipped;
+                                ++skip_far;
+                                far_pts.push_back({ mx, my, mz });
+                                if (sdump)
+                                    fprintf(sdump, "far %.4f %.4f "
+                                            "%.4f %.4f\n", mx, my,
+                                            mz, snap_d[s] /
+                                                soup.spacing);
+                                continue;
+                            }
                         }
                     }
                     /*  Locate the edge's two triangles by position.
@@ -6643,10 +6885,61 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                 plane_h(A2, B2, D2));
                         if (th < 0.02f * soup.spacing)
                         {
-                            done[s] = 1;
-                            ++snap_skipped;
-                            ++skip_churn;
-                            continue;
+                            /*  Curvature carve-out (quality
+                             *  P2.2): the churn bar exists for
+                             *  FLATS (sliver bumps z-fight in the
+                             *  render), but the refused
+                             *  population bunches at 0.012-0.019
+                             *  sp right under the bar - on a
+                             *  curved blend that tent height IS
+                             *  the chord sagitta (L^2 kappa / 8),
+                             *  real bend geometry.  Allow the
+                             *  tent where the measured curvature
+                             *  accounts for the apex height; a
+                             *  flat reads kappa ~ 0 and still
+                             *  refuses.  0.005 sp absolute floor
+                             *  keeps zero-depth churn out.
+                             *  STIBIUM_DMESH_CHURN_CURVE=0
+                             *  disables.  */
+                            bool curved_ok = false;
+                            static const char* cc_env = getenv(
+                                    "STIBIUM_DMESH_CHURN_CURVE");
+                            if ((!cc_env || atoi(cc_env) != 0) &&
+                                th >= 0.005f * soup.spacing)
+                            {
+                                KOut kc;
+                                if (curvature_probe(deck, ctx,
+                                        0.1f * soup.spacing,
+                                        px, py, pz, &kc))
+                                {
+                                    const float ex2 = B2[0]-A2[0],
+                                            ey2 = B2[1]-A2[1],
+                                            ez2 = B2[2]-A2[2];
+                                    const float el2 =
+                                            ex2*ex2 + ey2*ey2 +
+                                            ez2*ez2;
+                                    const float kmag = std::max(
+                                            fabsf(kc.k),
+                                            fabsf(kc.kmax));
+                                    curved_ok = th <=
+                                            0.25f * kmag * el2;
+                                }
+                            }
+                            if (curved_ok)
+                                ++churn_saved;
+                            else
+                            {
+                                done[s] = 1;
+                                ++snap_skipped;
+                                ++skip_churn;
+                                if (sdump)
+                                    fprintf(sdump, "churn %.4f "
+                                            "%.4f %.4f %.4f\n",
+                                            mx, my, mz,
+                                            snap_d[s] /
+                                                soup.spacing);
+                                continue;
+                            }
                         }
                         const float ref[4][3] = {
                             { (A2[0]+px)*0.5f, (A2[1]+py)*0.5f,
@@ -6695,6 +6988,10 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                             done[s] = 1;
                             ++snap_skipped;
                             ++skip_damage;
+                            if (sdump)
+                                fprintf(sdump, "damage %.4f %.4f "
+                                        "%.4f %.4f\n", mx, my, mz,
+                                        snap_d[s] / soup.spacing);
                             continue;
                         }
                     }
@@ -6722,22 +7019,40 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     }
                     done[s] = 1;
                     ++snapped;
+                    if (sdump)
+                        fprintf(sdump, "tent %.4f %.4f %.4f "
+                                "%.4f\n", mx, my, mz,
+                                snap_d[s] / soup.spacing);
                     progress = true;
                 }
             }
+            if (sdump)
+                fclose(sdump);
             if (getenv("STIBIUM_DMESH_CHIP_DEBUG"))
             {
                 fprintf(stderr, "SNAP: %llu chip edges tented "
-                        "(%llu onto the surface), %llu skipped "
+                        "(%llu onto the surface, %llu onto "
+                        "curvature valleys), %llu skipped "
                         "(%llu far, %llu hits, %llu damage, "
-                        "%llu churn)\n",
+                        "%llu churn; %llu churn-refusals saved "
+                        "by curvature)\n",
                         (unsigned long long)snapped,
                         (unsigned long long)snap_surf,
+                        (unsigned long long)snap_valley,
                         (unsigned long long)snap_skipped,
                         (unsigned long long)skip_far,
                         (unsigned long long)skip_hits,
                         (unsigned long long)skip_damage,
-                        (unsigned long long)skip_churn);
+                        (unsigned long long)skip_churn,
+                        (unsigned long long)churn_saved);
+                if (g_vly_try)
+                    fprintf(stderr, "VALLEY: %llu attempts, %llu "
+                            "proj-fail, %llu floor-reject, best "
+                            "kmin*sp %.4f\n",
+                            (unsigned long long)g_vly_try,
+                            (unsigned long long)g_vly_proj,
+                            (unsigned long long)g_vly_floor,
+                            g_vly_kmin);
                 /*  Where do the UNTRACED chips live?  5-cell bins,
                  *  top clusters - probe targets for the seed-
                  *  coverage hunt.  */
