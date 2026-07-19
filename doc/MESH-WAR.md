@@ -473,33 +473,60 @@ chains feed only the snap pass and the tangency chips are
 sub-floor; the tracer is an instrument still earning its
 delivery mechanism (full #4 constraints).
 
-NEXT-SESSION ENTRY POINT - TSEED STEP-TRACING (read this, then
-go): seed step-marches from soup.tseeds (the shallow channel:
-QEF points from crease-leaf cells with normal spread between
-~14 and ~25 degrees - fillet-boundary territory; minted in
-feature_points, carried on DSoup, currently consumed only by
-delaunay_trace as tracer seeds).  Plan: in trace_contact_chains
-(or a sibling running AFTER delaunay_trace so tchains can claim
-their cells first), seed step-mode marches from tseeds not yet
-claimed by crease chains: project7 -> grad_at -> step_project
--> march both ways (all built, 2bfbcd04).  Keep the claim map
-across both passes so crease law and step law never double-
-cover.  ACCEPTANCE (pre-agreed with Nate): the ON-AXIS
-stacked_cylinders_torus_lip lip junction must trace a FULL ring
-(24/24 azimuth bins in the tube dump census), and the OFF-AXIS
-variant must trace its full tilted ring too - that is the
-orientation-independence referee, executable.  Then the
-off-axis defect rim (Nate's box39 azimuth, (-12.8, 4.1, -7.8)).
-Gotchas already paid for: make your own TapeCtx (collector ctxs
-die at the merge); sign-cross filter stays on every step
-(buried sheets); loop-closure detection still TODO (chains lap
-today); the vertex RAIL is PARKED (oa_rail verdict: it railed
-the buried ring - the pre-filter chains; revisit only with true
-chains).  Instruments: CONTACT/STEP counter lines under
-CHIP_DEBUG, STIBIUM_DMESH_DUMP_CONTACT=path tubes, tools/
-areamap.py.  Nate's standing verdicts: cylinder walls
-"pleasingly smooth" (despeckle era); oa_ct visually identical
-to oa_hc2.
+TSEED STEP-TRACING LANDED - #4a ROUND 4 (2026-07-19, both
+pre-agreed acceptance tests PASS): trace_step_seams runs after
+delaunay_trace, seeds step-marches from soup.tseeds (the
+shallow channel), claim map preloaded from tchains + contact
+chains so crease law and step law never double-cover.  Seed
+ladder per unclaimed tseed: newton7 -> mc_tgrad (wake bar
+0.005/sp - blend interiors are mean-curvature-flat and reject
+free) -> step_project -> re-check claim at the CENTERED point
+(first seed on a ring traces it, every later seed centers onto
+the claimed line and stops - 1,492/1,496 on-axis seeds dedupe
+this way) -> sign-cross -> march both ways.  LOOP CLOSURE built
+(march_xline returns closed when it re-enters 0.75 step of the
+start after real progress; the round-2 lap TODO is done).
+ACCEPTANCE MEASURED: on-axis lip = 1 CLOSED ring, 165 pts,
+24/24 azimuth bins at z=16/r~13.3 (the z=15/r=14 ring is
+CREASE-LAW-OWNED - the c0-rim clause pair is a real tape crease
+even though the union is G1; correct dedup, both rings covered).
+Off-axis = 1 CLOSED ring, 168 pts, 24/24 bins after untilt
+(r 13.32-13.53, z 15.81-16.01) - ORIENTATION INDEPENDENCE IS
+NOW AN EXECUTABLE REFEREE AND IT PASSES.  Referees: bino
+IDENTICAL to splotch-r1 (133,316 tris / 0 open / 287 nm /
+12,109 cstr / worst 0.093) with 0 false step seams (909 seeds:
+904 crease-claimed, 4 step-rejected, 1 short); screws worst
+0.125 held, pass inert (no tseeds on thread geometry); suite
+9/9 green.  REFACTOR: tracer probes are shared statics now
+(cc_key/cc_claimed, probe_normal7, probe_real_surface, newton7,
+mc_tgrad, march_xline) - the mc-gradient block was duplicated
+twice inside trace_contact_chains and is one function.
+STIBIUM_DMESH_STEP_TRACE=0 disables.  Exhibits for Nate:
+build/zeiss_dmesh/{onaxis,offaxis}_tseed_{ring,mesh}.stl.
+
+OPEN - THE SPIKE-RUNG QUESTION (opt-in STIBIUM_DMESH_TSEED_
+RIDGE=1, next primitive hunt): the cone-torus lip (stacked_
+cone_cylinder_torus_lip) meets at ~13 deg - a real crossing
+BELOW the crease tracer's reach (no z~15.2 ring in tchains) and
+step_project rightly refuses it (a crossing is a kappa SPIKE;
+the strict peak gate is a RAMP detector - the derivative flips
+sign mid-window; that asymmetry is exactly why bino mints no
+false seams).  Valley+ridge fallback rungs are BUILT and the
+ridge rung traces the cone seam full-azimuth (24/24, r 10.0-
+10.5, z 15.3-15.8, exhibit cone_tseed_ridge_optin.stl) - but
+it ALSO chains the stencil's overshoot SHOULDER 0.5 sp inside
+the off-axis fillet (a wobbling false rail; today it measures
+harmless - mesh report identical - but it is the "curvy chaotic
+lines" class in embryo).  PROMINENCE CANNOT SEPARATE THEM
+(measured: bars 0.02/0.05/0.1 per sp each fail one side -
+STIBIUM_DMESH_RIDGE_PROM plumbed through valley_project ridge
+branch and march mode 2, kept for the hunt).  Next
+discriminator candidate: NORMAL-FOLD EXCESS - probe normals
++/-0.25 sp across the line; a true crossing folds beyond what
+the measured curvature explains, a shoulder does not.  Note the
+cone seam's mesh damage today is 0.008 sp (sub-floor) - this
+rung is about ZEISS-CLASS shallow-crossing coverage (the 22K
+untraced tangent-blend chips), not the bench.
 
 STEP DETECTOR CORE BUILT (2026-07-19 late, 2bfbcd04): hg_from_
 vals + kappa_along (raw Hessian shared), step_project (five
