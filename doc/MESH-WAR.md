@@ -93,6 +93,22 @@ cyl_referee.py (one-command acceptance: corner exactness +
 tilt census + defect-vs-gap curve).  Next: re-referee bino +
 full zeiss with the fix (expect the dense-detail class to
 shrink model-wide), then the pre-split follow-up.
+POST-FIX EYE SCORES (Nate): flat 99.25 -> 99.75%, screws 90 ->
+95%, cylinder 97 -> 99.9% ("basically perfect... huge
+success").  RESIDUES IDENTIFIED: (1) flat's two remaining tris
+both fan onto the TWIN displaced plate-outline vertices
+(10.5366 / 11.0366 - the 0.0366 pre-split residual, one per
+strip side, mirror-symmetric exactly as Nate's eyes read it).
+(2) screws' three spikes radiating into the socket hollow =
+fans at three azimuth gaps in the hollow-rim circle law
+(z=67.25): surviving-but-untraced features sit exactly there
+(PROBE: features-without-polylines = seeds refused; window
+census 518 correct-fail / 362 consumed / 112 moved), tris
+roof +0.063 sp into the void, MIRRORED on both screws.  NOT a
+regression: the same site read 0.197-0.206 sp pre-fix (its
+worst faces) - the fix improved it 3x and unmasked it.  Open
+question: why three ~120-degree gaps - rim-junction breaks or
+another consumption flavor.
 
 ## CURRENT STATE (2026-07-20, post metric-audit)
 
