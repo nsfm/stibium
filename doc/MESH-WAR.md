@@ -54,14 +54,22 @@ tools/ in-repo.  Reviews: doc/reviews/2026-07-17-*.md
 Knob roster: ~26 STIBIUM_DMESH_* - defaults are all measured-in;
 see the architecture review for the product/frozen/dead tiers.
 
-## CURRENT STATE (2026-07-18 early am)
+## CURRENT STATE (2026-07-20)
 
-Best zeiss: autod31 (727K tris / 0 open / 0.465* / 42 min pre-
-femto-guard).  With THIN + gates the zeiss projection is SINGLE-
-DIGIT minutes - the validation run is the next big dish.
+Best zeiss: crowd3-2sig (1.02M tris / 0 open / WORST 0.217 -
+the (4.15, 15.94, 89.01) site that survived every campaign
+since autod32 finally moved / 26.5 min / 6.99 GB).  The MAX=3
+REFEREE ROUND IS SETTLED - see LEVEL-3 CROWDING GRANT below;
+level 3 ships default-on through the TWO-SIGNAL rule (extreme
+crowding AND residual heat), never blanket.  Screws tilt 4.03
+-> 3.04% of area (Nate: base "hideous", all level-3 variants
+identical); bino: Nate-verified improvement (chip removal at
+sharp edges, air-chords reduced).
+
+(2026-07-18 state, kept for context:) autod31 was 727K / 0
+open / 0.465* / 42 min pre-femto-guard.
 Bino: THIN+gates 59 s (Nate: identical to base-gated), r2 in
-198 s / 1.77 GB (impossible pre-THIN).  Screws v20-class needs
-MAX=3 (queue: referee level-3 into the default).  THIN DEFAULT
+198 s / 1.77 GB (impossible pre-THIN).  THIN DEFAULT
 ON since 2026-07-18 (Nate: "I couldn't spot any visible
 difference... Worth it"; the 0.097-vs-0.170 depth delta did
 not register to the eye referee).  QEM dial verdict:
@@ -375,6 +383,47 @@ big).  TWO mechanisms separated by A/B, THREE theories buried:
 - Dense-knob smoke test isolated from the trigger (CURVEBAR=0
   around the DENSE=1 smoke; bench pitch legitimately reads
   several deg/cell).
+- LEVEL-3 CROWDING GRANT, TWO-SIGNAL RULE - ***LANDED DEFAULT
+  ON*** (2026-07-20, the MAX=3 referee round; three configs
+  measured + Nate's eyes on every leg).  VERDICTS: (1) blanket
+  MAX=3 refuted AGAIN (bino: residual formula blankets 1,555 of
+  1,665 leaves @3 -> worst 0.093 -> 0.372, nm 6.4x - same
+  failure as 2026-07-17, now with the mechanism named).  (2)
+  live-magnitude targeting refuted: bino's blend bands honestly
+  read live >= 64 in 1,288 leaves - crowding alone re-blankets.
+  (3) the MEASURED discriminator is signal COINCIDENCE: screws'
+  grant leaves are 92% residual-HOT (sub-lattice slots show
+  both extreme crowding AND QEF residual), bino's false grants
+  86% residual-SILENT (assembly collars crowd the clause count
+  without sub-lattice geometry).  RULE AS SHIPPED: level 3 iff
+  live >= 4x bar AND flag_leaf fired on the leaf (Collector::
+  resid_hot) AND not tangle; decided POST-survey in
+  delaunay_sample (the in-descent gate cannot see residuals);
+  ceiling crowd_max_level() (STIBIUM_DMESH_CROWD_MAX, default
+  3) - the residual formula stays behind AUTODENSE_MAX=2.
+  RESULTS: screws tilt 4.03 -> 3.13% of area, weighted 0.947 ->
+  0.711 deg, 0 geometric opens (Nate: base "hideous", all
+  level-3 variants visually identical - the 0.125 -> 0.177
+  depth delta does not register); bino 664 @3, worst 0.091
+  (BEST EVER, beats 0.093), Nate-verified visual improvement
+  (chip removal at sharp edges, air-chord severity down; chips
+  remain near certain sharp-edge classes - a named residual
+  class, not a regression); zeiss 1,472 @3 of 7,882 (19%,
+  targeted), WORST 0.364 -> 0.217 (the eternal (4.15, 15.94,
+  89.01) site moved; new worst at (-28.65, -23.56, 17.84)),
+  1.02M tris / 26.5 min / 6.99 GB (1.75x/1.9x/2x - RAM well
+  inside the laptop envelope; Nate 2026-07-15: speed is not a
+  concern for final meshes).  COST NOTE: the bill is real -
+  CROWD_MAX=2 reverts to the pre-round default in one env.
+  Instruments minted this round: DENS rows in the census dump
+  (final per-leaf density map, C/S tagged - the density-shadow
+  referee), tools-side join scripts in the session scratchpad.
+  Screws' index nm 1 -> 123 is kiss-fan class: openedges_exact
+  reads 0 geometric opens; pinch split owns it at export.
+  Determinism note (Nate's eye): the two screw instances now
+  fail IDENTICALLY (mirrored defects) - residual error is pure
+  deterministic geometry response now, no randomness left in
+  the failure class.
 
 INTERVAL ARC OPENED (2026-07-19, strategy doc: doc/reviews/
 2026-07-18-interval-certify-reach-locus.md - "cull -> certify",

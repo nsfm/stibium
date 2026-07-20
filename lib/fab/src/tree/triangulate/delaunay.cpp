@@ -145,6 +145,10 @@ struct Collector
      *  inside promoted neighborhoods (the wireframe splotch
      *  class).  Box only; no survey.  */
     std::unordered_map<uint64_t, LeafBox> smooth_leaves;
+    /*  Leaves the RESIDUAL formula flagged (flag_leaf) - the
+     *  crowding grant's second signal; want_dense alone cannot
+     *  distinguish residual-driven 2s from crowding-driven 2s.  */
+    std::unordered_set<uint64_t> resid_hot;
     uint64_t tangle_suppressed = 0;
     /*  Hidden-feature oracle verdicts + (env-gated) verdict
      *  boxes for the STL dump.  */
@@ -1002,6 +1006,24 @@ int autod_max_level()
     return lv < 1 ? 1 : std::min(lv, 8);
 }
 
+/*  Crowding-grant ceiling (STIBIUM_DMESH_CROWD_MAX, default 3):
+ *  the MAX=3 referee round (2026-07-19) split the verdict by
+ *  TRIGGER - blanket level 3 wrecks organic models through the
+ *  residual formula (bino: 1,555 of 1,665 leaves @3, worst
+ *  0.093 -> 0.372, nm 6.4x) while the extreme-crowding grant is
+ *  exactly the screws-class cure (26 leaves @3: tilt 4.03 ->
+ *  3.04% of area, weighted tilt 0.947 -> 0.692 deg, worst
+ *  held).  So the ceilings are SEPARATE: the residual formula
+ *  stays behind AUTODENSE_MAX (default 2), and only live-pair
+ *  crowding (>= 4x the bar) may take level 3.  */
+int crowd_max_level()
+{
+    const char* env = getenv("STIBIUM_DMESH_CROWD_MAX");
+    const int lv = env ? atoi(env)
+                       : std::max(3, autod_max_level());
+    return lv < 1 ? 1 : std::min(lv, 8);
+}
+
 /*  Tangle gate (zeiss autopsy, 2026-07-16): every open/non-manifold
  *  site in the auto-density zeiss sat in a leaf with 9-201 live
  *  pairs - thin-wall CSG tangles where a denser lattice resolves
@@ -1473,17 +1495,13 @@ void descend(Collector& c, const Region& r, Tape* tape)
             {
                 const bool tangle =
                         sep < autod_sep_bar() * c.spacing;
-                /*  Magnitude-scaled like the residual formula:
-                 *  extreme crowding (4x the bar) asks for level 3
-                 *  - eighth-cells put ~4 lattice rows across a
-                 *  screw slot that level 2 spans in 1-2 (the
-                 *  large visible tilted tris at the head rims).
-                 *  Level 3 stays behind the AUTODENSE_MAX cap
-                 *  (default 2): opt-in until refereed.  */
-                const int want = (live >= 4 * autod_live_bar() &&
-                                  autod_max_level() >= 3) ? 3 : 2;
+                /*  Crowding asks for level 2 here; the level-3
+                 *  grant is decided LATER (post-residual-survey,
+                 *  see the crowding-grant block in
+                 *  delaunay_sample) because the discriminator
+                 *  needs both signals at once.  */
                 int& lv = c.want_dense[key];
-                lv = std::max(lv, tangle ? 1 : want);
+                lv = std::max(lv, tangle ? 1 : 2);
             }
             /*  Chainless-curvature trigger (density campaign 2
              *  of 3, 2026-07-18): cones quilt and curved walls
@@ -2847,6 +2865,7 @@ void feature_points(Collector& c)
                 ++lvl;
         int& lv = c.want_dense[key];
         lv = std::max(lv, lvl);
+        c.resid_hot.insert(key);
     };
 
     /*  QEF candidates awaiting the phantom oracle (below).  */
@@ -3849,6 +3868,31 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
         trace_contact_chains(c.deck, c.soup.spacing,
                              c.hidden_contact_boxes,
                              &c.soup.contact_chains);
+    /*  Level-3 crowding grant, TWO-SIGNAL rule (MAX=3 referee
+     *  round, 2026-07-19): blanket level 3 wrecks organic models
+     *  (bino: worst 0.093 -> 0.372, nm 6.4x) and live-count
+     *  magnitude alone cannot target it - bino's blend bands
+     *  honestly read live >= 64 in 1,288 leaves.  The measured
+     *  discriminator is the COINCIDENCE of signals: screws-class
+     *  sub-lattice slots are extreme-crowded AND residual-hot
+     *  (92% of screws grants), while assembly collars are
+     *  crowded but residual-silent (86% of bino's false grants).
+     *  So level 3 requires both: live >= 4x the bar AND the
+     *  residual formula already flagged the leaf >= 2.  Ceiling
+     *  crowd_max_level() (default 3), refereed on screws (tilt
+     *  4.03 -> 3.04% of area, worst held, 0 geometric opens).  */
+    if (autodense() && crowd_max_level() >= 3)
+        for (auto& [key, lv] : c.want_dense)
+        {
+            if (lv < 2 || lv >= 3 || !c.resid_hot.count(key))
+                continue;
+            const auto it = c.crease_leaves.find(key);
+            if (it != c.crease_leaves.end() &&
+                it->second.live >= 4u * autod_live_bar() &&
+                !(it->second.sep <
+                  autod_sep_bar() * c.spacing))
+                lv = 3;
+        }
     if (autodense() && !c.want_dense.empty() && !(*halt))
     {
         const bool dbg = census.on ||
@@ -4040,6 +4084,36 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
                     dilated.size(), l1, l2,
                     l3, (unsigned long long)c.tangle_suppressed,
                     (unsigned long long)c.phantom_rejected);
+        }
+        /*  Final density map (census dump): one DENS row per
+         *  granted leaf - the offline referee for density-shadow
+         *  hunts (quilted patches are LEVEL HOLES; this is the
+         *  map that says which trigger never fired).  Crease
+         *  leaves not in `dilated` are base-level by omission.  */
+        if (census.dump)
+        {
+            for (const auto& [k, l] : dilated)
+            {
+                const auto it = c.crease_leaves.find(k);
+                if (it == c.crease_leaves.end())
+                    continue;
+                fprintf(census.dump, "DENS %.6g %.6g %.6g %d C\n",
+                        0.5f * (it->second.lo[0] +
+                                it->second.hi[0]),
+                        0.5f * (it->second.lo[1] +
+                                it->second.hi[1]),
+                        0.5f * (it->second.lo[2] +
+                                it->second.hi[2]), l);
+            }
+            for (const auto& [k, b] : c.smooth_leaves)
+            {
+                const auto it = dilated.find(k);
+                fprintf(census.dump, "DENS %.6g %.6g %.6g %d S\n",
+                        0.5f * (b.lo[0] + b.hi[0]),
+                        0.5f * (b.lo[1] + b.hi[1]),
+                        0.5f * (b.lo[2] + b.hi[2]),
+                        it == dilated.end() ? 0 : it->second);
+            }
         }
 
         Census census2;
