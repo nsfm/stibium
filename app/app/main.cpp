@@ -182,6 +182,21 @@ static int analyzeHeadless(App& app, float resolution,
  *  then (for export) runs the file's export worker synchronously.
  *  Returns the process exit code.
  */
+static int facedevHeadlessMain(App& app, const QString& mesh,
+                               float res)
+{
+    QList<ExportWorker*> workers;
+    for (auto np : app.getProxy()->nodeProxies())
+        if (auto w = np->getExportWorker())
+            workers << w;
+    if (workers.isEmpty())
+    {
+        fprintf(stderr, "facedev: no export node in this file\n");
+        return 1;
+    }
+    return workers.first()->facedevHeadless(mesh, res);
+}
+
 static int runHeadless(App& app, bool validate_only,
                        const QString& export_file, float resolution,
                        int detect_features, bool skip_export)
@@ -835,6 +850,12 @@ int main(int argc, char *argv[])
                 "Load the file, report script and datum errors to "
                 "stderr, and exit (0 = valid)");
         parser.addOption(validateOpt);
+        QCommandLineOption facedevOpt("facedev",
+                "Sweep an existing mesh file (binary STL or 3MF) "
+                "against this model's math tape and print "
+                "area-weighted face-deviation statistics "
+                "(--resolution sets the pitch), then exit", "MESH");
+        parser.addOption(facedevOpt);
         parser.addPositionalArgument("file", "File to open", "[file]");
 
         parser.process(app);
@@ -847,6 +868,7 @@ int main(int argc, char *argv[])
                               parser.isSet(resaveOpt) ||
                               parser.isSet(analyzeOpt) ||
                               parser.isSet(validateOpt) ||
+                              parser.isSet(facedevOpt) ||
                               parser.isSet(importVmOpt) ||
                               parser.isSet(diffOpt) ||
                               parser.isSet(turntableOpt) ||
@@ -930,6 +952,10 @@ int main(int argc, char *argv[])
                                       parser.value(nodeOpt), aa);
             if (code == 0 && parser.isSet(analyzeOpt))
                 code = analyzeHeadless(app, res, parser.value(nodeOpt));
+            if (code == 0 && parser.isSet(facedevOpt))
+                code = facedevHeadlessMain(app,
+                                           parser.value(facedevOpt),
+                                           res);
             if (code == 0 && parser.isSet(resaveOpt))
                 code = resaveHeadless(app, parser.value(resaveOpt));
             // Return (rather than exit()) so Qt tears down cleanly

@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "fab/formats/stl.h"
 
@@ -42,9 +43,29 @@ void save_stl(float* verts, unsigned count, const char* filename)
 void save_stl_indexed(const float* verts, const uint32_t* indices,
                       uint32_t tri_count, const char* filename)
 {
+    save_stl_indexed_stamped(verts, indices, tri_count, filename,
+                             NULL);
+}
+
+void save_stl_indexed_stamped(const float* verts,
+                              const uint32_t* indices,
+                              uint32_t tri_count,
+                              const char* filename,
+                              const char* stamp)
+{
     FILE* stl = fopen(filename, "wb");
 
-    write_header(stl, tri_count);
+    if (stamp && *stamp)
+    {
+        /*  Custom 80-byte header: provenance for the naked
+            format (the full config rides in 3MF metadata).  */
+        char hdr[80] = { 0 };
+        strncpy(hdr, stamp, sizeof(hdr) - 1);
+        fwrite(hdr, 1, sizeof(hdr), stl);
+        fwrite(&tri_count, sizeof(tri_count), 1, stl);
+    }
+    else
+        write_header(stl, tri_count);
 
     for (uint32_t t=0; t < tri_count; ++t)
     {

@@ -45,6 +45,20 @@ public:
                              int detect) = 0;
 
     /*
+     *  Offline face-deviation referee (--facedev MESH): sweep an
+     *  EXISTING mesh file (binary STL or 3MF) against this
+     *  worker's math tape and print area-weighted deviation
+     *  statistics.  res sets the lattice pitch the stats are
+     *  normalized by.  Only mesh exports implement it.
+     */
+    virtual int facedevHeadless(const QString&, float)
+    {
+        fprintf(stderr, "facedev: this file's export node is not "
+                        "a mesh export\n");
+        return 1;
+    }
+
+    /*
      *  Checks if _filename is writable.
      *  If so, returns true; otherwise, shows a warning and returns false.
      */
