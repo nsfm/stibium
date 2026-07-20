@@ -383,6 +383,60 @@ big).  TWO mechanisms separated by A/B, THREE theories buried:
 - Dense-knob smoke test isolated from the trigger (CURVEBAR=0
   around the DENSE=1 smoke; bench pitch legitimately reads
   several deg/cell).
+- SMOOTH-BRANCH CURVE TRIGGER - ***QUILT SOLVED*** (2026-07-20,
+  Nate's V-patch coordinate (-3.775, 32.14, 40.98)): the
+  chainless-curvature trigger only probed CREASE-suspect
+  leaves, but a tilted cylinder wall is a live = 0 SMOOTH
+  expanse - and the smooth-pocket fill needs >= 3 touching
+  promoted CREASE leaves, which a big smooth region's interior
+  never has.  DENS autopsy: 9 leaves at the patch, all smooth,
+  7 at level 0 - the V is exactly the set beyond fill reach.
+  Fix: the same leaf_curve_theta probe in the smooth branch
+  (same band, same magnitude ladder; the projection clamp
+  already refuses out-of-reach leaves).  Zeiss referee: the V
+  region 125 -> 876 tris, max tri area 0.813 -> 0.061 (13x),
+  worst/opens/tris/nm all held.  Instrument minted: the DENS
+  census rows (C/S tagged) - built for this hunt, kept for the
+  next one.
+- HIDDEN-CELL WITNESSES - density campaign 3 of 3 LANDED
+  (2026-07-20, the dense-details autopsy; Nate's #1 class:
+  "when details are densely packed, chipping and air chords
+  abound").  AUTOPSY CHAIN, each step measured: all screws-head
+  defects cluster at z 64-67 -> 1,023 of 1,067 sit within
+  0.25 sp of a traced chain (NOT seed starvation - law is
+  complete and the mesh disobeys it at close range) -> the
+  worst-site corridor (two law rings 0.25 sp apart) has 7
+  mid-row vertices where ~40 stand on each ring -> corridor
+  drop, decimation, thinning all exonerated (one-variable) ->
+  THINDBG ground truth: 136/136 lattice points OUT across the
+  whole band even at level 3 - the rim is thinner than the
+  LOCAL pitch, the lattice cannot see the material, and the
+  surface hangs from law chains alone.  The leaf-level hidden
+  oracle can't reach it (it requires an ALL-quiet leaf; the rim
+  hides inside a mixed leaf).  THE RUNG: cell-level certify
+  witnesses - in pass-2 dense leaves (level >= 2),
+  sign-unanimous cells within 2 cells of a crossing cell are
+  batch-interval-checked; straddlers run certify_hidden with a
+  PROVEN-BOX COLLECTOR (cap 4), and each proven center pairs
+  with 4 tetrahedral cell corners as guaranteed sign-change
+  segments into the ordinary bisection queue.  Proof-carrying
+  witnesses: minted only on interval PROOF of opposite-sign
+  volume, never on grazes.  MATERIAL-ONLY GATE (bino referee,
+  measured): the symmetric version certified 8,225 cells /
+  127K bisections on bino and dragged worst 0.091 -> 0.372 -
+  proven-AIR cells inside solid are near-tangent assembly gaps,
+  the class the clearance weld fuses on purpose (sheet-
+  separation verdict); resolving them re-mints the pinches.
+  Hidden MATERIAL in air is the rim/thin-wall class and cures.
+  RESULTS: screws worst 0.177 -> 0.061 sp (3x, well under the
+  0.1 product bar; 29 cells, 464 witnesses; tilt 2.99% /
+  0.662 deg - the best of the whole density round); bino
+  neutral (224 cells, worst 0.096, nm slightly down, tris
+  flat); knob/suite untouched.  STIBIUM_DMESH_HIDDEN_CELLS=0
+  disables.  Instruments minted: STIBIUM_DMESH_CHIP_DUMP=path
+  (every defective edge midpoint, BOTH signs - the
+  localization referee), STIBIUM_DMESH_DROP_PROBE="x,y,z,r"
+  (corridor-drop survivor census).
 - LEVEL-3 CROWDING GRANT, TWO-SIGNAL RULE - ***LANDED DEFAULT
   ON*** (2026-07-20, the MAX=3 referee round; three configs
   measured + Nate's eyes on every leg).  VERDICTS: (1) blanket
