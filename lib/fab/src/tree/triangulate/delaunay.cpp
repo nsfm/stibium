@@ -10030,8 +10030,50 @@ static void weld_slivers(const Deck* deck, DMesh* out, float sp)
             const uint32_t a = vs[emini], b = vs[(emini+1)%3];
             /*  Flatter endpoint moves; ties move b into a.  */
             const float pa = planarity(a), pb = planarity(b);
-            const uint32_t keep = pa < pb ? a : b;
-            const uint32_t drop = pa < pb ? b : a;
+            uint32_t keep, drop;
+            /*  Corner-preserving tie-break (the graze-ladder
+             *  residual, 2026-07-20): when BOTH short-edge endpoints
+             *  are equally featured - both sit on a crease, so
+             *  |pa - pb| falls in the planarity noise floor - the
+             *  pa < pb pick is decided by sub-1e-4 float noise, and
+             *  an upstream witness perturbation (the tangent-graze
+             *  demotion moving phantom groove-mouth samples off the
+             *  surface) flips its sign.  The loser can be an EXACT
+             *  junction corner welded into the 0.037 sp-off chain-
+             *  march vertex beside it, moving law by the razor's
+             *  length (the c5 strip corner, graze on).  A razor
+             *  abutting a real corner has its APEX ~perpendicular
+             *  OVER that corner - the right angle sits on the corner,
+             *  the hypotenuse skims the crease - so keep the short-
+             *  edge endpoint nearest the foot of the apex's
+             *  perpendicular.  That foot is a property of the razor's
+             *  OWN geometry (identical under any witness change), so
+             *  the corner outcome is deterministic and exact.  Gated
+             *  TIGHT (1e-3): the crease-vs-crease tie sits in the
+             *  float-noise floor (measured < 5e-5 on the ladder), so
+             *  the band catches it with 20x margin while a clear
+             *  flat-vs-featured split still follows planarity as
+             *  before - holding the screws razor census (a 1e-2 band
+             *  perturbed 10 screws collapses, +0.02pp tilt).  */
+            if (fabsf(pa - pb) < 1e-3f)
+            {
+                const uint32_t c2 = vs[(emini + 2) % 3];
+                const float ex = vp(b,0)-vp(a,0), ey = vp(b,1)-vp(a,1),
+                            ez = vp(b,2)-vp(a,2);
+                const float ee = ex*ex + ey*ey + ez*ez;
+                float tc = 0.5f;
+                if (ee > 0)
+                    tc = ((vp(c2,0)-vp(a,0))*ex +
+                          (vp(c2,1)-vp(a,1))*ey +
+                          (vp(c2,2)-vp(a,2))*ez) / ee;
+                keep = tc < 0.5f ? a : b;
+                drop = tc < 0.5f ? b : a;
+            }
+            else
+            {
+                keep = pa < pb ? a : b;
+                drop = pa < pb ? b : a;
+            }
             /*  Orientation guard: every surviving triangle of
              *  drop's fan keeps its own normal direction.  */
             bool ok = true;
