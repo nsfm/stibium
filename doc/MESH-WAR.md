@@ -109,6 +109,27 @@ regression: the same site read 0.197-0.206 sp pre-fix (its
 worst faces) - the fix improved it 3x and unmasked it.  Open
 question: why three ~120-degree gaps - rim-junction breaks or
 another consumption flavor.
+TWIN-CORNER RESCUE LANDED (2026-07-20, the pre-split follow-up,
+second opus agent): at crowded junctions the wall crease
+DETOURS on its final step (last segment (11,-10,2.375) ->
+(10.75,-10,2.5) instead of marching to the corner), so no chain
+vertex is planted; the exact QEF corner feature exists but
+sole_owner corridor-drops it (one visible owner = "redundant"),
+and the through-vertex pre-split has nothing to split on -
+the outline chain keeps its 0.0366-off vertex.  FIX: keep a
+QEF FEATURE that lies on an accepted constraint's INTERIOR
+(perp < 1e-3 sp, endpoints > 5e-3 sp clear = genuinely
+stranded) - it becomes exactly the through-vertex the
+pre-split wants.  Two variants measured-rejected first
+(exempt-all flooded the pre-split 32 -> 2,289).  RESULTS:
+***THE FLAT LADDER IS PERFECT*** - all six grooves EXACT,
+0 tilted, 0 chips, 0 airs, referee VERDICT PASS; cylinder
+unchanged; screws tilt 2.71%/0.580 deg (best ever), repairs/
+snaps down, constrained 1,674 -> 1,780 (+106 = the slot-
+profile chip-row class receiving its stranded-corner law -
+the predicted follow-up dividend, deviation accepted).
+Rescue counters print under SEG_DEBUG.  REMAINING on the
+focus models: ONLY the three socket-rim spikes (hunt #2).
 
 ## CURRENT STATE (2026-07-20, post metric-audit)
 
