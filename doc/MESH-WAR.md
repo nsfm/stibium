@@ -54,6 +54,46 @@ tools/ in-repo.  Reviews: doc/reviews/2026-07-17-*.md
 Knob roster: ~26 STIBIUM_DMESH_* - defaults are all measured-in;
 see the architecture review for the product/frozen/dead tiers.
 
+## THE SEED-POACHING FIX (2026-07-20 - the dense-detail class ROOT CAUSE)
+
+Nate's ladder models (examples/detail_spacing_test.sb + _cyl.sb -
+PERMANENT BENCH: groove pairs at gaps 8/4/2/1/0.5 sp, flat and
+cylindrical) reduced the class to a 30-second repro, and the
+autopsy chain ran: defects radiate from junction corners whose
+exact vertices are missing -> the incoming chains were never
+traced -> their seeds exist but were CONSUMED by an earlier
+pair.  MECHANISM (opus agent, verified): with two walls 0.5 sp
+apart, the earlier pair's correct() Newton-drags the later
+pair's seeds across the strip onto its own already-traced
+crease (the moved-away gate rightly allows 1.5 sp), the dup
+guard brands them duplicates, and consumed[] is GLOBAL - the
+owning pair finds its seed pool looted and traces nothing.
+Autodense-dependent because dense seeding covers the whole
+wall.  FIX: consume only GENUINE duplicates - the seed's
+ORIGINAL position must lie within the dup radius of the matched
+curve; drag-in poachers are skipped without consuming.
+RESULTS: flat ladder 0 chips / 0 airs / FACE 0.000% (tilted
+slivers 8 -> 2); cylinder rims at gap 1 and 0.5: 190 defects
+each -> 4 shallow 0.002 sp whispers - THE DEFECT-VS-GAP CURVE
+IS FLAT; screws at DEFAULT config: constraints 1,199 -> 1,674
+(+40% law), nm -> 0, repairs halved, tilt 2.75%/0.581 deg =
+best ever measured, at HALF the level-3 grant's triangles -
+"dense feature compliance separate from triangle density",
+delivered.  Suite 9/9.  RESIDUAL (root-caused, separate
+follow-up): the plate-outline chain marches THROUGH strip
+corners without an exact vertex (10.9116 -> 11.0366) and the
+through-vertex pre-split does not fire on it - pins both strip
+corners 0.0366 off (pre-existing, also on never-poached c5);
+plus shallow straight-line chip rows on screws slot profiles
+(<= 0.063 sp).  Instruments minted for this hunt (all
+probe-gated envs): STIBIUM_DMESH_MARCH_PROBE (march exit
+reasons), STIBIUM_DMESH_SEED_PROBE (SEEDINV inventory + SEEDDBG
+per-pair verdicts), scratchpad ladder_referee.py /
+cyl_referee.py (one-command acceptance: corner exactness +
+tilt census + defect-vs-gap curve).  Next: re-referee bino +
+full zeiss with the fix (expect the dense-detail class to
+shrink model-wide), then the pre-split follow-up.
+
 ## CURRENT STATE (2026-07-20, post metric-audit)
 
 THE RANKING METRIC IS NOW FACE (area-weighted centroid
