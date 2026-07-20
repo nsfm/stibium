@@ -4709,6 +4709,26 @@ struct CreaseTracer
                std::vector<DSurfPoint>& out_pts,
                volatile int* halt) const
     {
+        /*  March-exit forensics (the crowded-junction hunt,
+         *  2026-07-20): STIBIUM_DMESH_MARCH_PROBE="x,y,z,r"
+         *  prints WHY a march ended within r of the point.  */
+        static const char* mp_env =
+                getenv("STIBIUM_DMESH_MARCH_PROBE");
+        static float mp[4] = { 0, 0, 0, -1 };
+        if (mp_env && mp[3] < 0)
+            sscanf(mp_env, "%f,%f,%f,%f",
+                   mp, mp + 1, mp + 2, mp + 3);
+        const auto mprobe = [&](const char* why, const float q[3],
+                                float aux) {
+            if (!mp_env || mp[3] <= 0)
+                return;
+            const float dx = q[0]-mp[0], dy = q[1]-mp[1],
+                        dz = q[2]-mp[2];
+            if (dx*dx + dy*dy + dz*dz < mp[3]*mp[3])
+                fprintf(stderr, "MARCHDBG exit=%s at "
+                        "(%.4f, %.4f, %.4f) aux=%.5g\n",
+                        why, q[0], q[1], q[2], aux);
+        };
         float p[3] = { p0[0], p0[1], p0[2] };
         float tprev[3] = { dir * t0[0], dir * t0[1], dir * t0[2] };
         for (int steps = 0; steps < 16384 && !*halt; ++steps)
@@ -4729,7 +4749,10 @@ struct CreaseTracer
                             p[2] + step * tprev[2] };
             Probe pr;
             if (!correct(pt, &pr) || !in_bounds(pt))
+            {
+                mprobe("correct-fail", p, step);
                 break;
+            }
             /*  Minimum progress: near a tangency the corrector
              *  pulls every predictor step back to the same point -
              *  emitting float-noise micro-segments (measured: three
@@ -4740,7 +4763,10 @@ struct CreaseTracer
                             pz2 = pt[2] - p[2];
                 if (px2*px2 + py2*py2 + pz2*pz2 <
                     0.01f * step * step)
+                {
+                    mprobe("min-progress", p, step);
                     break;
+                }
             }
             /*  abs trim analog: fdist can't lift (field B IS the
              *  oracle) - the crease ends where the surface stops
@@ -4748,7 +4774,10 @@ struct CreaseTracer
              *  overshoot is at most one step of on-surface
              *  polyline, which constrains harmlessly.  */
             if (tp.is_max == 2 && !kinked(pt, pr))
+            {
+                mprobe("kink-end", pt, 0);
                 break;
+            }
             if (pr.fdist > trim)
             {
                 /*  Left the boundary: a third branch owns the
@@ -4798,6 +4827,7 @@ struct CreaseTracer
                                 1e-10f * sp * sp)
                         out_pts.push_back({ pe[0], pe[1], pe[2] });
                 }
+                mprobe("junction", pt, pr.fdist);
                 break;
             }
             float t[3];
@@ -4809,7 +4839,10 @@ struct CreaseTracer
                 t[2] = -t[2];
             }
             if (t[0]*tprev[0] + t[1]*tprev[1] + t[2]*tprev[2] < 0.5f)
+            {
+                mprobe("hard-turn", pt, 0);
                 break;                            // hard turn: corner
+            }
             const float cx = pt[0] - p0[0], cy = pt[1] - p0[1],
                         cz = pt[2] - p0[2];
             if (steps > 3 &&
@@ -4973,6 +5006,43 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
         }
     }
 
+    /*  Seed-verdict forensics (the crowded-junction hunt):
+     *  STIBIUM_DMESH_SEED_PROBE="x,y,z,r" prints every seed
+     *  verdict within r of the point, per pair.  */
+    static const char* sp_env2 =
+            getenv("STIBIUM_DMESH_SEED_PROBE");
+    static float spb[4] = { 0, 0, 0, -1 };
+    if (sp_env2 && spb[3] < 0)
+        sscanf(sp_env2, "%f,%f,%f,%f",
+               spb, spb + 1, spb + 2, spb + 3);
+    if (sp_env2 && spb[3] > 0)
+    {
+        size_t inr = 0;
+        for (const DSurfPoint& q : seeds)
+        {
+            const float dx = q.x-spb[0], dy = q.y-spb[1],
+                        dz = q.z-spb[2];
+            if (dx*dx + dy*dy + dz*dz < spb[3]*spb[3])
+            {
+                if (inr < 24)
+                    fprintf(stderr, "SEEDINV (%.4f, %.4f, "
+                            "%.4f)\n", q.x, q.y, q.z);
+                ++inr;
+            }
+        }
+        fprintf(stderr, "SEEDINV total %zu in radius\n", inr);
+    }
+    const auto sprobe = [&](const char* why, const DSurfPoint& q,
+                            unsigned pi2, float aux) {
+        if (!sp_env2 || spb[3] <= 0)
+            return;
+        const float dx = q.x-spb[0], dy = q.y-spb[1],
+                    dz = q.z-spb[2];
+        if (dx*dx + dy*dy + dz*dz < spb[3]*spb[3])
+            fprintf(stderr, "SEEDDBG pair@%u %s seed "
+                    "(%.4f, %.4f, %.4f) aux=%.5g\n",
+                    pi2, why, q.x, q.y, q.z, aux);
+    };
     std::vector<uint8_t> consumed(seeds.size(), 0);
     for (unsigned pi = 0; pi < npairs; ++pi)
     {
@@ -4987,18 +5057,32 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
             const size_t s = seedgate ? size_t(pair_seeds[pi][si])
                                       : si;
             if (consumed[s] || *halt)
+            {
+                if (!*halt)
+                    sprobe("consumed", seeds[s], pi, 0);
                 continue;
+            }
             const DSurfPoint& seed = seeds[s];
             float p0[3] = { seed.x, seed.y, seed.z };
             CreaseTracer::Probe pr;
             if (!tr.correct(p0, &pr))
+            {
+                sprobe("correct-fail", seed, pi, 0);
                 continue;
+            }
             const float mx = p0[0] - seed.x, my = p0[1] - seed.y,
                         mz = p0[2] - seed.z;
             if (mx*mx + my*my + mz*mz > 2.25f * sp * sp)
+            {
+                sprobe("moved-away", seed, pi,
+                       sqrtf(mx*mx + my*my + mz*mz));
                 continue;                // converged elsewhere
+            }
             if (pr.fdist > 0.05f * sp)
+            {
+                sprobe("off-surface", seed, pi, pr.fdist);
                 continue;                // crease not on the surface
+            }
             /*  abs creases can't lift off the surface (field B IS
              *  the oracle), so the on-surface gate always passes -
              *  the activity question is whether the surface is
@@ -5019,41 +5103,62 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
              *  gaps lost every seed (Nate's overlay read,
              *  2026-07-17: crowded bands under-polylined).  */
             {
-                bool dup = false;
+                bool dup = false, own = false;
                 const float dr2 = 0.1f * sp * 0.1f * sp;
+                const auto seg_d2 = [](const DSurfPoint& A,
+                                       const DSurfPoint& B,
+                                       float x, float y,
+                                       float z) {
+                    const float bx = B.x - A.x, by = B.y - A.y,
+                                bz = B.z - A.z;
+                    const float px = x - A.x, py = y - A.y,
+                                pz = z - A.z;
+                    const float bb = bx*bx + by*by + bz*bz;
+                    float t = bb > 0
+                            ? (px*bx + py*by + pz*bz) / bb : 0;
+                    t = t < 0 ? 0 : t > 1 ? 1 : t;
+                    const float dx = px - t*bx, dy = py - t*by,
+                                dz = pz - t*bz;
+                    return dx*dx + dy*dy + dz*dz;
+                };
                 for (size_t c = 0; c < polys.size() && !dup; ++c)
                 {
                     if (poly_pair[c] != tp.clause)
                         continue;
                     const std::vector<DSurfPoint>& pl = polys[c];
                     for (size_t qi = 0; qi + 1 < pl.size(); ++qi)
-                    {
-                        const DSurfPoint& A = pl[qi];
-                        const DSurfPoint& B = pl[qi + 1];
-                        const float bx = B.x - A.x,
-                                    by = B.y - A.y,
-                                    bz = B.z - A.z;
-                        const float px = p0[0] - A.x,
-                                    py = p0[1] - A.y,
-                                    pz = p0[2] - A.z;
-                        const float bb = bx*bx + by*by + bz*bz;
-                        float t = bb > 0
-                                ? (px*bx + py*by + pz*bz) / bb
-                                : 0;
-                        t = t < 0 ? 0 : t > 1 ? 1 : t;
-                        const float dx = px - t*bx,
-                                    dy = py - t*by,
-                                    dz = pz - t*bz;
-                        if (dx*dx + dy*dy + dz*dz < dr2)
+                        if (seg_d2(pl[qi], pl[qi + 1],
+                                   p0[0], p0[1], p0[2]) < dr2)
                         {
                             dup = true;
+                            if (seg_d2(pl[qi], pl[qi + 1],
+                                       seed.x, seed.y,
+                                       seed.z) < dr2)
+                                own = true;
                             break;
                         }
-                    }
                 }
                 if (dup)
                 {
-                    consumed[s] = 1;
+                    /*  THE SEED-POACHING FIX (the 0.5 mm strip
+                     *  autopsy, 2026-07-20; the dense-detail
+                     *  defect class' root): an EARLIER pair's
+                     *  correct() drags a seed across a sub-cell
+                     *  strip onto its own already-traced
+                     *  neighbour crease (c5's wall is 0.5 sp
+                     *  from c6's; the moved-away gate rightly
+                     *  allows 1.5 sp), and the guard branded it
+                     *  duplicate and consumed it GLOBALLY - so
+                     *  the pair that owns the seed's own crease
+                     *  never traced it (c6's whole x=11 line:
+                     *  lawless, corners unminted, chips + air-
+                     *  chords at every junction).  Consume only
+                     *  when the seed's ORIGINAL position lies on
+                     *  the matched curve (a genuine duplicate);
+                     *  drag-in poachers are skipped WITHOUT
+                     *  consuming.  */
+                    if (own)
+                        consumed[s] = 1;
                     continue;
                 }
             }
