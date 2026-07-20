@@ -131,6 +131,23 @@ the predicted follow-up dividend, deviation accepted).
 Rescue counters print under SEG_DEBUG.  REMAINING on the
 focus models: ONLY the three socket-rim spikes (hunt #2).
 
+## FIFTH FIX - CORNER-SUPPORT KEEP (2026-07-20 afternoon, a00e4ce2)
+
+Nate's eye sweep of the four-fix bench caught a cylinder
+regression (crowded-groove inside corners, 0.177 sp air roofs)
+- one-env bisected to the SOLID graze branch stripping corner
+support from buried wall-plane sheets.  Fifth agent, fifth
+kill: the sheet-normal axis probe separates thin plates (air
+along the normal at <=2 cells: demote) from concave corners in
+thick solid (air only diagonal: un-demote).  Cylinder restored
+to the clean baseline, screws byte-identical, ladder PASS,
+suite green.  Bench state: flat 100 percent (Nate), cylinder
+clean, screws 99 percent, bino "feels better" at HALF the
+triangles (law doubled to 23.8K - the compliance thesis paying
+at model scale).  Eye-refuted hypothesis worth keeping: the
+screws underside tents are real thin-plate surface, NOT graze
+collateral - measured, not assumed.
+
 ## FOCUS-BENCH ENDGAME (2026-07-20 late - four fixes, one residue)
 
 The dense-detail campaign closed FOUR mechanisms in one day, each
