@@ -6112,6 +6112,72 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                          box_dense_factor(soup, x, y, z));
         return sole_owner(x, y, z, std::min(eff, drop_max));
     };
+    /*  Twin-corner rescue (the 0.5 mm strip residual, 2026-07-20):
+     *  a QEF corner feature sitting ON an accepted constraint's
+     *  interior is exactly the through-vertex the pre-split chains
+     *  into the crossing segment - so dropping it as a redundant
+     *  on-crease sample strands the outline without an exact corner
+     *  vertex whenever the perpendicular wall chain DETOURS past the
+     *  junction instead of terminating on it.  c3's x=3 wall marches
+     *  straight up to (3,-10,2.5) and plants a chain vertex there, so
+     *  the outline splits exact; c6's x=11 wall veers to
+     *  (10.75,-9.9999,2.5), the only candidate at (11,-10,2.5) is
+     *  this corridor-dropped feature, and the corner pins 0.0366 off.
+     *  Keep a feature essentially ON a segment INTERIOR: the pre-
+     *  split (5e-3 sp radius) absorbs it into the polyline (a chain
+     *  vertex, never a free pinch source), and the 1e-3 sp weld
+     *  collapses any twin.  The keep tolerance is TIGHTER than the
+     *  split radius (1e-3 sp): true junction corners sit on the
+     *  constraint to float noise (measured 2e-6 sp on the ladder,
+     *  36x inside the nearest non-corner feature at 0.037 sp), so a
+     *  tight band keeps only genuine corners.
+     *
+     *  ENDPOINT-CLEAR gate (screws footprint): rescue ONLY the
+     *  stranded case - a corner with NO chain vertex already on it.
+     *  When a chain endpoint sits at the corner (c3's wall lands it;
+     *  the common case on mechanical parts) the corner is planted and
+     *  the feature would only add a redundant near-coincident
+     *  constraint.  Requiring the corner to be endpoint-clear (5e-3 sp
+     *  from every accepted endpoint) holds screws at its guard: the
+     *  ladder's stranded corners keep their nearest endpoint 0.08 sp
+     *  away and pass, planted corners everywhere else are skipped.  */
+    const float corner_keep_eps2 = 1e-3f * soup.spacing *
+                                   1e-3f * soup.spacing;
+    const float corner_planted_eps2 = 5e-3f * soup.spacing *
+                                      5e-3f * soup.spacing;
+    const auto on_constraint_interior = [&](float x, float y,
+                                            float z) {
+        bool interior = false;
+        for (const auto& s : cseg)
+        {
+            /*  A chain vertex already on the corner: not stranded.  */
+            for (int e = 0; e < 2; ++e)
+            {
+                const float ex = s[3*e], ey = s[3*e+1],
+                            ez = s[3*e+2];
+                const float dx = x-ex, dy = y-ey, dz = z-ez;
+                if (dx*dx + dy*dy + dz*dz < corner_planted_eps2)
+                    return false;
+            }
+            if (interior)
+                continue;
+            const float ax = s[0], ay = s[1], az = s[2];
+            const float ux = s[3] - ax, uy = s[4] - ay,
+                        uz = s[5] - az;
+            const float uu = ux*ux + uy*uy + uz*uz;
+            if (!(uu > 0))
+                continue;
+            const float px = x - ax, py = y - ay, pz = z - az;
+            const float t = (px*ux + py*uy + pz*uz) / uu;
+            if (t <= 1e-4f || t >= 1.f - 1e-4f)
+                continue;                // endpoint, not interior
+            const float dx = px - t*ux, dy = py - t*uy,
+                        dz = pz - t*uz;
+            if (dx*dx + dy*dy + dz*dz < corner_keep_eps2)
+                interior = true;
+        }
+        return interior;
+    };
     /*  Feature points referenced by an accepted segment are the
      *  chain itself and always enter; the rest of the QEF clump
      *  (curved creases run 26-51% duplicates, merged out of the
@@ -6203,6 +6269,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     static const char* dp_env = getenv("STIBIUM_DMESH_DROP_PROBE");
     float dpx = 0, dpy = 0, dpz = 0, dpr = 0;
     size_t dp_kept = 0, dp_drop = 0;
+    uint64_t corner_rescues = 0;
     if (dp_env)
         sscanf(dp_env, "%f,%f,%f,%f", &dpx, &dpy, &dpz, &dpr);
     for (size_t si = 0; si < soup.surface.size(); ++si)
@@ -6216,8 +6283,20 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 fabsf(s.x - dpx) < dpr &&
                 fabsf(s.y - dpy) < dpr &&
                 fabsf(s.z - dpz) < dpr;
-        if (!cseg.empty() && !chain_used.count(uint32_t(si)) &&
-            in_corridor(s.x, s.y, s.z))
+        /*  ...EXCEPT a QEF FEATURE (si >= feat_base) that lies on an
+         *  accepted constraint's interior: that is a crease-junction
+         *  corner the through-vertex pre-split wants to chain, not a
+         *  redundant bisected sample.  Restricting to features keeps
+         *  the exemption to the sparse true-corner set (ordinary
+         *  surface points cluster within the tolerance and would
+         *  flood the pre-split).  */
+        const bool corridor_drop =
+                !cseg.empty() && !chain_used.count(uint32_t(si)) &&
+                in_corridor(s.x, s.y, s.z);
+        const bool rescued = corridor_drop && si >= feat_base &&
+                on_constraint_interior(s.x, s.y, s.z);
+        corner_rescues += rescued;
+        if (corridor_drop && !rescued)
         {
             if (probed)
                 ++dp_drop;
@@ -6235,6 +6314,10 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         fprintf(stderr, "DROP_PROBE (%.3f,%.3f,%.3f r%.2f): "
                 "%zu kept, %zu corridor-dropped\n",
                 dpx, dpy, dpz, dpr, dp_kept, dp_drop);
+    if (corner_rescues && getenv("STIBIUM_DMESH_SEG_DEBUG"))
+        fprintf(stderr, "corner rescues: %llu features kept "
+                "on-constraint (twin-corner) [sp=%.6g]\n",
+                (unsigned long long)corner_rescues, soup.spacing);
     {
         using PMap = CGAL::First_of_pair_property_map<
                 std::pair<TPoint, size_t>>;
