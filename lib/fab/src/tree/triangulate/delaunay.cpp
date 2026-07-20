@@ -711,10 +711,116 @@ void sample_block(Collector& c, const Region& r, Tape* tape,
         }
     }
 
+    /*  Tangent-graze demotion (the socket-roof hunt, 2026-07-20):
+     *  a lattice corner whose plane COINCIDES with an axis-aligned
+     *  model plane reads f == 0 bit-exactly, and the vals==0 test in
+     *  the sample loop promotes it to an on_surface vertex.  Where
+     *  that plane is a countersink's top face, the min/max CSG
+     *  leaves the field TANGENT to zero INSIDE the bore: f dips to 0
+     *  and returns to the SAME (air) sign, |grad| ~ 0 (measured on
+     *  screws' z=67.25 sheet: f = +0.04 / 0 / +0.04 across z, vs a
+     *  real top face's -0.04 / 0 / +0.04).  The coarse z-neighbours
+     *  straddle either way (solid floor far below, air far above),
+     *  so neighbour signs cannot tell the graze from a transverse
+     *  crossing - only a FINE probe does.  A promoted graze corner
+     *  becomes a phantom surface vertex on the sheet across the
+     *  hollow, and the CCDT roofs the bore onto it (three wedge fans
+     *  per socket rim, +0.063 sp through air, mirrored on both
+     *  screws - the model's worst FACE faces).  A zero corner is a
+     *  genuine surface point only when the field CHANGES SIGN across
+     *  a fine neighbourhood (solid on one side, air on the other); a
+     *  graze that touches zero from ONE side only is a phantom, and
+     *  is demoted to a plain witness of that side - an air graze to
+     *  an outside witness, a SOLID graze to an INSIDE witness (its
+     *  own sign, so no false pocket).  The air case roofs the socket
+     *  hollow; the solid case (the base plate's top plane buried
+     *  under the screw shaft, +0.069 sp) craters it - same tangency,
+     *  opposite sign.  The neighbourhood is the full 26 (all +-h
+     *  combinations), NOT the 6 axes: at an axis-aligned convex EDGE
+     *  or CORNER the opposite phase sits in a diagonal wedge/octant,
+     *  and the 6 axis taps stay ON the incident faces (f = 0), so an
+     *  axis-only test false-demotes every such edge (the base
+     *  plate's wall-bottom edges - a 0.17 sp chip regression).  The
+     *  diagonal taps see it; a true single-sided graze has none in
+     *  any of the 26.  */
+    std::vector<uint8_t> graze(n, 0);   // 0 keep, 1 air, 2 solid
+    if (!getenv("STIBIUM_DMESH_NO_GRAZE"))
+    {
+        std::vector<size_t> zc;
+        for (size_t p = 0; p < n; ++p)
+            if (vals[p] == 0)
+                zc.push_back(p);
+        if (!zc.empty())
+        {
+            const float h = 0.01f * c.spacing > 0
+                    ? 0.01f * c.spacing : 0.01f;
+            static const int off[26][3] = {
+                {-1,-1,-1},{0,-1,-1},{1,-1,-1},{-1,0,-1},{0,0,-1},
+                {1,0,-1},{-1,1,-1},{0,1,-1},{1,1,-1},{-1,-1,0},
+                {0,-1,0},{1,-1,0},{-1,0,0},{1,0,0},{-1,1,0},
+                {0,1,0},{1,1,0},{-1,-1,1},{0,-1,1},{1,-1,1},
+                {-1,0,1},{0,0,1},{1,0,1},{-1,1,1},{0,1,1},{1,1,1} };
+            std::vector<float> px, py, pz, pv;
+            px.reserve(zc.size() * 26);
+            py.reserve(zc.size() * 26);
+            pz.reserve(zc.size() * 26);
+            for (const size_t p : zc)
+                for (int q = 0; q < 26; ++q)
+                {
+                    px.push_back(xs[p] + off[q][0] * h);
+                    py.push_back(ys[p] + off[q][1] * h);
+                    pz.push_back(zs[p] + off[q][2] * h);
+                }
+            eval_points(tape, c.ctx, px, py, pz, pv);
+            for (size_t i = 0; i < zc.size(); ++i)
+            {
+                bool neg = false, pos = false;
+                for (int q = 0; q < 26; ++q)
+                {
+                    const float v = pv[i*26 + q];
+                    if (v < 0)
+                        neg = true;
+                    else if (v > 0)
+                        pos = true;
+                }
+                if (neg && pos)
+                    continue;            // sign change: real surface
+                if (pos)
+                    graze[zc[i]] = 1;    // air graze
+                else if (neg)
+                    graze[zc[i]] = 2;    // solid graze
+                /*  all-zero (neither): a genuine zero volume; keep.  */
+                static const char* gp_env =
+                        getenv("STIBIUM_DMESH_GRAZE_PROBE");
+                static float gp[4] = { 0, 0, 0, -1 };
+                if (gp_env && gp[3] < 0)
+                    sscanf(gp_env, "%f,%f,%f,%f",
+                           gp, gp + 1, gp + 2, gp + 3);
+                if (gp_env && gp[3] > 0 && graze[zc[i]])
+                {
+                    const float dx = xs[zc[i]] - gp[0],
+                            dy = ys[zc[i]] - gp[1],
+                            dz = zs[zc[i]] - gp[2];
+                    if (dx*dx + dy*dy + dz*dz < gp[3]*gp[3])
+                        fprintf(stderr, "GRAZEDBG %s "
+                                "(%.4f, %.4f, %.4f)\n",
+                                graze[zc[i]] == 1 ? "air"
+                                                  : "solid",
+                                xs[zc[i]], ys[zc[i]],
+                                zs[zc[i]]);
+                }
+            }
+        }
+    }
+
     const auto idx = [&](uint32_t i, uint32_t j, uint32_t k) {
         return (size_t(k) * cy + j) * cx + i;
     };
-    const auto inside = [&](size_t p) { return vals[p] < 0; };
+    /*  A demoted solid graze is INSIDE (its neighbourhood is solid);
+     *  everything else follows the sign of f (zero is outside).  */
+    const auto inside = [&](size_t p) {
+        return graze[p] == 2 || vals[p] < 0;
+    };
 
     bool any_in = false, any_out = false;
     for (size_t p = 0; p < n; ++p)
@@ -822,7 +928,8 @@ void sample_block(Collector& c, const Region& r, Tape* tape,
                                 "%.4f) f=%.5g %s block=%s%s\n",
                                 xs[p], ys[p], zs[p], vals[p],
                                 shell < 0 ? "legacy"
-                                : (keep[p] || vals[p] == 0)
+                                : (keep[p] ||
+                                   (vals[p] == 0 && !graze[p]))
                                         ? "KEEP" : "DROP",
                                 any_in && any_out ? "mixed"
                                 : any_in ? "uni-in" : "uni-out",
@@ -830,9 +937,10 @@ void sample_block(Collector& c, const Region& r, Tape* tape,
                                         ys[p], zs[p]) > 1
                                         ? "-dense" : "");
                 }
-                if (shell < 0 || keep[p] || vals[p] == 0)
+                const bool on_surf = vals[p] == 0 && !graze[p];
+                if (shell < 0 || keep[p] || on_surf)
                     c.add_sample(xs[p], ys[p], zs[p], inside(p),
-                                 vals[p] == 0);
+                                 on_surf);
                 else
                     ++c.soup.thinned;
                 const size_t nb[3] = {
