@@ -259,7 +259,8 @@ const char* RELS =
 
 bool save_3mf_indexed(const float* verts, uint32_t vert_count,
                       const uint32_t* indices, uint32_t tri_count,
-                      const char* filename)
+                      const char* filename,
+                      const char* description)
 {
     ZipWriter zip(filename);
     if (!zip.ok())
@@ -274,7 +275,26 @@ bool save_3mf_indexed(const float* verts, uint32_t vert_count,
         "<model unit=\"millimeter\" xml:lang=\"en-US\" "
             "xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/"
             "2015/02\">\n"
-        " <metadata name=\"Application\">Stibium</metadata>\n"
+        " <metadata name=\"Application\">Stibium</metadata>\n");
+    /*  Provenance (Nate's peace-of-mind ask, 2026-07-20): the
+     *  exact mesher configuration rides in the file - the 3MF
+     *  core spec allows arbitrary metadata elements, and slicers
+     *  ignore names they don't know.  */
+    if (description && *description)
+    {
+        std::string esc;
+        for (const char* c = description; *c; ++c)
+            switch (*c)
+            {
+                case '&':  esc += "&amp;";  break;
+                case '<':  esc += "&lt;";   break;
+                case '>':  esc += "&gt;";   break;
+                default:   esc += *c;
+            }
+        zip.writef(" <metadata name=\"Description\">%s"
+                   "</metadata>\n", esc.c_str());
+    }
+    zip.write(
         " <resources>\n"
         "  <object id=\"1\" type=\"model\">\n"
         "   <mesh>\n"

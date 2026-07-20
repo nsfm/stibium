@@ -8992,6 +8992,10 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 "%.3f sp at (%.4f, %.4f, %.4f)\n",
                 (unsigned long long)nfinal, worst / soup.spacing,
                 wpos[0], wpos[1], wpos[2]);
+
+        dmesh_face_sweep(deck, out->verts, out->tris,
+                         soup.spacing,
+                         getenv("STIBIUM_DMESH_FACE_DUMP"));
     }
 
     /*  Quality accounting: closed 2-manifold means every edge is
@@ -10385,6 +10389,115 @@ static void repair_winding(const Deck* deck, DMesh* out)
                 "majority flips\n",
                 (unsigned long long)flipped,
                 (unsigned long long)maj_flips);
+}
+
+/*  FACE-DEVIATION sweep (Nate's metric audit, 2026-07-20): the
+ *  edge-midpoint worst-depth metric cannot see the class he
+ *  cares about - "points placed on the surface, but the
+ *  triangle formed through air or through the volume" has
+ *  on-surface edges and an off-surface INTERIOR - and it kept
+ *  improving with no visual change.  This probes every triangle
+ *  CENTROID against the tape: deviation |f|/|grad f| (sign
+ *  says dips-into-material vs roofs-through-air), reported as
+ *  AREA-WEIGHTED statistics, because the eye integrates area,
+ *  not maxima (calibrated: screws configs Nate ranked visually
+ *  separate 25x on %-area-over-bar and not at all on
+ *  worst-depth).  Shared by the export tail and the --facedev
+ *  CLI verb (offline referee for PAST meshes).  dump_path:
+ *  "x y z signed_dev_sp area_sp2" rows for heatmaps.  */
+void dmesh_face_sweep(const Deck* deck,
+                      const std::vector<float>& verts,
+                      const std::vector<uint32_t>& tris,
+                      float spacing, const char* dump_path)
+{
+    TapeCtx* ctx = tape_ctx_new(deck);
+    const size_t ntri = tris.size() / 3;
+    std::vector<float> cxs(ntri * 7), cys(ntri * 7),
+            czs(ntri * 7), harr(ntri), aarr(ntri), cv;
+    for (size_t t = 0; t < ntri; ++t)
+    {
+        const float* A2 = &verts[3*tris[3*t]];
+        const float* B2 = &verts[3*tris[3*t + 1]];
+        const float* C2 = &verts[3*tris[3*t + 2]];
+        const float gx = (A2[0] + B2[0] + C2[0]) / 3;
+        const float gy = (A2[1] + B2[1] + C2[1]) / 3;
+        const float gz = (A2[2] + B2[2] + C2[2]) / 3;
+        const float ux = B2[0]-A2[0], uy = B2[1]-A2[1],
+                uz = B2[2]-A2[2];
+        const float vx2 = C2[0]-A2[0], vy2 = C2[1]-A2[1],
+                vz2 = C2[2]-A2[2];
+        const float nx2 = uy*vz2 - uz*vy2,
+                ny2 = uz*vx2 - ux*vz2,
+                nz2 = ux*vy2 - uy*vx2;
+        aarr[t] = 0.5f * sqrtf(nx2*nx2 + ny2*ny2 + nz2*nz2);
+        /*  Probe h rides the triangle's own scale.  */
+        const float el = sqrtf(std::max(
+                ux*ux + uy*uy + uz*uz,
+                vx2*vx2 + vy2*vy2 + vz2*vz2));
+        harr[t] = std::max(el * 0.01f, 1e-4f * spacing);
+        for (int q = 0; q < 7; ++q)
+        {
+            cxs[t*7+q] = gx;
+            cys[t*7+q] = gy;
+            czs[t*7+q] = gz;
+        }
+        cxs[t*7+1] += harr[t];  cxs[t*7+2] -= harr[t];
+        cys[t*7+3] += harr[t];  cys[t*7+4] -= harr[t];
+        czs[t*7+5] += harr[t];  czs[t*7+6] -= harr[t];
+    }
+    eval_points_mt(deck, ctx, cxs, cys, czs, cv);
+    FILE* fdump = dump_path ? fopen(dump_path, "w") : nullptr;
+    double a_tot = 0, a_dev = 0, wsum = 0;
+    float fworst = 0;
+    float fwpos[3] = { 0, 0, 0 };
+    uint64_t nface = 0;
+    const float bar = 0.05f * spacing;
+    for (size_t t = 0; t < ntri; ++t)
+    {
+        const float f = cv[t*7];
+        const float h2 = 2 * harr[t];
+        const float gx2 = (cv[t*7+1]-cv[t*7+2]) / h2;
+        const float gy2 = (cv[t*7+3]-cv[t*7+4]) / h2;
+        const float gz2 = (cv[t*7+5]-cv[t*7+6]) / h2;
+        const float gl = sqrtf(gx2*gx2 + gy2*gy2 + gz2*gz2);
+        if (!(gl > 0) || !std::isfinite(f) || !(aarr[t] > 0))
+            continue;
+        const float dist = fabsf(f) / gl;
+        /*  Credibility gate, as in the edge sweep: a first-
+         *  order distance is not trustworthy past ~2 local
+         *  edge lengths.  */
+        if (dist > 200.f * harr[t])
+            continue;
+        a_tot += aarr[t];
+        wsum += double(dist) * aarr[t];
+        if (dist > bar)
+        {
+            ++nface;
+            a_dev += aarr[t];
+        }
+        if (dist > fworst)
+        {
+            fworst = dist;
+            fwpos[0] = cxs[t*7];
+            fwpos[1] = cys[t*7];
+            fwpos[2] = czs[t*7];
+        }
+        if (fdump && dist > 0.01f * spacing)
+            fprintf(fdump, "%.6g %.6g %.6g %.4f %.5f\n",
+                    cxs[t*7], cys[t*7], czs[t*7],
+                    (f < 0 ? -dist : dist) / spacing,
+                    aarr[t] / (spacing * spacing));
+    }
+    if (fdump)
+        fclose(fdump);
+    fprintf(stderr, "FACE: %llu faces over 0.05 sp (%.3f%% of "
+            "area), worst %.3f sp at (%.4f, %.4f, %.4f), "
+            "area-weighted mean %.4f sp\n",
+            (unsigned long long)nface,
+            a_tot > 0 ? 100.0 * a_dev / a_tot : 0.0,
+            fworst / spacing, fwpos[0], fwpos[1], fwpos[2],
+            a_tot > 0 ? wsum / a_tot / spacing : 0.0);
+    tape_ctx_free(ctx);
 }
 
 /*  Edge-pinch split, SEAM-CLOSURE-CONSISTENT (the "0

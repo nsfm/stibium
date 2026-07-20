@@ -231,6 +231,18 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
 bool delaunay_mesh_soup(const Deck* deck, const DSoup& soup,
                         volatile int* halt, DMesh* out);
 
+/*  Face-deviation sweep (the metric that tracks the eye,
+ *  2026-07-20): probe every triangle CENTROID against the tape
+ *  and report area-weighted deviation statistics - the referee
+ *  for "edges on the surface, interior through air/material",
+ *  which edge-midpoint metrics cannot see.  Prints the FACE
+ *  line; dump_path optionally writes per-face rows.  Shared by
+ *  the export tail and the --facedev CLI verb.  */
+void dmesh_face_sweep(const Deck* deck,
+                      const std::vector<float>& verts,
+                      const std::vector<uint32_t>& tris,
+                      float spacing, const char* dump_path);
+
 /*  Seam-closure-consistent pinch split (slicer hygiene): makes
  *  every index edge <= 2-incident by duplicating vertices per
  *  sheet (coincident copies, zero vertex motion) and midpoint-

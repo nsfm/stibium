@@ -30,6 +30,8 @@ public:
     bool runHeadless(const QString& fname, float res,
                      int detect) override;
 
+    int facedevHeadless(const QString& mesh, float res) override;
+
 protected:
     /*
      *  Simplifies the indexed mesh to within _simplify model units of

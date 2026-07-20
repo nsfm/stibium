@@ -8,6 +8,8 @@
 
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QRegularExpression>
+#include <QDateTime>
 
 #include "app/settings.h"
 #include <QMessageBox>
@@ -331,15 +333,50 @@ void ExportMeshWorker::async()
 
     progress_phase = PHASE_WRITING;
 
+    /*  Provenance metadata (Nate's peace-of-mind ask,
+     *  2026-07-20): mesher, resolution, date, and every
+     *  STIBIUM_* environment override, stamped into the export
+     *  so past meshes explain themselves.  3MF carries the full
+     *  string; STL's 80-byte header gets the short form.  */
+    QString prov = QString("mesher=%1 resolution=%2 detect=%3 "
+                           "simplify=%4 date=%5")
+            .arg(_mesher == 0 ? "stibnite" : "classic")
+            .arg(_resolution)
+            .arg(_detect_features ? 1 : 0)
+            .arg(_simplify)
+            .arg(QDateTime::currentDateTime().toString(Qt::ISODate));
+    extern char** environ;
+    for (char** e = environ; *e; ++e)
+        if (strncmp(*e, "STIBIUM_", 8) == 0)
+            prov += QString(" %1").arg(*e);
+    {
+        const QString plain =
+                QString(_stats).replace("<br>", "; ")
+                               .replace("&nbsp;", " ")
+                               .replace(QRegularExpression("<[^>]*>"),
+                                        "");
+        if (!plain.isEmpty())
+            prov += QString("; stats: %1").arg(plain);
+    }
+
     // Format follows the file extension; STL is the fallback for
     // scripted exports with unrecognized names (the legacy behavior).
     if (_filename.endsWith(".3mf", Qt::CaseInsensitive))
         save_3mf_indexed(verts.data(), verts.size() / 3,
                          indices.data(), indices.size() / 3,
-                         _filename.toStdString().c_str());
+                         _filename.toStdString().c_str(),
+                         prov.toStdString().c_str());
     else
-        save_stl_indexed(verts.data(), indices.data(), indices.size() / 3,
-                         _filename.toStdString().c_str());
+    {
+        const QString stamp = QString("Stibium stibnite r=%1 %2")
+                .arg(_resolution)
+                .arg(QDateTime::currentDateTime()
+                             .toString("yyyy-MM-dd"));
+        save_stl_indexed_stamped(verts.data(), indices.data(),
+                                 indices.size() / 3,
+                                 _filename.toStdString().c_str(),
+                                 stamp.toStdString().c_str());
+    }
     free_arrays(&r);
 }
 
@@ -382,4 +419,203 @@ void ExportMeshWorker::simplifyMesh(float deviation,
         i = remap[i];
     }
     verts = std::move(packed);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+/*  --facedev support: load an EXISTING mesh (binary STL or 3MF)
+ *  and sweep it against this worker's tape (dmesh_face_sweep) -
+ *  the offline referee that lets past exports be ranked with the
+ *  metric that tracks the eye.  */
+
+#include <zlib.h>
+
+#include "fab/tree/tape.h"
+
+static bool load_stl_mesh(const QString& path,
+                          std::vector<float>& verts,
+                          std::vector<uint32_t>& tris)
+{
+    FILE* f = fopen(path.toLocal8Bit().constData(), "rb");
+    if (!f)
+        return false;
+    char hdr[80];
+    if (fread(hdr, 1, 80, f) != 80)
+        { fclose(f); return false; }
+    uint32_t n = 0;
+    if (fread(&n, 4, 1, f) != 1)
+        { fclose(f); return false; }
+    verts.reserve(size_t(n) * 9);
+    tris.reserve(size_t(n) * 3);
+    for (uint32_t t = 0; t < n; ++t)
+    {
+        float rec[12];
+        uint16_t attr;
+        if (fread(rec, 4, 12, f) != 12 ||
+            fread(&attr, 2, 1, f) != 1)
+            { fclose(f); return false; }
+        for (int v = 0; v < 3; ++v)
+        {
+            tris.push_back(uint32_t(verts.size() / 3));
+            verts.push_back(rec[3 + v*3]);
+            verts.push_back(rec[3 + v*3 + 1]);
+            verts.push_back(rec[3 + v*3 + 2]);
+        }
+    }
+    fclose(f);
+    return true;
+}
+
+/*  Minimal central-directory zip walk + raw-deflate inflate:
+ *  enough to read the 3D/*.model entry of any spec-conforming
+ *  3MF (including our own writer's).  */
+static bool load_3mf_mesh(const QString& path,
+                          std::vector<float>& verts,
+                          std::vector<uint32_t>& tris)
+{
+    FILE* f = fopen(path.toLocal8Bit().constData(), "rb");
+    if (!f)
+        return false;
+    fseek(f, 0, SEEK_END);
+    const long fsz = ftell(f);
+    const long tail = std::min(fsz, long(65557));
+    std::vector<unsigned char> tb(tail);
+    fseek(f, fsz - tail, SEEK_SET);
+    if (fread(tb.data(), 1, tail, f) != size_t(tail))
+        { fclose(f); return false; }
+    long eocd = -1;
+    for (long i = tail - 22; i >= 0; --i)
+        if (tb[i] == 0x50 && tb[i+1] == 0x4b &&
+            tb[i+2] == 0x05 && tb[i+3] == 0x06)
+            { eocd = i; break; }
+    if (eocd < 0)
+        { fclose(f); return false; }
+    const auto rd16 = [&](long o) {
+        return uint32_t(tb[o]) | (uint32_t(tb[o+1]) << 8); };
+    const auto rd32 = [&](long o) {
+        return uint32_t(tb[o]) | (uint32_t(tb[o+1]) << 8) |
+               (uint32_t(tb[o+2]) << 16) |
+               (uint32_t(tb[o+3]) << 24); };
+    const uint32_t nent = rd16(eocd + 10);
+    uint32_t cdofs = rd32(eocd + 16);
+    std::string model;
+    for (uint32_t e = 0; e < nent; ++e)
+    {
+        unsigned char ch[46];
+        fseek(f, cdofs, SEEK_SET);
+        if (fread(ch, 1, 46, f) != 46)
+            break;
+        const auto crd16 = [&](int o) {
+            return uint32_t(ch[o]) | (uint32_t(ch[o+1]) << 8); };
+        const auto crd32 = [&](int o) {
+            return uint32_t(ch[o]) | (uint32_t(ch[o+1]) << 8) |
+                   (uint32_t(ch[o+2]) << 16) |
+                   (uint32_t(ch[o+3]) << 24); };
+        const uint32_t method = crd16(10), csz = crd32(20),
+                usz = crd32(24), nlen = crd16(28),
+                xlen = crd16(30), clen = crd16(32),
+                lofs = crd32(42);
+        std::string name(nlen, 0);
+        if (fread(name.data(), 1, nlen, f) != nlen)
+            break;
+        cdofs += 46 + nlen + xlen + clen;
+        if (name.size() < 6 ||
+            name.compare(name.size() - 6, 6, ".model") != 0)
+            continue;
+        /*  Local header: skip its (possibly different) name/extra
+         *  lengths.  */
+        unsigned char lh[30];
+        fseek(f, lofs, SEEK_SET);
+        if (fread(lh, 1, 30, f) != 30)
+            break;
+        const uint32_t lnlen = uint32_t(lh[26]) |
+                (uint32_t(lh[27]) << 8);
+        const uint32_t lxlen = uint32_t(lh[28]) |
+                (uint32_t(lh[29]) << 8);
+        fseek(f, lofs + 30 + lnlen + lxlen, SEEK_SET);
+        std::vector<unsigned char> cbuf(csz);
+        if (fread(cbuf.data(), 1, csz, f) != csz)
+            break;
+        model.resize(usz);
+        if (method == 0)
+            model.assign(cbuf.begin(), cbuf.end());
+        else if (method == 8)
+        {
+            z_stream st = {};
+            if (inflateInit2(&st, -MAX_WBITS) != Z_OK)
+                break;
+            st.next_in = cbuf.data();
+            st.avail_in = csz;
+            st.next_out =
+                    reinterpret_cast<unsigned char*>(&model[0]);
+            st.avail_out = usz;
+            const int zr = inflate(&st, Z_FINISH);
+            inflateEnd(&st);
+            if (zr != Z_STREAM_END)
+                model.clear();
+        }
+        break;
+    }
+    fclose(f);
+    if (model.empty())
+        return false;
+    /*  Light scan of the model XML: vertices in document order,
+     *  triangles by index (matching our writer and the spec).  */
+    const char* p = model.c_str();
+    while ((p = strstr(p, "<vertex ")))
+    {
+        const char* px = strstr(p, "x=\"");
+        const char* py = strstr(p, "y=\"");
+        const char* pz = strstr(p, "z=\"");
+        if (!px || !py || !pz)
+            break;
+        verts.push_back(strtof(px + 3, nullptr));
+        verts.push_back(strtof(py + 3, nullptr));
+        verts.push_back(strtof(pz + 3, nullptr));
+        p += 8;
+    }
+    p = model.c_str();
+    while ((p = strstr(p, "<triangle ")))
+    {
+        const char* v1 = strstr(p, "v1=\"");
+        const char* v2 = strstr(p, "v2=\"");
+        const char* v3 = strstr(p, "v3=\"");
+        if (!v1 || !v2 || !v3)
+            break;
+        tris.push_back(uint32_t(strtoul(v1 + 4, nullptr, 10)));
+        tris.push_back(uint32_t(strtoul(v2 + 4, nullptr, 10)));
+        tris.push_back(uint32_t(strtoul(v3 + 4, nullptr, 10)));
+        p += 10;
+    }
+    return !verts.empty() && !tris.empty();
+}
+
+int ExportMeshWorker::facedevHeadless(const QString& mesh,
+                                      float res)
+{
+    const float r2 = res > 0 ? res : resolution;
+    if (r2 <= 0)
+    {
+        fprintf(stderr, "facedev: no resolution (pass "
+                        "--resolution R)\n");
+        return 1;
+    }
+    std::vector<float> mverts;
+    std::vector<uint32_t> mtris;
+    const bool ok = mesh.endsWith(".3mf", Qt::CaseInsensitive)
+            ? load_3mf_mesh(mesh, mverts, mtris)
+            : load_stl_mesh(mesh, mverts, mtris);
+    if (!ok)
+    {
+        fprintf(stderr, "facedev: could not read %s\n",
+                mesh.toLocal8Bit().constData());
+        return 1;
+    }
+    fprintf(stderr, "facedev: %zu tris from %s\n",
+            mtris.size() / 3, mesh.toLocal8Bit().constData());
+    Deck* deck = deck_from_tree(shape.tree.get());
+    dmesh_face_sweep(deck, mverts, mtris, 1.f / r2,
+                     getenv("STIBIUM_DMESH_FACE_DUMP"));
+    deck_free(deck);
+    return 0;
 }

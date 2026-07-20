@@ -14,6 +14,7 @@
  */
 bool save_3mf_indexed(const float* verts, uint32_t vert_count,
                       const uint32_t* indices, uint32_t tri_count,
-                      const char* filename);
+                      const char* filename,
+                      const char* description = nullptr);
 
 #endif
