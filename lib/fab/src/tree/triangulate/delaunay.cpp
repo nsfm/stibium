@@ -785,9 +785,13 @@ void sample_block(Collector& c, const Region& r, Tape* tape,
                 }
                 if (neg && pos)
                     continue;            // sign change: real surface
-                if (pos)
+                static const bool no_air =
+                        getenv("STIBIUM_DMESH_NO_AIR_GRAZE");
+                static const bool no_solid =
+                        getenv("STIBIUM_DMESH_NO_SOLID_GRAZE");
+                if (pos && !no_air)
                     graze[zc[i]] = 1;    // air graze
-                else if (neg)
+                else if (neg && !no_solid)
                     graze[zc[i]] = 2;    // solid graze
                 /*  all-zero (neither): a genuine zero volume; keep.  */
                 static const char* gp_env =
@@ -808,6 +812,78 @@ void sample_block(Collector& c, const Region& r, Tape* tape,
                                                   : "solid",
                                 xs[zc[i]], ys[zc[i]],
                                 zs[zc[i]]);
+                }
+            }
+
+            /*  Corner-support keep (the cylinder-groove regression,
+             *  2026-07-20): a SOLID graze demoted to INSIDE erases
+             *  the zero-sheet's sign-change edges.  Where the sheet
+             *  backs a THIN wall (the screws base plate: its top
+             *  plane reads zero, the plate is ~0.7 cell thick, and
+             *  keeping the top as a surface vertex craters the slab)
+             *  the demotion is correct.  But where the sheet is the
+             *  coplanar EXTENSION of a real wall into a THICK solid
+             *  body at a CONCAVE floor/wall corner (the cylinder
+             *  groove's inside corner: the z=9 plane runs from the
+             *  floor r=8.5 inward through the solid core), the
+             *  inside-flip pulls the witnesses out from under the
+             *  corner and the CCDT roofs the concave floor through
+             *  air (0.177 sp, only at the crowded gaps).  Both are
+             *  wide tangent sheets spanning their whole cross-
+             *  section - width does not separate them, and neither
+             *  does raw proximity to air: the groove corner has air
+             *  one cell off DIAGONALLY (out past the floor AND up
+             *  into the groove), and so does the base-plate rim
+             *  (out past the shaft AND up over the plate), so a
+             *  26-direction reach keeps both and re-craters the
+             *  plate.  The SHEET NORMAL separates them cleanly.  The
+             *  sheets are axis planes (only axis-aligned model faces
+             *  read f==0 bit-exactly), so march the 3 AXES: a thin
+             *  wall shows AIR within a cell straight along the
+             *  normal (screws: -z through the 0.17 plate); a concave
+             *  corner in thick solid shows only solid on every axis
+             *  (its air is purely diagonal - the radial axis stays
+             *  ON the coplanar wall at f==0, the normal axis stays
+             *  in solid).  Demote when an axis reaches air (thin
+             *  wall); otherwise un-demote to the pre-demotion state
+             *  (on_surface, zero==outside), keeping the corner's
+             *  sign-change edges.  STIBIUM_DMESH_GRAZE_KEEP_R sets
+             *  the axis reach in cells; 0 reverts to unconditional
+             *  demotion.  */
+            const float pitch = r.ni ? (r.X[1] - r.X[0]) : c.spacing;
+            static const char* kr_env =
+                    getenv("STIBIUM_DMESH_GRAZE_KEEP_R");
+            const float keep_r = kr_env ? atof(kr_env) : 2.f;
+            if (keep_r > 0 && pitch > 0)
+            {
+                static const int ax[6][3] = {
+                    {1,0,0},{-1,0,0},{0,1,0},
+                    {0,-1,0},{0,0,1},{0,0,-1} };
+                std::vector<size_t> sc;
+                for (const size_t p : zc)
+                    if (graze[p] == 2)
+                        sc.push_back(p);
+                if (!sc.empty())
+                {
+                    const float R = keep_r * pitch;
+                    px.clear(); py.clear(); pz.clear();
+                    for (const size_t p : sc)
+                        for (int q = 0; q < 6; ++q)
+                        {
+                            px.push_back(xs[p] + ax[q][0] * R);
+                            py.push_back(ys[p] + ax[q][1] * R);
+                            pz.push_back(zs[p] + ax[q][2] * R);
+                        }
+                    eval_points(tape, c.ctx, px, py, pz, pv);
+                    for (size_t i = 0; i < sc.size(); ++i)
+                    {
+                        bool axis_air = false;
+                        for (int q = 0; q < 6; ++q)
+                            if (pv[i*6 + q] > 0)
+                                axis_air = true;
+                        if (!axis_air)
+                            graze[sc[i]] = 0;   // corner support
+                    }
                 }
             }
         }
