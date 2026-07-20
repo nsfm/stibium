@@ -131,6 +131,46 @@ the predicted follow-up dividend, deviation accepted).
 Rescue counters print under SEG_DEBUG.  REMAINING on the
 focus models: ONLY the three socket-rim spikes (hunt #2).
 
+## FOCUS-BENCH ENDGAME (2026-07-20 late - four fixes, one residue)
+
+The dense-detail campaign closed FOUR mechanisms in one day, each
+with its own commit and referee battery: seed poaching (04531b9a),
+twin-corner rescue (228c9d82), tangent-graze demotion (3d8d7607),
+deterministic razor tie-break (fdec9167).  BENCH STATE: flat
+ladder VERDICT PASS (all corners EXACT, zero tilted/chips/airs -
+Nate: visually 100%); cylinder ladder flat at every gap; screws
+FACE 0.000% over bar / tilt 1.91%/0.438 / repairs 12 / snapped 0
+/ 0 open / 0 nm (Nate: "stunning... above 99%").  Suite green
+throughout.
+
+ONE RESIDUE, FULLY MAPPED (the ~4-tri underside dimple at
+(6.92, -16.5, 64.2), worst 0.025 sp, Nate-visible): an
+OFF-SURFACE RIDER - a neighbouring clause pair's curve runs
+~0.009 sp inside the trim margin (0.0125 at stride 0.125) below
+the true underside edge, traces FIRST by clause order, and
+consumes the seeds; the exact plane-pair that owns the edge
+never traces.  The poaching pattern BELOW the dup radius: two
+curves 0.01 apart cannot be separated by the 0.1 sp identity
+story.  FIX DIRECTIONS for a fresh session (touches the
+tracer's oldest invariants - do not rush): (a) absolute fdist
+cap ~2-5e-3 sp on accepted march points (csg's measured real-
+crease convergence is 1.9e-3; the stride-scaled trim admits
+riders in dense bands), (b) surface-distance priority in curve
+competition (prefer the pair whose curve has smaller fdist when
+curves collide within the dup radius).  Evidence anchors: chain
+segs at z=64.240021 (FPROBE: f=0.036 there, |g|~4), the dip
+vertex (6.8577, -16.5, 64.2006), site improved 0.069 -> 0.025
+by graze demotion.  Eye-calibration note: Nate SEES coherent
+0.025 sp dimples on flat ground - FACE may want an area-
+coherence term (cluster of shallow same-sign faces), not a
+lower bar.
+
+NEXT after the rider: bino + full zeiss generalization sweep
+(all four fixes are model-agnostic; expect the dense-detail
+class to shrink everywhere), then NATE'S TEXT GAUNTLET
+(engraved text on flat + cylindrical surfaces - the graduation
+exam).
+
 ## CURRENT STATE (2026-07-20, post metric-audit)
 
 THE RANKING METRIC IS NOW FACE (area-weighted centroid
