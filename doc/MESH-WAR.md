@@ -54,17 +54,38 @@ tools/ in-repo.  Reviews: doc/reviews/2026-07-17-*.md
 Knob roster: ~26 STIBIUM_DMESH_* - defaults are all measured-in;
 see the architecture review for the product/frozen/dead tiers.
 
-## CURRENT STATE (2026-07-20)
+## CURRENT STATE (2026-07-20, post metric-audit)
 
-Best zeiss: crowd3-2sig (1.02M tris / 0 open / WORST 0.217 -
-the (4.15, 15.94, 89.01) site that survived every campaign
-since autod32 finally moved / 26.5 min / 6.99 GB).  The MAX=3
-REFEREE ROUND IS SETTLED - see LEVEL-3 CROWDING GRANT below;
-level 3 ships default-on through the TWO-SIGNAL rule (extreme
-crowding AND residual heat), never blanket.  Screws tilt 4.03
--> 3.04% of area (Nate: base "hideous", all level-3 variants
-identical); bino: Nate-verified improvement (chip removal at
-sharp edges, air-chords reduced).
+THE RANKING METRIC IS NOW FACE (area-weighted centroid
+deviation, dmesh_face_sweep + the --facedev CLI verb): Nate's
+audit caught worst-depth improving with no visual change -
+it is an L-infinity EDGE-midpoint statistic, blind to
+triangles whose edges hug the surface while their INTERIOR
+spans air/material.  FACE is calibrated against his verdicts
+(screws base "hideous" = 0.612% of area deviant vs grant
+"clean" = 0.024% - a 25x separation worst-depth scored a tie).
+Worst-depth remains the REPAIR referee only.  --facedev sweeps
+any past STL/3MF against the tape; every 3MF now carries
+provenance metadata (config + env + stats), STLs a header
+stamp.
+
+DEFAULT ZEISS (the shipping config): 577K tris / 0 open /
+worst 0.217 / FACE 0.022% deviant / 14.7 min / 3.87 GB -
+statistically EQUAL on FACE to the 1.03M grant build (0.020%)
+at 56% of the mass; Nate's slicer bar (prusa complains at 1M)
+and his "600k at 99% is the right move" verdict decided the
+default.  CROWD_MAX=3 is the documented DETAIL DIAL (screws-
+class FACE 0.233 -> 0.024%, eye-visible) for part-scale
+exports.  Hidden-cell witnesses stay DEFAULT ON: ~free on
+zeiss (577K vs 582K), the screws depth cure, and on bino
+their 2.2x mass buys the improvement Nate's eyes verified
+(chip removal, air-chords reduced; FACE 0.044 -> 0.038%,
+mean 0.0009 -> 0.0006 sp; the mass is real thin-wall sheets
+resolving - a worthiness discriminator for sub-pitch walls is
+an open question).  NEXT BOSS (found by FACE, invisible to
+the old metric): the shared worst face at (-5.26, 53.5, 68.0),
+0.39 sp, IDENTICAL in curve_r1 and night_r1 - resolution-
+immune, class unknown.
 
 (2026-07-18 state, kept for context:) autod31 was 727K / 0
 open / 0.465* / 42 min pre-femto-guard.
