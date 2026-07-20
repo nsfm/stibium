@@ -154,6 +154,10 @@ struct Collector
      *  boxes for the STL dump.  */
     uint64_t hidden_feature = 0, hidden_graze = 0;
     uint64_t hidden_contact = 0;     // reach-collapse markers
+    /*  Hidden-CELL witnesses (campaign 3/3): certified thin
+     *  cells inside mixed leaves + proof-carrying bisection
+     *  segments minted from them.  */
+    uint64_t hidden_cell_feat = 0, hidden_cell_wit = 0;
     std::vector<std::array<float, 6>> hidden_feat_boxes;
     std::vector<std::array<float, 6>> hidden_graze_boxes;
     std::vector<std::array<float, 6>> hidden_contact_boxes;
@@ -489,7 +493,9 @@ bool autodense();
 static bool certify_hidden(const Tape* sub, TapeCtx* ctx,
                            const float lo[3], const float hi[3],
                            float pitch, bool lat_inside,
-                           bool* contact)
+                           bool* contact,
+                           std::vector<std::array<float, 3>>*
+                                   proven = nullptr)
 {
     struct HB { float lo[3], hi[3]; };
     std::vector<HB> work;
@@ -499,6 +505,7 @@ static bool certify_hidden(const Tape* sub, TapeCtx* ctx,
      *  an opposite-sign proof never arrived, and unbounded
      *  digging in a tangency shell buys nothing.  */
     size_t budget = 4096;
+    bool found = false;
     Interval Xs[TAPE_BATCH], Ys[TAPE_BATCH], Zs[TAPE_BATCH],
              out[TAPE_BATCH];
     while (!work.empty())
@@ -517,16 +524,42 @@ static bool certify_hidden(const Tape* sub, TapeCtx* ctx,
         tape_eval_i_batch(sub, ctx, Xs, Ys, Zs, out, n);
         for (int i = 0; i < n; ++i)
         {
+            /*  With a proven-box collector the search continues
+             *  past the first proof (cap 4): the collector's
+             *  centers seed proof-carrying WITNESS bisections -
+             *  see the hidden-cell pass.  */
             if (out[i].lower > 0)       /* proven AIR */
             {
                 if (lat_inside)
-                    return true;        /* opposite sign: FEATURE */
+                {
+                    if (!proven)
+                        return true;    /* opposite sign: FEATURE */
+                    found = true;
+                    const HB& b = batch[i];
+                    proven->push_back({
+                            0.5f * (b.lo[0] + b.hi[0]),
+                            0.5f * (b.lo[1] + b.hi[1]),
+                            0.5f * (b.lo[2] + b.hi[2]) });
+                    if (proven->size() >= 4)
+                        return true;
+                }
                 continue;
             }
             if (out[i].upper < 0)       /* proven MATERIAL */
             {
                 if (!lat_inside)
-                    return true;        /* opposite sign: FEATURE */
+                {
+                    if (!proven)
+                        return true;    /* opposite sign: FEATURE */
+                    found = true;
+                    const HB& b = batch[i];
+                    proven->push_back({
+                            0.5f * (b.lo[0] + b.hi[0]),
+                            0.5f * (b.lo[1] + b.hi[1]),
+                            0.5f * (b.lo[2] + b.hi[2]) });
+                    if (proven->size() >= 4)
+                        return true;
+                }
                 continue;
             }
             const HB& b = batch[i];
@@ -551,7 +584,8 @@ static bool certify_hidden(const Tape* sub, TapeCtx* ctx,
             }
         }
     }
-    return false;              /* no opposite-sign volume: EMPTY */
+    return found;      /* (collector mode: any proof counts)
+                          no opposite-sign volume: EMPTY  */
 }
 
 void sample_block(Collector& c, const Region& r, Tape* tape,
@@ -876,6 +910,164 @@ void sample_block(Collector& c, const Region& r, Tape* tape,
                       : c.hidden_graze_boxes).push_back(
                         { blo[0], blo[1], blo[2],
                           bhi[0], bhi[1], bhi[2] });
+        }
+    }
+
+    /*  HIDDEN-CELL WITNESSES (density campaign 3 of 3, the
+     *  dense-details autopsy 2026-07-20): sub-lattice-thin
+     *  material hides INSIDE mixed leaves too - the screws head
+     *  rim reads 136/136 lattice points OUT across its whole
+     *  band even at level 3 (thickness < the local pitch), so
+     *  the leaf-level hidden branch (which needs an all-quiet
+     *  leaf) never sees it, and the surface there hangs from law
+     *  chains alone: the chips-and-air-chords-where-details-
+     *  crowd class.  The lattice cannot see the material, but
+     *  the INTERVAL can prove it: for sign-unanimous cells near
+     *  crossing cells (2-cell shell - the thin band always
+     *  borders visible surface), certify with the subdivision
+     *  oracle, COLLECTING proven opposite-sign sub-boxes; each
+     *  proven center paired with a cell corner is a guaranteed
+     *  sign-change segment, and the ordinary bisection queue
+     *  turns those into exact surface witnesses.  Proof-carrying
+     *  witnesses: never minted on grazes (the certify verdict
+     *  rule), never guessed.  STIBIUM_DMESH_HIDDEN_CELLS=0
+     *  disables.  Pass-2 dense leaves only (level >= 2): the
+     *  class lives where density was already granted and the
+     *  fine pitch makes the certify floor (pitch/8) deep.  */
+    {
+        static const char* hcw_env =
+                getenv("STIBIUM_DMESH_HIDDEN_CELLS");
+        const int hcw = hcw_env ? atoi(hcw_env) : 1;
+        int dlevel = 0;
+        if (hcw && c.dense_map)
+        {
+            const auto dit = c.dense_map->find(leaf_key);
+            if (dit != c.dense_map->end())
+                dlevel = dit->second;
+        }
+        if (hcw && dlevel >= 2 && (any_in || any_out))
+        {
+            const uint32_t mi = ni, mj = nj, mk = nk;
+            const auto cidx = [&](uint32_t i, uint32_t j,
+                                  uint32_t k) {
+                return (size_t(k) * mj + j) * mi + i;
+            };
+            /*  Cell classes: mixed (some corner signs differ)
+             *  vs unanimous; then a 2-cell dilation of mixed.  */
+            std::vector<uint8_t> mixed(size_t(mi) * mj * mk, 0);
+            for (uint32_t k = 0; k < mk; ++k)
+                for (uint32_t j = 0; j < mj; ++j)
+                    for (uint32_t i = 0; i < mi; ++i)
+                    {
+                        const bool s0 = inside(idx(i, j, k));
+                        bool mix = false;
+                        for (int o = 1; o < 8 && !mix; ++o)
+                            mix = inside(idx(i + (o & 1),
+                                             j + ((o >> 1) & 1),
+                                             k + (o >> 2)))
+                                  != s0;
+                        mixed[cidx(i, j, k)] = mix;
+                    }
+            std::vector<std::array<uint32_t, 3>> shell;
+            for (uint32_t k = 0; k < mk; ++k)
+                for (uint32_t j = 0; j < mj; ++j)
+                    for (uint32_t i = 0; i < mi; ++i)
+                    {
+                        if (mixed[cidx(i, j, k)])
+                            continue;
+                        bool near = false;
+                        for (int dk2 = -2; dk2 <= 2 && !near;
+                             ++dk2)
+                            for (int dj2 = -2; dj2 <= 2 && !near;
+                                 ++dj2)
+                                for (int di2 = -2;
+                                     di2 <= 2 && !near; ++di2)
+                                {
+                                    const int qi = int(i) + di2,
+                                            qj = int(j) + dj2,
+                                            qk = int(k) + dk2;
+                                    if (qi < 0 || qj < 0 ||
+                                        qk < 0 ||
+                                        qi >= int(mi) ||
+                                        qj >= int(mj) ||
+                                        qk >= int(mk))
+                                        continue;
+                                    near = mixed[cidx(qi, qj,
+                                                      qk)];
+                                }
+                        if (near)
+                            shell.push_back({ i, j, k });
+                    }
+            /*  Batch-interval the shell; certify straddlers.  */
+            Interval bXs[TAPE_BATCH], bYs[TAPE_BATCH],
+                     bZs[TAPE_BATCH], bout[TAPE_BATCH];
+            for (size_t s0 = 0; s0 < shell.size();
+                 s0 += TAPE_BATCH)
+            {
+                const int n2 = int(std::min(
+                        shell.size() - s0, size_t(TAPE_BATCH)));
+                for (int q = 0; q < n2; ++q)
+                {
+                    const auto& s = shell[s0 + q];
+                    bXs[q] = { xs[idx(s[0], s[1], s[2])],
+                               xs[idx(s[0] + 1, s[1], s[2])] };
+                    bYs[q] = { ys[idx(s[0], s[1], s[2])],
+                               ys[idx(s[0], s[1] + 1, s[2])] };
+                    bZs[q] = { zs[idx(s[0], s[1], s[2])],
+                               zs[idx(s[0], s[1], s[2] + 1)] };
+                }
+                tape_eval_i_batch(tape, c.ctx, bXs, bYs, bZs,
+                                  bout, n2);
+                for (int q = 0; q < n2; ++q)
+                {
+                    if (!(bout[q].lower < 0 &&
+                          bout[q].upper > 0))
+                        continue;
+                    const auto& s = shell[s0 + q];
+                    const float clo[3] = { bXs[q].lower,
+                                           bYs[q].lower,
+                                           bZs[q].lower };
+                    const float chi[3] = { bXs[q].upper,
+                                           bYs[q].upper,
+                                           bZs[q].upper };
+                    const bool cin =
+                            inside(idx(s[0], s[1], s[2]));
+                    /*  MATERIAL ONLY (bino referee, 2026-07-20:
+                     *  the symmetric version minted 127K
+                     *  bisections and dragged worst 0.091 ->
+                     *  0.372): a proven-air cell inside solid is
+                     *  a near-tangent assembly GAP - the class
+                     *  the clearance weld fuses on purpose
+                     *  (sheet-separation verdict: pinches are
+                     *  thin air; resolving them mints the
+                     *  pinches back).  Hidden MATERIAL in air is
+                     *  the rim/thin-wall class witnesses cure.  */
+                    if (cin)
+                        continue;
+                    bool contact2 = false;
+                    std::vector<std::array<float, 3>> proven;
+                    if (!certify_hidden(tape, c.ctx, clo, chi,
+                                        chi[0] - clo[0], cin,
+                                        &contact2, &proven) ||
+                        proven.empty())
+                        continue;
+                    ++c.hidden_cell_feat;
+                    /*  Four tetrahedral corners: spread the
+                     *  bisection directions around each proof.  */
+                    static const int TC[4] = { 0, 3, 5, 6 };
+                    for (const auto& P : proven)
+                        for (const int o : TC)
+                        {
+                            const uint32_t pi = s[0] + (o & 1),
+                                    pj = s[1] + ((o >> 1) & 1),
+                                    pk = s[2] + (o >> 2);
+                            const size_t cp = idx(pi, pj, pk);
+                            c.add_edge(P[0], P[1], P[2], !cin,
+                                       xs[cp], ys[cp], zs[cp]);
+                            ++c.hidden_cell_wit;
+                        }
+                }
+            }
         }
     }
 
@@ -1559,6 +1751,39 @@ void descend(Collector& c, const Region& r, Tape* tape)
                     { r.X[0], r.Y[0], r.Z[0] },
                     { r.X[r.ni], r.Y[r.nj], r.Z[r.nk] },
                     0, 1.f, HUGE_VALF };
+            /*  Chainless-curvature trigger, SMOOTH branch (the
+             *  V-quilt autopsy, 2026-07-20): the trigger built
+             *  for "curved walls carry random level-0 holes"
+             *  only probed crease-suspect leaves - but a tilted
+             *  cylinder wall is a live = 0 SMOOTH expanse, and
+             *  its interior leaves are beyond the smooth-fill's
+             *  reach too (the fill needs >= 3 touching promoted
+             *  CREASE leaves; a big smooth region's interior
+             *  touches none - measured at (-3.775, 32.14,
+             *  40.98): 9 leaves, all smooth, 7 at level 0, the
+             *  quilted V exactly).  Same probe, same band, same
+             *  magnitude ladder as the crease branch;
+             *  leaf_curve_theta already refuses leaves whose
+             *  surface is out of reach.  */
+            if (curve_bar_deg() > 0)
+            {
+                ++c.curve_seen;
+                float th = 0;
+                if (leaf_curve_theta(c, r, &th))
+                {
+                    ++c.curve_cross;
+                    c.curve_theta_max =
+                            std::max(c.curve_theta_max, th);
+                    if (th > curve_bar_deg() && th < 25.f)
+                    {
+                        const int want2 =
+                                th > 2 * curve_bar_deg() ? 2 : 1;
+                        int& lv = c.want_dense[key];
+                        lv = std::max(lv, want2);
+                        ++c.curve_flagged;
+                    }
+                }
+            }
         }
 
         /*  Crease-band density: the push rewrites every DECIDED
@@ -3621,6 +3846,8 @@ static void merge_collector(Collector& c, Collector& w)
     c.hidden_feature += w.hidden_feature;
     c.hidden_graze += w.hidden_graze;
     c.hidden_contact += w.hidden_contact;
+    c.hidden_cell_feat += w.hidden_cell_feat;
+    c.hidden_cell_wit += w.hidden_cell_wit;
     for (const auto& b : w.hidden_feat_boxes)
         c.hidden_feat_boxes.push_back(b);
     for (const auto& b : w.hidden_graze_boxes)
@@ -3801,9 +4028,10 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
      *  (STIBIUM_DMESH_DUMP_HIDDEN=prefix ->
      *  prefix_feature.stl / prefix_graze.stl).  */
     if ((c.hidden_feature || c.hidden_graze ||
-         c.hidden_contact) &&
+         c.hidden_contact || c.hidden_cell_feat) &&
         (census.on || getenv("STIBIUM_DMESH_TIME") ||
          getenv("STIBIUM_DMESH_CHIP_DEBUG")))
+    {
         fprintf(stderr, "HIDDEN: %llu candidates -> %llu "
                 "certified features, %llu contact (reach-"
                 "collapse), %llu proven grazes\n",
@@ -3811,6 +4039,13 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
                 (unsigned long long)c.hidden_feature,
                 (unsigned long long)c.hidden_contact,
                 (unsigned long long)c.hidden_graze);
+        if (c.hidden_cell_feat)
+            fprintf(stderr, "HIDDEN cells: %llu thin cells "
+                    "certified in mixed leaves, %llu witness "
+                    "bisections minted\n",
+                    (unsigned long long)c.hidden_cell_feat,
+                    (unsigned long long)c.hidden_cell_wit);
+    }
     if (const char* hp = getenv("STIBIUM_DMESH_DUMP_HIDDEN"))
     {
         const auto wboxes = [](const std::string& path,
@@ -4155,6 +4390,13 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
                     "%zu kept\n",
                     (unsigned long long)c2.soup.thinned,
                     c2.soup.samples.size());
+        if (c2.hidden_cell_feat &&
+            (dbg || getenv("STIBIUM_DMESH_CHIP_DEBUG")))
+            fprintf(stderr, "HIDDEN cells: %llu thin cells "
+                    "certified in mixed leaves, %llu witness "
+                    "bisections minted\n",
+                    (unsigned long long)c2.hidden_cell_feat,
+                    (unsigned long long)c2.hidden_cell_wit);
         if (dbg && !c2.want_dense.empty())
             fprintf(stderr, "AUTOD residue: %zu leaves still hot "
                     "after drill-down\n", c2.want_dense.size());
@@ -5846,6 +6088,14 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
      *  first.  */
     std::vector<std::pair<TPoint, size_t>> sorder;
     sorder.reserve(soup.surface.size());
+    /*  Corridor-drop autopsy (STIBIUM_DMESH_DROP_PROBE=
+     *  "x,y,z,r"): count survivors vs drops near a site - the
+     *  witness-starvation instrument (dense-details class).  */
+    static const char* dp_env = getenv("STIBIUM_DMESH_DROP_PROBE");
+    float dpx = 0, dpy = 0, dpz = 0, dpr = 0;
+    size_t dp_kept = 0, dp_drop = 0;
+    if (dp_env)
+        sscanf(dp_env, "%f,%f,%f,%f", &dpx, &dpy, &dpz, &dpr);
     for (size_t si = 0; si < soup.surface.size(); ++si)
     {
         const DSurfPoint& s = soup.surface[si];
@@ -5853,11 +6103,29 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
          *  with the constrained polyline and pair into pinch
          *  slivers - drop them, EXCEPT the chain members
          *  themselves.  */
+        const bool probed = dp_env &&
+                fabsf(s.x - dpx) < dpr &&
+                fabsf(s.y - dpy) < dpr &&
+                fabsf(s.z - dpz) < dpr;
         if (!cseg.empty() && !chain_used.count(uint32_t(si)) &&
             in_corridor(s.x, s.y, s.z))
+        {
+            if (probed)
+                ++dp_drop;
             continue;
+        }
+        if (probed)
+        {
+            ++dp_kept;
+            fprintf(stderr, "DPKEEP %.5g %.5g %.5g\n",
+                    s.x, s.y, s.z);
+        }
         sorder.push_back({ TPoint(s.x, s.y, s.z), si });
     }
+    if (dp_env)
+        fprintf(stderr, "DROP_PROBE (%.3f,%.3f,%.3f r%.2f): "
+                "%zu kept, %zu corridor-dropped\n",
+                dpx, dpy, dpz, dpr, dp_kept, dp_drop);
     {
         using PMap = CGAL::First_of_pair_property_map<
                 std::pair<TPoint, size_t>>;
@@ -8677,6 +8945,16 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         float worst = 0;
         float wpos[3] = { 0, 0, 0 };
         uint64_t nfinal = 0;
+        /*  Site dump (STIBIUM_DMESH_CHIP_DUMP=path): every
+         *  defective edge midpoint, BOTH signs - chips (edge
+         *  under the surface, f < 0) AND air-chords (edge in
+         *  air, f > 0) - "x y z signed_depth_sp len_sp" rows.
+         *  The localization instrument for the densely-packed-
+         *  details class (defects cluster where features crowd;
+         *  the dump is what turns "abounds" into coordinates).  */
+        FILE* cdump = nullptr;
+        if (const char* cd = getenv("STIBIUM_DMESH_CHIP_DUMP"))
+            cdump = fopen(cd, "w");
         for (size_t i = 0; i < fxs.size(); ++i)
         {
             const float f = fv[i*7];
@@ -8685,12 +8963,19 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             const float gy = (fv[i*7+3]-fv[i*7+4]) / h2;
             const float gz = (fv[i*7+5]-fv[i*7+6]) / h2;
             const float gl = sqrtf(gx*gx + gy*gy + gz*gz);
-            if (!(gl > 0) || !std::isfinite(f) || f >= 0)
+            if (!(gl > 0) || !std::isfinite(f))
                 continue;
             const float dist = fabsf(f) / gl;
             if (dist > 2.0f * flen[i])
                 continue;   // gradient not credible (see repair gate)
             if (dist <= flen[i] * 0.03f)
+                continue;
+            if (cdump)
+                fprintf(cdump, "%.6g %.6g %.6g %.4f %.3f\n",
+                        fxs[i], fys[i], fzs[i],
+                        (f < 0 ? -dist : dist) / soup.spacing,
+                        flen[i] / soup.spacing);
+            if (f >= 0)
                 continue;
             ++nfinal;
             if (dist > worst)
@@ -8701,6 +8986,8 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 wpos[2] = fzs[i];
             }
         }
+        if (cdump)
+            fclose(cdump);
         fprintf(stderr, "FINAL mesh: %llu chip edges, worst depth "
                 "%.3f sp at (%.4f, %.4f, %.4f)\n",
                 (unsigned long long)nfinal, worst / soup.spacing,
