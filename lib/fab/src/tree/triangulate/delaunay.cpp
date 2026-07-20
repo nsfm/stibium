@@ -1198,21 +1198,25 @@ int autod_max_level()
     return lv < 1 ? 1 : std::min(lv, 8);
 }
 
-/*  Crowding-grant ceiling (STIBIUM_DMESH_CROWD_MAX, default 3):
- *  the MAX=3 referee round (2026-07-19) split the verdict by
- *  TRIGGER - blanket level 3 wrecks organic models through the
- *  residual formula (bino: 1,555 of 1,665 leaves @3, worst
- *  0.093 -> 0.372, nm 6.4x) while the extreme-crowding grant is
- *  exactly the screws-class cure (26 leaves @3: tilt 4.03 ->
- *  3.04% of area, weighted tilt 0.947 -> 0.692 deg, worst
- *  held).  So the ceilings are SEPARATE: the residual formula
- *  stays behind AUTODENSE_MAX (default 2), and only live-pair
- *  crowding (>= 4x the bar) may take level 3.  */
+/*  Crowding-grant ceiling (STIBIUM_DMESH_CROWD_MAX, default 2 =
+ *  grant OFF; 3 = the DETAIL DIAL): the MAX=3 referee round
+ *  (2026-07-19) split the verdict by TRIGGER - blanket level 3
+ *  wrecks organic models through the residual formula (bino:
+ *  worst 0.093 -> 0.372) while the extreme-crowding+residual
+ *  two-signal grant is exactly the screws-class cure (FACE
+ *  0.233% -> 0.024% of area deviant, tilt 4.03 -> 3.04%, eye
+ *  referee: base "hideous", grant "clean").  DEFAULT verdict
+ *  (Nate + the FACE A/B, 2026-07-20): at ASSEMBLY scale the
+ *  grant spends ~2x triangles/RAM/wall for a statistically
+ *  invisible model-wide gain (zeiss 1.03M @ 0.020% deviant vs
+ *  577K @ 0.022% without it; slicers complain at 1M), so the
+ *  default stays 2 and CROWD_MAX=3 is the dial for part-scale
+ *  exports where dense details dominate.  The residual formula
+ *  stays behind AUTODENSE_MAX (default 2) regardless.  */
 int crowd_max_level()
 {
     const char* env = getenv("STIBIUM_DMESH_CROWD_MAX");
-    const int lv = env ? atoi(env)
-                       : std::max(3, autod_max_level());
+    const int lv = env ? atoi(env) : autod_max_level();
     return lv < 1 ? 1 : std::min(lv, 8);
 }
 
