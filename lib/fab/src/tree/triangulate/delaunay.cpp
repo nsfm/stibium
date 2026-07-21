@@ -6324,6 +6324,15 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
      *  Junction corners still drop: there the two chains' closest
      *  points coincide at the shared corner, so the foot points
      *  sit within the radius of each other.  */
+    /*  STIBIUM_DMESH_STEP=0 reverts the sub-cell twin-rail drop.  */
+    static const char* step_env = getenv("STIBIUM_DMESH_STEP");
+    const bool step_drop = !step_env || atoi(step_env) != 0;
+    static const char* stepw_env = getenv("STIBIUM_DMESH_STEPW");
+    const float step_wide = (stepw_env ? float(atof(stepw_env)) : 0.19f)
+                            * soup.spacing;
+    static const char* stepbar_env = getenv("STIBIUM_DMESH_STEPBAR");
+    const float step_bar = (stepbar_env ? float(atof(stepbar_env)) : 0.10f)
+                           * soup.spacing;
     const auto sole_owner = [&](float x, float y, float z,
                                 float r) {
         float d1 = 1e30f, d2 = 1e30f;
@@ -6365,6 +6374,54 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             {
                 d2 = d;
                 f2x = fx; f2y = fy; f2z = fz;
+            }
+        }
+        /*  Sub-cell twin-rail step (the bino 0.25 mm seam,
+         *  2026-07-20): two near-parallel constrained creases closer
+         *  than a HALF-base-cell bar are the two 90-degree edges of a
+         *  step riser well below lattice pitch (bino rails 0.0625 sp
+         *  apart = 1/16 base cell).  DC extraction roofs the two flat
+         *  faces across the riser with triangle railA-face-railB,
+         *  whose far-rail edge (railB->face) dives ~half the riser
+         *  into air - the "chaotically chipped all along the edge"
+         *  Nate flagged.  The face vertices that roof survive the
+         *  corridor drop because the high LOCAL density sharpening the
+         *  seam collapses the effective radius r below one stride.
+         *  Drop the FIRST outside-face row on a wider fixed radius
+         *  (step_wide, ~1.5 strides) so the face conforms to the NEAR
+         *  rail polyline: seam1 off-law tris 86->53, area 0.37->0.22
+         *  (measured), the edge reads regular instead of chaotic.
+         *
+         *  This does NOT resolve the step - worst air stays ~half the
+         *  riser (0.030 sp), the alignment-locked floor of roofing a
+         *  sub-cell offset; only resolution clears it (seam2 already
+         *  0.006 at r1 where the lattice aligns, and clean at r7).
+         *  The win is REGULARITY, which is what Nate asked for at r1.
+         *
+         *  Scoped HARD (steps and grooves are the same local shape -
+         *  the a-priori tangle gate is dead): fires ONLY for a pair
+         *  under step_bar (0.10 sp default; the ladder's resolvable
+         *  grooves sit >=0.11 sp and its corner-exactness referee
+         *  FAILS at 0.12, so the bar is a true separator - additive
+         *  rings sit 0.22-0.77 sp and are untouched), and NEVER drops
+         *  a point projecting BETWEEN the feet (the strip's own
+         *  witness the two-chain rule keeps - the double ring of
+         *  thorns).  STIBIUM_DMESH_STEP=0 reverts; _STEPW / _STEPBAR
+         *  retune the radius / the pair bar.  */
+        if (step_drop && d1 < step_wide * step_wide &&
+            d2 < step_wide * step_wide)
+        {
+            const float gx = f2x - f1x, gy = f2y - f1y,
+                        gz = f2z - f1z;
+            const float gg = gx*gx + gy*gy + gz*gz;
+            const float pair_bar = step_bar;
+            if (gg > 0 && gg < pair_bar * pair_bar)
+            {
+                const float t = ((x-f1x)*gx + (y-f1y)*gy
+                                 + (z-f1z)*gz) / gg;
+                if (t > 0.2f && t < 0.8f)
+                    return false;     // between the rails: keep witness
+                return true;          // outside the pair: roofing face vertex
             }
         }
         if (!(d1 < r * r))
