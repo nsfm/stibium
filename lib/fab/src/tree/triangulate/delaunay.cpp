@@ -6282,6 +6282,362 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     }
     pt.mark("segment referee");
     prog_stage(5);
+    /*  STEP-COLLAPSE (treatment B, the bino r1 seam, 2026-07-20):
+     *  two near-parallel constrained rails closer than the half-cell
+     *  feet bar are the two 90-degree edges of a sub-cell step riser
+     *  the lattice cannot resolve at this resolution.  3b71787e drops
+     *  the roofing FACE row so the edge reads less chaotic, but the
+     *  rail PAIR survives and DC still roofs railA-railB-face at half
+     *  the riser (worst 0.030 sp, alignment-locked) - thinner chaos,
+     *  not regular.  Vertex-dropping PLATEAUS (measured: STEPW 0.25 =
+     *  0.40, worst stays 0.030) because as long as the far rail and
+     *  the lower face both live in the point set, CDT roofs them
+     *  across the near rail - a constrained edge does not forbid a
+     *  triangle straddling it.  The step's sharp edges exist ONLY
+     *  because the tracer delivered both rails as constraints (the
+     *  coarse surface sampling cannot see a 0.0625 sp riser), so the
+     *  cure is to DELIVER ONE crease: drop the far rail (constraints
+     *  and its vertices) and keep the near rail, either moved to the
+     *  geometric midline (mode 1, both faces share a uniform sep/2
+     *  deviation) or unmoved (mode 2, near face exact, far face slants
+     *  one sep over a pitch).  The riser vanishes into a single
+     *  deterministic vertical edge; both faces meet plumb, off-law
+     *  -> ~0, the residual is a UNIFORM band by design, not chaos.
+     *
+     *  Gated by the SAME half-cell bar as the drop (0.10 sp default):
+     *  the ladder's resolvable 0.5 mm grooves sit >=0.11 sp and MUST
+     *  NOT merge (the corner-exactness referee fails at 0.12) - the
+     *  bar is the identity story, and additive rings at 0.22-0.77 sp
+     *  are far outside it.  Near-parallel guard (|dir.dir| > 0.9) so a
+     *  sub-cell CORNER (perpendicular creases meeting close) is never
+     *  collapsed - only genuine parallel twin rails.  At coarser res
+     *  the pair opens past the bar (seam2 r7 = 0.44 sp) and NOTHING
+     *  collapses - the step resolves normally and 3b71787e's drop is
+     *  the fallback.  Chains sharing a vertex with a non-collapsing
+     *  chain (junctions) are left intact.  STIBIUM_DMESH_STEPCOLLAPSE
+     *  =0 (default) reverts to 3b71787e; =1 midline; =2 keep-near.
+     *
+     *  REFUTED, kept OFF-by-default as a reproducible knob (2026-07-
+     *  20): the step joins two REAL resolvable faces offset 0.0625 sp,
+     *  not one lie the mesh can straighten.  =1 (midline) detaches the
+     *  crease from BOTH faces (2936 chips, 5947 repaired - refinement
+     *  fights the 0.031 sp gap).  =2 (drop far rail) strands the far
+     *  face, which slants to the near rail and sprays airs (seam2
+     *  off-law 17->57, airs 102->517, std WORSENS).  Collapse is a
+     *  net loss both ways; see the commit case file.  */
+    std::unordered_map<uint32_t, std::array<float, 3>> col_move;
+    std::unordered_set<uint32_t> col_drop;
+    {
+        static const char* stepcol_env =
+                getenv("STIBIUM_DMESH_STEPCOLLAPSE");
+        const int step_collapse = stepcol_env ? atoi(stepcol_env) : 0;
+        if (step_collapse && cseg.size() > 1 &&
+            accepted.size() == cseg.size())
+        {
+            static const char* colbar_env =
+                    getenv("STIBIUM_DMESH_STEPBAR");
+            const float col_bar = (colbar_env ? float(atof(colbar_env))
+                                              : 0.10f) * soup.spacing;
+            const float col_bar2 = col_bar * col_bar;
+            /*  segment indices grouped by owning chain  */
+            std::unordered_map<uint32_t, std::vector<size_t>> bychain;
+            for (size_t i = 0; i < cseg.size(); ++i)
+                bychain[cseg_chain[i]].push_back(i);
+            /*  nearest point on a chain's segments to P: squared dist,
+             *  fills foot + unit segment direction.  */
+            const auto nearest_on = [&](const std::vector<size_t>& segs,
+                                        float x, float y, float z,
+                                        float& qx, float& qy, float& qz,
+                                        float& dx, float& dy, float& dz)
+            {
+                float best = 1e30f;
+                for (size_t si : segs)
+                {
+                    const auto& s = cseg[si];
+                    const float ax = s[0], ay = s[1], az = s[2];
+                    const float bx = s[3]-ax, by = s[4]-ay,
+                                bz = s[5]-az;
+                    const float bb = bx*bx + by*by + bz*bz;
+                    const float px = x-ax, py = y-ay, pz = z-az;
+                    float t = bb > 0 ? (px*bx+py*by+pz*bz)/bb : 0;
+                    t = t < 0 ? 0 : t > 1 ? 1 : t;
+                    const float fx = ax+t*bx, fy = ay+t*by, fz = az+t*bz;
+                    const float ex = x-fx, ey = y-fy, ez = z-fz;
+                    const float d = ex*ex + ey*ey + ez*ez;
+                    if (d < best)
+                    {
+                        best = d;
+                        qx = fx; qy = fy; qz = fz;
+                        const float bl = bb > 0 ? 1.f/sqrtf(bb) : 0;
+                        dx = bx*bl; dy = by*bl; dz = bz*bl;
+                    }
+                }
+                return best;
+            };
+            /*  partner vote: which other chain does the majority of a
+             *  chain's endpoints sit parallel-and-within-bar of?  */
+            std::unordered_map<uint32_t, uint32_t> partner;
+            for (const auto& [c, segs] : bychain)
+            {
+                std::unordered_map<uint32_t, int> votes;
+                int npts = 0;
+                for (size_t si : segs)
+                {
+                    const auto& s = cseg[si];
+                    const float sbx = s[3]-s[0], sby = s[4]-s[1],
+                                sbz = s[5]-s[2];
+                    const float sl = sqrtf(sbx*sbx+sby*sby+sbz*sbz);
+                    const float ux = sl>0?sbx/sl:0, uy = sl>0?sby/sl:0,
+                                uz = sl>0?sbz/sl:0;
+                    for (int e = 0; e < 2; ++e)
+                    {
+                        ++npts;
+                        const float px = s[3*e], py = s[3*e+1],
+                                    pz = s[3*e+2];
+                        for (const auto& [c2, segs2] : bychain)
+                        {
+                            if (c2 == c) continue;
+                            float qx,qy,qz,dx,dy,dz;
+                            const float d2 = nearest_on(segs2, px,py,pz,
+                                    qx,qy,qz,dx,dy,dz);
+                            if (d2 > 1e-12f && d2 < col_bar2 &&
+                                fabsf(ux*dx+uy*dy+uz*dz) > 0.9f)
+                                ++votes[c2];
+                        }
+                    }
+                }
+                uint32_t best_c = UINT32_MAX; int best_v = 0;
+                for (const auto& [c2, v] : votes)
+                    if (v > best_v) { best_v = v; best_c = c2; }
+                if (best_c != UINT32_MAX && best_v * 2 > npts)
+                    partner[c] = best_c;
+            }
+            /*  which surface vertices are used by which chains (to
+             *  spare junction-shared vertices)  */
+            std::unordered_map<uint32_t, int> vchain_a, vchain_b;
+            for (size_t i = 0; i < cseg.size(); ++i)
+            {
+                const uint32_t c = cseg_chain[i];
+                for (uint32_t idx : { accepted[i].first,
+                                      accepted[i].second })
+                {
+                    auto it = vchain_a.find(idx);
+                    if (it == vchain_a.end())
+                        vchain_a[idx] = int(c);
+                    else if (it->second != int(c))
+                        vchain_b[idx] = int(c);   // second owner
+                }
+            }
+            const auto shared_elsewhere = [&](uint32_t idx,
+                                              uint32_t cc, uint32_t pp) {
+                auto it = vchain_b.find(idx);
+                if (it == vchain_b.end()) return false;
+                const uint32_t o1 = uint32_t(vchain_a[idx]),
+                               o2 = uint32_t(it->second);
+                return !((o1==cc||o1==pp) && (o2==cc||o2==pp));
+            };
+            uint32_t twins = 0;
+            std::vector<std::array<float,6>> ncseg;
+            std::vector<uint32_t> nchain;
+            std::vector<std::pair<uint32_t,uint32_t>> nacc;
+            for (size_t i = 0; i < cseg.size(); ++i)
+            {
+                const uint32_t c = cseg_chain[i];
+                auto it = partner.find(c);
+                bool keep_move = false, drop = false;
+                uint32_t pc = UINT32_MAX;
+                if (it != partner.end())
+                {
+                    pc = it->second;
+                    auto pit = partner.find(pc);
+                    if (pit != partner.end() && pit->second == c)
+                    {
+                        if (c < pc) keep_move = true;   // keep lower id
+                        else        drop = true;        // drop higher
+                    }
+                }
+                if (drop)
+                {
+                    /*  far rail: retire its vertices from insertion
+                     *  (constraints then die on the VH() guard)  */
+                    for (uint32_t idx : { accepted[i].first,
+                                          accepted[i].second })
+                        if (!shared_elsewhere(idx, c, pc))
+                            col_drop.insert(idx);
+                    continue;
+                }
+                std::array<float,6> s = cseg[i];
+                if (keep_move)
+                {
+                    ++twins;
+                    if (step_collapse == 1)
+                    {
+                        const auto& psegs = bychain[pc];
+                        const uint32_t vids[2] = { accepted[i].first,
+                                                   accepted[i].second };
+                        for (int e = 0; e < 2; ++e)
+                        {
+                            if (shared_elsewhere(vids[e], c, pc))
+                                continue;
+                            float qx,qy,qz,dx,dy,dz;
+                            nearest_on(psegs, s[3*e], s[3*e+1], s[3*e+2],
+                                       qx,qy,qz,dx,dy,dz);
+                            const float mx = 0.5f*(s[3*e]  +qx),
+                                        my = 0.5f*(s[3*e+1]+qy),
+                                        mz = 0.5f*(s[3*e+2]+qz);
+                            s[3*e]=mx; s[3*e+1]=my; s[3*e+2]=mz;
+                            col_move[vids[e]] = { mx, my, mz };
+                        }
+                    }
+                }
+                ncseg.push_back(s);
+                nchain.push_back(c);
+                nacc.push_back(accepted[i]);
+            }
+            if (twins)
+            {
+                cseg.swap(ncseg);
+                cseg_chain.swap(nchain);
+                accepted.swap(nacc);
+            }
+            if (getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+                fprintf(stderr, "STEP-COLLAPSE mode %d: %zu twin "
+                        "chain-segs kept, %zu far verts retired, "
+                        "%zu near verts moved\n",
+                        step_collapse, size_t(twins), col_drop.size(),
+                        col_move.size());
+        }
+    }
+    /*  STEP-DENSIFY (treatment A done right, the bino r1 seam, 2026-
+     *  07-20): the roof is a CONNECTIVITY artifact - after the wall
+     *  rung railA[k]-railB[k], Delaunay completes it with the nearest
+     *  surface vertex, and the lower-face vertex ~one stride out
+     *  (0.12 sp) TIES with the next rung railA[k+1] (level-3 stride
+     *  0.129 sp), so on unlucky alignment the face wins and the wall
+     *  roofs.  Point-set drops cannot fix connectivity (the face
+     *  separator is a legitimate surface point).  But BISECTING the
+     *  twin-rail segments halves the rung stride to ~0.065 sp < the
+     *  0.0625 sp separation: the next rung now beats the face vertex
+     *  by the empty-circumsphere test, the wall self-meshes rung-to-
+     *  rung, and the face conforms to its OWN rail.  The midpoints go
+     *  in as on-rail surface vertices; the existing through-vertex
+     *  pre-split (5e-3 sp) chains the constraint through them, so no
+     *  new constraint plumbing - the rail is simply delivered denser.
+     *
+     *  Same half-cell bar as the drop/collapse: only a sub-bar twin
+     *  pair densifies (the ladder's 0.5 mm grooves at >=0.11 sp are
+     *  untouched, additive rings at 0.22-0.77 sp are untouched), and
+     *  at coarser res the pair opens past the bar (seam2 r7 = 0.44 sp)
+     *  so NOTHING densifies - the step resolves normally.  Default
+     *  ON at N=1 (one bisection, the measured sweet spot: N=2 holds
+     *  the win, N=3 over-densifies and a 0.027 sp roof returns).
+     *  STIBIUM_DMESH_STEPDENSE=0 reverts to 3b71787e; N = midpoints
+     *  per segment.  Measured (bino r1, seam1): worst air 0.030 ->
+     *  0.006 sp, |depth| std 0.0091 -> 0.0015 sp - the chaotic deep
+     *  roof becomes the tight uniform band of a resolved step (seam2's
+     *  own r1 texture), off-law 53 -> 36; nm 2 -> 0.  */
+    std::vector<std::array<float, 3>> dens_pts;
+    {
+        static const char* dens_env = getenv("STIBIUM_DMESH_STEPDENSE");
+        const int step_dense = dens_env ? atoi(dens_env) : 1;
+        if (step_dense > 0 && cseg.size() > 1 &&
+            accepted.size() == cseg.size())
+        {
+            static const char* dbar_env =
+                    getenv("STIBIUM_DMESH_STEPBAR");
+            const float d_bar = (dbar_env ? float(atof(dbar_env))
+                                          : 0.10f) * soup.spacing;
+            const float d_bar2 = d_bar * d_bar;
+            std::unordered_map<uint32_t, std::vector<size_t>> bychain;
+            for (size_t i = 0; i < cseg.size(); ++i)
+                bychain[cseg_chain[i]].push_back(i);
+            const auto nearest_d = [&](const std::vector<size_t>& segs,
+                    float x, float y, float z, float& dx, float& dy,
+                    float& dz) {
+                float best = 1e30f;
+                for (size_t si : segs)
+                {
+                    const auto& s = cseg[si];
+                    const float ax = s[0], ay = s[1], az = s[2];
+                    const float bx = s[3]-ax, by = s[4]-ay,
+                                bz = s[5]-az;
+                    const float bb = bx*bx + by*by + bz*bz;
+                    const float px = x-ax, py = y-ay, pz = z-az;
+                    float t = bb > 0 ? (px*bx+py*by+pz*bz)/bb : 0;
+                    t = t < 0 ? 0 : t > 1 ? 1 : t;
+                    const float fx = ax+t*bx, fy = ay+t*by, fz = az+t*bz;
+                    const float ex = x-fx, ey = y-fy, ez = z-fz;
+                    const float d = ex*ex + ey*ey + ez*ez;
+                    if (d < best)
+                    {
+                        best = d;
+                        const float bl = bb > 0 ? 1.f/sqrtf(bb) : 0;
+                        dx = bx*bl; dy = by*bl; dz = bz*bl;
+                    }
+                }
+                return best;
+            };
+            /*  mutual twin partners (same vote as collapse)  */
+            std::unordered_map<uint32_t, uint32_t> partner;
+            for (const auto& [c, segs] : bychain)
+            {
+                std::unordered_map<uint32_t, int> votes;
+                int npts = 0;
+                for (size_t si : segs)
+                {
+                    const auto& s = cseg[si];
+                    const float sbx = s[3]-s[0], sby = s[4]-s[1],
+                                sbz = s[5]-s[2];
+                    const float sl = sqrtf(sbx*sbx+sby*sby+sbz*sbz);
+                    const float ux = sl>0?sbx/sl:0, uy = sl>0?sby/sl:0,
+                                uz = sl>0?sbz/sl:0;
+                    for (int e = 0; e < 2; ++e)
+                    {
+                        ++npts;
+                        const float px = s[3*e], py = s[3*e+1],
+                                    pz = s[3*e+2];
+                        for (const auto& [c2, segs2] : bychain)
+                        {
+                            if (c2 == c) continue;
+                            float dx,dy,dz;
+                            const float d2 = nearest_d(segs2, px,py,pz,
+                                    dx,dy,dz);
+                            if (d2 > 1e-12f && d2 < d_bar2 &&
+                                fabsf(ux*dx+uy*dy+uz*dz) > 0.9f)
+                                ++votes[c2];
+                        }
+                    }
+                }
+                uint32_t best_c = UINT32_MAX; int best_v = 0;
+                for (const auto& [c2, v] : votes)
+                    if (v > best_v) { best_v = v; best_c = c2; }
+                if (best_c != UINT32_MAX && best_v * 2 > npts)
+                    partner[c] = best_c;
+            }
+            /*  bisect each segment of a mutually-twinned chain  */
+            for (size_t i = 0; i < cseg.size(); ++i)
+            {
+                const uint32_t c = cseg_chain[i];
+                auto it = partner.find(c);
+                if (it == partner.end())
+                    continue;
+                auto pit = partner.find(it->second);
+                if (pit == partner.end() || pit->second != c)
+                    continue;
+                const auto& s = cseg[i];
+                for (int k = 1; k <= step_dense; ++k)
+                {
+                    const float f = float(k) / float(step_dense + 1);
+                    dens_pts.push_back({ s[0] + f*(s[3]-s[0]),
+                                         s[1] + f*(s[4]-s[1]),
+                                         s[2] + f*(s[5]-s[2]) });
+                }
+            }
+            if (getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+                fprintf(stderr, "STEP-DENSIFY x%d: %zu rung midpoints "
+                        "injected\n", step_dense, dens_pts.size());
+        }
+    }
     const auto near_crease = [&](float x, float y, float z,
                                  float r) {
         for (const auto& s : cseg)
@@ -6442,6 +6798,78 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                          box_dense_factor(soup, x, y, z));
         return sole_owner(x, y, z, std::min(eff, drop_max));
     };
+    /*  Step-roof shield (treatment A, the bino r1 seam, 2026-07-20):
+     *  the roofing face vertex that survives the corridor drop is NOT
+     *  an original sample - it is a REFINEMENT point, a fresh bisected
+     *  separator the inside/outside loop lands on the lower face ~one
+     *  stride out from the near rail, UNFILTERED (the corridor drop
+     *  only sifts soup.surface).  Delaunay then completes the wall
+     *  rung railA-railB with that face vertex instead of the next
+     *  rung -> the tilted roof railA-railB-face, worst air ~half the
+     *  riser.  Vertex-dropping the ORIGINAL samples plateaus (measured
+     *  STEPW 0.25 = 0.40) precisely because the survivor is refined in
+     *  AFTER the drop.  step_roof is the same twin-rail test standalone
+     *  so the refinement loop can shield the far rail: a fresh point
+     *  within step_wide of BOTH rails of a sub-cell pair (feet < bar)
+     *  and projecting OUTSIDE the [footA,footB] span is a roofing face
+     *  separator - do not insert it; the wall meshes rung-to-rung and
+     *  the face conforms to its own rail.  A point BETWEEN the feet is
+     *  the riser's own wall separator and is always kept (the two-
+     *  chain rule).  Disengages exactly like the drop: past the bar
+     *  (coarser res, seam2 r7 = 0.44 sp) it never fires.  */
+    /*  REFUTED, kept as an OFF-by-default reproducible knob (2026-07-
+     *  20): shielding the refinement separators leaves their inside/
+     *  outside edges UNRESOLVED (~350/round regenerate, seam2 grows a
+     *  0.068 sp chip where extraction chords the survivor) - the face
+     *  separator is LEGITIMATE (it separates the real lower face); the
+     *  roof is a Delaunay CONNECTIVITY artifact (railA-railB-face),
+     *  not a stray point, so no point-set drop removes it.  See the
+     *  commit case file.  STIBIUM_DMESH_STEPREFINE=1 re-arms it.  */
+    static const char* stepref_env = getenv("STIBIUM_DMESH_STEPREFINE");
+    const bool step_refine = stepref_env && atoi(stepref_env) != 0;
+    const auto step_roof = [&](float x, float y, float z) {
+        if (!step_refine || !step_drop || cseg.empty())
+            return false;
+        float d1 = 1e30f, d2 = 1e30f;
+        float f1x = 0, f1y = 0, f1z = 0;
+        float f2x = 0, f2y = 0, f2z = 0;
+        uint32_t c1 = UINT32_MAX;
+        for (size_t si = 0; si < cseg.size(); ++si)
+        {
+            const auto& s = cseg[si];
+            const float ax = s[0], ay = s[1], az = s[2];
+            const float bx = s[3]-ax, by = s[4]-ay, bz = s[5]-az;
+            const float px = x-ax, py = y-ay, pz = z-az;
+            const float bb = bx*bx + by*by + bz*bz;
+            float t = bb > 0 ? (px*bx+py*by+pz*bz)/bb : 0;
+            t = t < 0 ? 0 : t > 1 ? 1 : t;
+            const float fx = ax+t*bx, fy = ay+t*by, fz = az+t*bz;
+            const float dx = x-fx, dy = y-fy, dz = z-fz;
+            const float d = dx*dx + dy*dy + dz*dz;
+            const uint32_t ch = cseg_chain[si];
+            if (ch == c1)
+            {
+                if (d < d1) { d1 = d; f1x=fx; f1y=fy; f1z=fz; }
+            }
+            else if (d < d1)
+            {
+                d2 = d1; f2x=f1x; f2y=f1y; f2z=f1z;
+                d1 = d; f1x=fx; f1y=fy; f1z=fz; c1 = ch;
+            }
+            else if (d < d2)
+            {
+                d2 = d; f2x=fx; f2y=fy; f2z=fz;
+            }
+        }
+        if (!(d1 < step_wide * step_wide && d2 < step_wide * step_wide))
+            return false;
+        const float gx = f2x-f1x, gy = f2y-f1y, gz = f2z-f1z;
+        const float gg = gx*gx + gy*gy + gz*gz;
+        if (!(gg > 0 && gg < step_bar * step_bar))
+            return false;
+        const float tt = ((x-f1x)*gx + (y-f1y)*gy + (z-f1z)*gz) / gg;
+        return !(tt > 0.2f && tt < 0.8f);   // outside feet = roof
+    };
     /*  Twin-corner rescue (the 0.5 mm strip residual, 2026-07-20):
      *  a QEF corner feature sitting ON an accepted constraint's
      *  interior is exactly the through-vertex the pre-split chains
@@ -6539,6 +6967,12 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                         int8_t(s.on_surface ? 0
                                : s.inside ? -1 : 1) });
     }
+    /*  STEP-DENSIFY rung midpoints: on-rail surface vertices; the
+     *  through-vertex pre-split chains the constraint through them,
+     *  delivering the twin rails at half stride so the wall self-
+     *  meshes rung-to-rung (see the densify block above).  */
+    for (const auto& m : dens_pts)
+        pts.push_back({ TPoint(m[0], m[1], m[2]), int8_t(0) });
     if constexpr (CCDT_MODE)
     {
         /*  No bulk constructor here: spatial-sort ourselves and
@@ -6605,6 +7039,12 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
     for (size_t si = 0; si < soup.surface.size(); ++si)
     {
         const DSurfPoint& s = soup.surface[si];
+        /*  STEP-COLLAPSE: a retired far-rail vertex never enters (its
+         *  constraint then dies on the VH() guard); a kept near-rail
+         *  vertex enters at its midline override so the delivered
+         *  crease is the single collapsed edge.  */
+        if (!col_drop.empty() && col_drop.count(uint32_t(si)))
+            continue;
         /*  Surface points inside the crease band are redundant
          *  with the constrained polyline and pair into pinch
          *  slivers - drop them, EXCEPT the chain members
@@ -6637,6 +7077,16 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             ++dp_kept;
             fprintf(stderr, "DPKEEP %.5g %.5g %.5g\n",
                     s.x, s.y, s.z);
+        }
+        if (!col_move.empty())
+        {
+            auto mit = col_move.find(uint32_t(si));
+            if (mit != col_move.end())
+            {
+                sorder.push_back({ TPoint(mit->second[0],
+                        mit->second[1], mit->second[2]), si });
+                continue;
+            }
         }
         sorder.push_back({ TPoint(s.x, s.y, s.z), si });
     }
@@ -7031,8 +7481,18 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         }
 
         uint64_t round_added = 0;
+        uint64_t step_shielded = 0;
         for (const DSurfPoint& s : fresh)
         {
+            /*  Step-roof shield: a fresh separator landing on the
+             *  lower face inside the sub-cell twin-rail corridor is
+             *  the roofing vertex - never insert it, so the wall
+             *  meshes rung-to-rung (see step_roof).  */
+            if (step_roof(s.x, s.y, s.z))
+            {
+                ++step_shielded;
+                continue;
+            }
             /*  A bisected point can converge onto an EXISTING vertex
              *  (grid-aligned geometry: surfaces lying on lattice
              *  planes).  Never overwrite a sign witness's info -
@@ -7048,6 +7508,10 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             }
         }
         sweep_steiner();
+        if (step_shielded && getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+            fprintf(stderr, "STEP-ROOF round %d: %llu separators "
+                    "shielded\n", round,
+                    (unsigned long long)step_shielded);
         if (!round_added)
             break;   // every insert coincided: no progress possible
     }
