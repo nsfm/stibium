@@ -131,6 +131,35 @@ the predicted follow-up dividend, deviation accepted).
 Rescue counters print under SEG_DEBUG.  REMAINING on the
 focus models: ONLY the three socket-rim spikes (hunt #2).
 
+## PRODUCT TIERS + TEXT CAMPAIGN BRIEF (Nate, 2026-07-20)
+
+STAGING (Nate's framing, the campaign's success criteria):
+r1 = "suitable for FDM prints" (the clean bench is this tier);
+r2 = "suitable for resin SLA" (the text gauntlet's target tier);
+r3 = exotic (defer).  The text model (examples/torture/
+engraved_text.sb - "stibnite mesher!", the word only 3.8mm
+wide, m-legs 0.15mm) is NOT expected to pass at r1; at r2 it
+must.  TEXT BASELINE: r1 tilt 20.5%/5.47deg, r2 15.1%/3.11deg
+(zero angled faces expected - tilt is error-by-definition);
+r2 tilted area by band: walls 6.4 > floors 3.6 > top 1.4 (the
+"noise inside engraved areas" per Nate's eyes; edges already
+crisp).  OPENING THESIS: engraved strokes are THIN AIR - the
+material-only witness gate and the 0.1mm weld doctrine
+(correct for assembly contacts) collide with intentional
+engraving; the mesher must learn "two parts touching" (fuse)
+vs "a letter someone carved" (resolve).  Hidden-cell witnesses
+minted only 32 bisections on the whole model - the air class
+is deliberately unserved today.
+
+BACKLOG EXPERIMENT (Nate): scale model 2x -> mesh at r1 ->
+scale mesh 0.5x, vs native r2.  Prediction from architecture:
+nearly identical (resolution enters only via region voxel
+counts; all downstream tolerances are sp-relative) EXCEPT
+knobs expressed in absolute mm (clearance weld 0.1mm, simplify
+deviation).  Any visible difference = a dial that is
+accidentally resolution-dependent and should be re-expressed
+in sp.  A diagnostic wearing a hack's clothes.
+
 ## FIFTH FIX - CORNER-SUPPORT KEEP (2026-07-20 afternoon, a00e4ce2)
 
 Nate's eye sweep of the four-fix bench caught a cylinder
