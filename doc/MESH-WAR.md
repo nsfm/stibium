@@ -73,14 +73,20 @@ drops roofing face vertices outside the [footA,footB] span
 (feet < 0.10 sp = the sub-cell pair test; _STEP=0 reverts).
 Thinner chaos: off-law -38%, floor 0.030 stands.
 
-EIGHTH FIX (640e0cdd, the kill): the roof is a Delaunay TIE -
-wall rung vs face vertex, one stride each.  WIN THE TIE: bisect
-twin-rail segments (STEPDENSE, default 1 midpoint) so the rung
-stride (~0.065) beats the separation; the riser self-meshes
-rung-to-rung, plumb and in-law.  seam1 worst 0.030 -> 0.006
-(5x), |depth| std 0.0091 -> 0.0015, nm 2 -> 0; both seams now
+EIGHTH FIX (640e0cdd, DEMOTED to opt-in by bca5362b): the roof
+is a Delaunay TIE - wall rung vs face vertex, one stride each.
+WIN THE TIE: bisect twin-rail segments (STEPDENSE=1 opts in) so
+the rung stride (~0.065) beats the separation; the riser self-
+meshes rung-to-rung, plumb and in-law.  seam1 worst 0.030 ->
+0.006 (5x), |depth| std 0.0091 -> 0.0015, nm 2 -> 0; both seams
 wear seam2's clean uniform texture.  res-7: 0 midpoints
 injected (0.44 sp > bar) = byte-identical, correctly disengages.
+DEMOTION (Nate's eyes + facedev agree): at full-bino scale the
+DISTANCE-only bar bisects curved sub-cell joint pairs at the
+eyepiece (0.077% -> 0.083% over-bar, repairs 7.4K) - no shape
+story.  Re-promotion path: straight/parallel/roofed identity
+gate or explicit wall stitch.  The extract bench contains only
+straight twin-rails - build a curved-pair jar before round 3.
 REFUTED with numbers, knobs kept off-default so nobody re-runs
 them: STEPREFINE (skipping roofing separators -> fresh 0.068
 chip), STEPCOLLAPSE (midline = 2936 chips - the twin rails are

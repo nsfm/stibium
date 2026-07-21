@@ -72,7 +72,8 @@ scratchpad; twin rails 0.0625 sp, ALL tris flat-or-plumb by law):
 | extract-base | six-fix HEAD | 86 / 0.030 | 18 / 0.006 | "chaotically chipped all along"; worst = half the riser, alignment-locked |
 | STEPFIX (3b71787e) | drop roofing face row in sole_owner | 53 / 0.030 | 17 / 0.006 | thinner chaos; floor stands - roof is a Delaunay TIE, vertex surgery can't win it |
 | STEPDENSE (640e0cdd) | bisect twin rails, rung stride beats separation | 36 / **0.006** | 25 / 0.006 | 5x depth, std 0.0091->0.0015: UNIFORM band = seam2's own clean texture; nm 2->0; res-7 disengages (0 injected); ladder/cyl/screws all no-op or byte-identical; refuted knobs kept: STEPREFINE, STEPCOLLAPSE |
-| bino-STEPDENSE | full bino, both fixes | (Nate's eyes + 0.15mm slicer blip test pending) | | staged build/zeiss_dmesh/bino_STEPDENSE.stl |
+| bino-STEPDENSE | full bino, both fixes | (see below) | | Nate: "break even or a teensy bit rougher"; facedev CONVICTED: 0.083% over-bar vs ENDGAME2 0.070 / STEPFIX-only 0.077 / JSPREAD 0.079; collateral = curved sub-cell pairs at the eyepiece (y 39-57 z 60-75), none at the seams |
+| STEPDENSE-demote (bca5362b) | default flipped OFF, opt-in dial kept | extract reverts to 53/0.030 | 17/0.006 | the 0.10 sp bar is DISTANCE-only - no shape story (20d0fee9 lesson recurs at a new layer); re-promotion path: straight/parallel/roofed identity gate, or explicit wall stitch; extract bench blind spot noted (contains only straight twin-rails - needs a curved-pair jar) |
 
 ## Perf round ledger (2026-07-17 evening, Nate's B-then-A vote)
 
