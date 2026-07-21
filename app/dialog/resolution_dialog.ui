@@ -56,22 +56,24 @@ Classic: fast uniform sampler - lower memory, much larger files.</string>
    <item>
     <widget class="QComboBox" name="quality">
      <property name="toolTip">
-      <string>Each step roughly triples meshing time and doubles surface fidelity.
-Extreme can take hours on large models.</string>
+      <string>Standard resolves everything an FDM printer can lay down;
+Beautiful is for resin/SLA detail.  Each step roughly triples
+meshing time and doubles memory; Extreme can take hours on
+large models.</string>
      </property>
      <item>
       <property name="text">
-       <string>Standard</string>
+       <string>Standard (FDM printing)</string>
       </property>
      </item>
      <item>
       <property name="text">
-       <string>Beautiful (~3x time)</string>
+       <string>Beautiful (resin printing, ~3x time)</string>
       </property>
      </item>
      <item>
       <property name="text">
-       <string>Extreme (very slow)</string>
+       <string>Extreme (tiny features; slow, heavy RAM)</string>
       </property>
      </item>
      <item>
