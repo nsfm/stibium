@@ -6650,6 +6650,18 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             if (getenv("STIBIUM_DMESH_CHIP_DEBUG"))
                 fprintf(stderr, "STEP-DENSIFY x%d: %zu rung midpoints "
                         "injected\n", step_dense, dens_pts.size());
+            /*  Site dump (STEPDENSE_DUMP=path): where the bisection
+             *  actually fired - the instrument that adjudicates
+             *  "collateral at innocent joints" vs "the same seam,
+             *  tilted" (bino demotion forensics).  */
+            if (const char* dd = getenv("STIBIUM_DMESH_STEPDENSE_DUMP"))
+                if (FILE* df = fopen(dd, "w"))
+                {
+                    for (const auto& m : dens_pts)
+                        fprintf(df, "%.6g %.6g %.6g\n",
+                                m[0], m[1], m[2]);
+                    fclose(df);
+                }
         }
     }
     const auto near_crease = [&](float x, float y, float z,
