@@ -54,6 +54,46 @@ tools/ in-repo.  Reviews: doc/reviews/2026-07-17-*.md
 Knob roster: ~26 STIBIUM_DMESH_* - defaults are all measured-in;
 see the architecture review for the product/frozen/dead tiers.
 
+## THE STEP CLASS KILL (2026-07-20 night, 3b71787e + 640e0cdd)
+
+Nate's extract (examples/torture/zeiss_id02_bino_extract.sb)
+jarred the 0.25mm-step class: TWIN constrained rails 0.0625 sp
+apart (flat face meets raised half-cylinder flat), law traced
+PERFECT, chaos anyway.  Forensics: every cleanup stage
+exonerated by one-variable bisection (weld/repair/snap/seal/
+decimate/decflats all no-ops on the defect); seam already at
+level-3 density; STRIPS/WELD=0.1 byte-identical.  Two agents:
+
+SEVENTH FIX (3b71787e, mechanism): deep airs owned by ONE
+triangle class railA-railB-face - the far-rail edge leaps the
+riser to a lower-face vertex, roofing it (FPROBE: roof midpoint
+f=+0.028 = half the riser).  Twin-seam asymmetry = lattice
+alignment picking the circumsphere winner.  Fix: sole_owner
+drops roofing face vertices outside the [footA,footB] span
+(feet < 0.10 sp = the sub-cell pair test; _STEP=0 reverts).
+Thinner chaos: off-law -38%, floor 0.030 stands.
+
+EIGHTH FIX (640e0cdd, the kill): the roof is a Delaunay TIE -
+wall rung vs face vertex, one stride each.  WIN THE TIE: bisect
+twin-rail segments (STEPDENSE, default 1 midpoint) so the rung
+stride (~0.065) beats the separation; the riser self-meshes
+rung-to-rung, plumb and in-law.  seam1 worst 0.030 -> 0.006
+(5x), |depth| std 0.0091 -> 0.0015, nm 2 -> 0; both seams now
+wear seam2's clean uniform texture.  res-7: 0 midpoints
+injected (0.44 sp > bar) = byte-identical, correctly disengages.
+REFUTED with numbers, knobs kept off-default so nobody re-runs
+them: STEPREFINE (skipping roofing separators -> fresh 0.068
+chip), STEPCOLLAPSE (midline = 2936 chips - the twin rails are
+two REAL resolvable faces, not one lie; drop-far-rail slants
+the far face, airs 102->517).  Battery: ladder PASS (0 injected
+- grooves >= 0.11 sp above bar, the anti-collapse sentinel
+holds), cyl no-op, screws byte-identical vs FINALBOSS, suite
+green.  Residual: ~36/25 shallow (0.006) upper-face transition
+facets per seam - geometrically inherent to a sub-cell step at
+r1 (reference-clean seam2 carries ~20 itself); regular, not
+chaotic.  Nate's slicer test (0.15mm layers stop blipping) is
+the field referee.
+
 ## THE SEED-POACHING FIX (2026-07-20 - the dense-detail class ROOT CAUSE)
 
 Nate's ladder models (examples/detail_spacing_test.sb + _cyl.sb -

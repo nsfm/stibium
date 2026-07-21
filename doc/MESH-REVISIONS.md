@@ -62,6 +62,18 @@ referee.  Update this table with EVERY rev handed over for review.
 | splotch-r1 | quality rd 2: tangle despeckle + decimation curvature veto + chainless trigger | 133K | 0 | 287 | 12109 | 0.093 | THE WIREFRAME SPLOTCHES GONE (areamap verified): 102 tangle-demotion speckles re-promoted, map uniform @2; dec veto caps curved plates (10.2K vetoes); screws tilt/worst/fightpix all held; suite green; awaits Nate's eyes |
 | tseed-r1 | #4a rd 4: tseed step-tracing default-on (fillet-boundary seams from the shallow channel, post-crease-law claim map, loop closure) | 133K | 0 | 287 | 12109 | 0.093 | bino BIT-CONSISTENT with splotch-r1, 0 false step seams (909 seeds: 904 crease-claimed); ACCEPTANCE: on-axis lip ring CLOSED 24/24 azimuth, off-axis tilted ring CLOSED 24/24 - orientation independence is an executable referee now; screws 0.125 held (pass inert); ridge rung for ~13-deg crossings OPT-IN pending shoulder discriminator; exhibits build/zeiss_dmesh/*tseed* |
 
+## Step-class arc (2026-07-20 night, Nate's bino_extract jar)
+
+Extract referee = seam_referee (off-law tris + air depth per seam,
+scratchpad; twin rails 0.0625 sp, ALL tris flat-or-plumb by law):
+
+| rev | change | seam1 offlaw/worst | seam2 offlaw/worst | verdict |
+|-----|--------|--------------------|--------------------|---------|
+| extract-base | six-fix HEAD | 86 / 0.030 | 18 / 0.006 | "chaotically chipped all along"; worst = half the riser, alignment-locked |
+| STEPFIX (3b71787e) | drop roofing face row in sole_owner | 53 / 0.030 | 17 / 0.006 | thinner chaos; floor stands - roof is a Delaunay TIE, vertex surgery can't win it |
+| STEPDENSE (640e0cdd) | bisect twin rails, rung stride beats separation | 36 / **0.006** | 25 / 0.006 | 5x depth, std 0.0091->0.0015: UNIFORM band = seam2's own clean texture; nm 2->0; res-7 disengages (0 injected); ladder/cyl/screws all no-op or byte-identical; refuted knobs kept: STEPREFINE, STEPCOLLAPSE |
+| bino-STEPDENSE | full bino, both fixes | (Nate's eyes + 0.15mm slicer blip test pending) | | staged build/zeiss_dmesh/bino_STEPDENSE.stl |
+
 ## Perf round ledger (2026-07-17 evening, Nate's B-then-A vote)
 
 - FEMTO-SEGMENT GUARD: both autod31 cascades were float-noise
