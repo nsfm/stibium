@@ -5538,6 +5538,95 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
                 my += gy * step;
                 mz += gz * step;
             }
+            /*  Sub-lattice step guard (the underside-dimple autopsy,
+             *  2026-07-20): when the clustered endpoints span a large
+             *  range - a thin stepped corner below the lattice pitch
+             *  (screws underside: wall-top z=64.25, ledge z=64.24,
+             *  wall-bottom z=64.0, a 0.25 sp tower) - the MEAN sinks
+             *  the shared corner BELOW an exposed plane (here to
+             *  z=64.2006, 0.049 under the z=64.25 underside) and the
+             *  CDT roofs it: an additive WART the insertion repair
+             *  structurally cannot reach (warts earn no snap target,
+             *  line ~7658).  True corners cluster within Newton noise
+             *  (~2.5e-3 sp), so a spread gate leaves them exactly on
+             *  the mean; only a genuine multi-height merge re-places
+             *  the corner onto the incident ENDPOINT that roofs the
+             *  least air - probe each candidate's terminal segments,
+             *  a midpoint reading f>0 past the bar is a chord through
+             *  empty space.  STIBIUM_DMESH_JSPREAD gates (default
+             *  0.1 sp; 0 = off, always the mean).  */
+            static const char* js_env =
+                    getenv("STIBIUM_DMESH_JSPREAD");
+            const float jspread = js_env ? atof(js_env) : 0.1f;
+            float spread2 = 0;
+            for (size_t a = 0; a < cl.size(); ++a)
+                for (size_t b = a + 1; b < cl.size(); ++b)
+                {
+                    const DSurfPoint& P = pt_of(ends[cl[a]]);
+                    const DSurfPoint& Q = pt_of(ends[cl[b]]);
+                    const float dx = P.x-Q.x, dy = P.y-Q.y,
+                                dz = P.z-Q.z;
+                    spread2 = std::max(spread2,
+                                       dx*dx + dy*dy + dz*dz);
+                }
+            if (jspread > 0 &&
+                spread2 > jspread * jspread * sp * sp)
+            {
+                const auto neighbor =
+                        [&](const End& e) -> const DSurfPoint* {
+                    const std::vector<DSurfPoint>& pl =
+                            polys[e.poly];
+                    if (pl.size() < 2)
+                        return nullptr;
+                    return e.end ? &pl[pl.size() - 2] : &pl[1];
+                };
+                const auto airroof = [&](float cx, float cy,
+                                         float cz) {
+                    int cnt = 0;
+                    for (const size_t q : cl)
+                    {
+                        const DSurfPoint* nb = neighbor(ends[q]);
+                        if (!nb)
+                            continue;
+                        const float mxx = (cx + nb->x) * 0.5f,
+                                    myy = (cy + nb->y) * 0.5f,
+                                    mzz = (cz + nb->z) * 0.5f;
+                        const float h = 0.01f * sp;
+                        float xs[7], ys[7], zs[7];
+                        for (int u = 0; u < 7; ++u)
+                        { xs[u]=mxx; ys[u]=myy; zs[u]=mzz; }
+                        xs[1]+=h; xs[2]-=h; ys[3]+=h; ys[4]-=h;
+                        zs[5]+=h; zs[6]-=h;
+                        Region dd = {};
+                        dd.voxels = 7;
+                        dd.X = xs; dd.Y = ys; dd.Z = zs;
+                        const float* rf = tape_eval_r(base, ctx, dd);
+                        const float f = rf[0], h2 = 2 * h;
+                        const float gx = (rf[1]-rf[2])/h2,
+                                    gy = (rf[3]-rf[4])/h2,
+                                    gz = (rf[5]-rf[6])/h2;
+                        const float gl =
+                                sqrtf(gx*gx + gy*gy + gz*gz);
+                        if (std::isfinite(f) && f > 0 && gl > 0 &&
+                            fabsf(f)/gl > 0.02f * sp)
+                            ++cnt;
+                    }
+                    return cnt;
+                };
+                int best = airroof(mx, my, mz);
+                for (const size_t q : cl)
+                {
+                    if (best == 0)
+                        break;
+                    const DSurfPoint& C = pt_of(ends[q]);
+                    const int sc = airroof(C.x, C.y, C.z);
+                    if (sc < best)
+                    {
+                        best = sc;
+                        mx = C.x; my = C.y; mz = C.z;
+                    }
+                }
+            }
             for (const size_t q : cl)
             {
                 pt_of(ends[q]) = { mx, my, mz };
