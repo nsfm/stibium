@@ -6528,18 +6528,32 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
      *  pair densifies (the ladder's 0.5 mm grooves at >=0.11 sp are
      *  untouched, additive rings at 0.22-0.77 sp are untouched), and
      *  at coarser res the pair opens past the bar (seam2 r7 = 0.44 sp)
-     *  so NOTHING densifies - the step resolves normally.  Default
-     *  ON at N=1 (one bisection, the measured sweet spot: N=2 holds
-     *  the win, N=3 over-densifies and a 0.027 sp roof returns).
-     *  STIBIUM_DMESH_STEPDENSE=0 reverts to 3b71787e; N = midpoints
-     *  per segment.  Measured (bino r1, seam1): worst air 0.030 ->
-     *  0.006 sp, |depth| std 0.0091 -> 0.0015 sp - the chaotic deep
-     *  roof becomes the tight uniform band of a resolved step (seam2's
-     *  own r1 texture), off-law 53 -> 36; nm 2 -> 0.  */
+     *  so NOTHING densifies - the step resolves normally.  N=1 is
+     *  the measured sweet spot (one bisection: N=2 holds the win,
+     *  N=3 over-densifies and a 0.027 sp roof returns).
+     *  STIBIUM_DMESH_STEPDENSE=N opts in; 0/unset = 3b71787e
+     *  behavior.  Measured (bino_extract r1, seam1): worst air
+     *  0.030 -> 0.006 sp, |depth| std 0.0091 -> 0.0015 sp - the
+     *  chaotic deep roof becomes the tight uniform band of a
+     *  resolved step (seam2's own r1 texture), off-law 53 -> 36;
+     *  nm 2 -> 0.
+     *
+     *  DEFAULT OFF (Nate's eyes, 2026-07-20 night): at full-bino
+     *  scale the 0.10 sp DISTANCE bar has no shape story - it
+     *  catches curved sub-cell joint pairs around the eyepiece
+     *  (clusters y 39-57 z 60-75, none at the straight-step seams)
+     *  and bisecting those sprayed over-bar area 0.077% -> 0.083%
+     *  (+19 faces, repairs 7.4K); Nate read it as "a teensy bit
+     *  rougher" before the numbers did.  The extract bench contains
+     *  ONLY straight vertical twin-rails - a bench blind spot, not
+     *  a referee failure.  Re-promotion needs an IDENTITY STORY
+     *  (the 20d0fee9 lesson): engage on straight/parallel/roofed
+     *  pairs, not every sub-bar distance - or deliver the wall by
+     *  explicit stitch instead of tie-winning.  */
     std::vector<std::array<float, 3>> dens_pts;
     {
         static const char* dens_env = getenv("STIBIUM_DMESH_STEPDENSE");
-        const int step_dense = dens_env ? atoi(dens_env) : 1;
+        const int step_dense = dens_env ? atoi(dens_env) : 0;
         if (step_dense > 0 && cseg.size() > 1 &&
             accepted.size() == cseg.size())
         {
