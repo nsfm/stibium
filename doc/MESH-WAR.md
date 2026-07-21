@@ -81,12 +81,19 @@ meshes rung-to-rung, plumb and in-law.  seam1 worst 0.030 ->
 0.006 (5x), |depth| std 0.0091 -> 0.0015, nm 2 -> 0; both seams
 wear seam2's clean uniform texture.  res-7: 0 midpoints
 injected (0.44 sp > bar) = byte-identical, correctly disengages.
-DEMOTION (Nate's eyes + facedev agree): at full-bino scale the
-DISTANCE-only bar bisects curved sub-cell joint pairs at the
-eyepiece (0.077% -> 0.083% over-bar, repairs 7.4K) - no shape
-story.  Re-promotion path: straight/parallel/roofed identity
-gate or explicit wall stitch.  The extract bench contains only
-straight twin-rails - build a curved-pair jar before round 3.
+DEMOTION (Nate's eyes + facedev agree): 0.077% -> 0.083%
+over-bar on the full bino, repairs 7.4K.  SITE-DUMP VERDICT
+(9ccde844, STEPDENSE_DUMP instrument): 930 injections, 9/12
+damage clusters ON injection sites - the "collateral" was the
+SAME step family at every station of the bino, TILTED (the
+extract is Nate's straightened copy).  Treatment wins on
+axis-aligned rails, loses on tilted: a tilted seam sweeps all
+lattice phases, fixed bisection wins some stretches and churns
+the rest.  Re-promotion identity gate = rail AXIS-ALIGNMENT
+(not curvature); or the law-generative WALL STITCH (emit the
+ribbon rail-to-rail from the law itself, no lattice phase to be
+unlucky about) - the strongest candidate, untried by both
+agents.  Bench note: a tilted-step jar would referee round 3.
 REFUTED with numbers, knobs kept off-default so nobody re-runs
 them: STEPREFINE (skipping roofing separators -> fresh 0.068
 chip), STEPCOLLAPSE (midline = 2936 chips - the twin rails are
