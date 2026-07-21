@@ -160,6 +160,46 @@ deviation).  Any visible difference = a dial that is
 accidentally resolution-dependent and should be re-expressed
 in sp.  A diagnostic wearing a hack's clothes.
 
+## NEXT-SESSION ENTRY POINT (2026-07-20 end - read this, then go)
+
+STATE: SIX fixes landed this arc (poaching 04531b9a, corner
+rescue 228c9d82, graze demotion 3d8d7607, razor tie-break
+fdec9167, corner-support keep a00e4ce2, junction spread gate
+3516f127 - each commit message is a complete case file).
+BENCH: flat + cylinder ladders 100% (Nate's eyes + referees);
+SCREWS DONE - "leave her be" (Nate): FINAL 0 chips / FACE
+0.000% / tilt 1.86% / 4 repairs, residuals ~0.1mm =
+screws_FINALBOSS.stl.  Bino: JSPREAD kept (Nate: equal to
+ENDGAME2, shifts noise, minor improvements; both staged).
+
+OPEN FRONTS, in Nate's priority order:
+1. THE 0.25mm STEP CLASS (bino): residual noise along a 0.25mm
+   step between a flat plane and a quartered cylinder - JSPREAD
+   did NOT clear it.  NATE IS BUILDING A REFERENCE MODEL to
+   isolate it (his extracts have been lethal all campaign -
+   wait for it, then run the standard forensics chain from the
+   tracer-forensics-playbook memory).  Likely kin: sub-lattice
+   step towers (the JSPREAD case) + the hidden-thin material
+   class - but MEASURE, the last three hunts each revised their
+   case-file theory.
+2. TEXT CAMPAIGN (r2/resin tier target): baseline + thesis in
+   the PRODUCT TIERS section.  The opening boss is DOCTRINE:
+   engraved strokes are thin AIR - the material-only witness
+   gate + 0.1mm weld treat them as fuse-able contacts.  "Two
+   parts touching" vs "a letter someone carved."
+3. Zeiss full sweep with all six fixes (expect law up, mass
+   flat - the 577K default config).
+4. Backlog: scale-2x hack as resolution-dependence diagnostic;
+   micro-SLA research (Nate); FACE area-coherence term (Nate
+   sees coherent 0.025sp dimples below the 0.05 bar).
+
+METHOD (proven this arc, keep): instruments before theories;
+one variable per run; Nate's eyes as formal referee; deep
+single-question code hunts -> opus agents in worktrees (brief =
+repro + verified facts + acceptance battery + regression
+warnings; recover crashed agents from worktree diff +
+transcript narration).  Six briefs, six kills, zero reverts.
+
 ## FIFTH FIX - CORNER-SUPPORT KEEP (2026-07-20 afternoon, a00e4ce2)
 
 Nate's eye sweep of the four-fix bench caught a cylinder
