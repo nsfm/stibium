@@ -5763,7 +5763,7 @@ using DPoint3 = DT::Point;
  *  _impl class, which IS the triangulation (derives from
  *  Conforming_Delaunay_triangulation_3<T_3> deriving from T_3), so
  *  the whole DT code path ports onto it.  Header-declared public,
- *  version-pinned by the system CGAL; GPL like the rest of us.  */
+ *  version-pinned by the system CGAL; copyleft like the rest of us.  */
 using CVb  = CGAL::Conforming_constrained_Delaunay_triangulation_vertex_base_3<K, Vb>;
 using CCb  = CGAL::Conforming_constrained_Delaunay_triangulation_cell_base_3<K, Cb>;
 using CTds = CGAL::Triangulation_data_structure_3<CVb, CCb>;
