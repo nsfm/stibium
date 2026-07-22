@@ -310,6 +310,62 @@ class to shrink everywhere), then NATE'S TEXT GAUNTLET
 (engraved text on flat + cylindrical surfaces - the graduation
 exam).
 
+## TODO EXPERIMENT: QEF-COLLAPSE SAMPLE THINNING (pre-CGAL)
+## (queued 2026-07-21, from the libfive three-mesher recon)
+
+THE STEAL (full analysis: doc/research/2026-07-21-libfive-
+mesher-comparison.md, gitignored reference): libfive's only
+decimation is an octree-level, QEF-error-gated bottom-up cell
+collapse (libfive/src/render/brep/dc/dc_tree.inl,
+collectChildren ~line 580) - it merges 8 children into one
+leaf whenever (a) no child is a branch, (b) the Ju-2002
+topology-safety triple holds (edge/face/center sign agreement
+vs corners - dc_tree3.cpp leafsAreManifold ~line 17 +
+cornersAreManifold 256-entry table), and (c) the merged QEF
+re-solve has residual < max_err AND the solved vertex is
+in-region AND |f(vertex)| < max_err.  Children's compact QEFs
+(AtA/AtB/BtB) just SUM, so the merge is O(1) per cell.
+
+WHY WE WANT IT: CGAL insert is ~2/3 of wall (84s+/52% on
+zeiss d1, 675+215s full-scale) and RSS scales with point
+count (20 GB incident class).  Our THIN pass already thins
+WITNESSES; this collapses SAMPLE CELLS - flat/near-planar
+sheets currently feed thousands of coplanar DC verts into the
+DT that one merged vertex could represent.  Fewer points into
+CGAL is the entire r1 speed+memory game, and unlike decimation
+AFTER extraction, upstream thinning also shrinks the DT itself.
+
+SKETCH (where it slots): after stage-A sampling / before the
+soup goes to delaunay_mesh's insert - walk the leaf octree
+bottom-up over SIGN-UNANIMOUS-boundary groups of 8 sibling
+cells, accumulate their surface-vertex QEFs (we already have
+per-cell QEF machinery; compact AtA/AtB/BtB accumulation may
+need adding), apply gates in order: (1) no child subdivided,
+(2) Ju triple on our lattice signs, (3) merged QEF residual
+< bar (start at the repair bar 0.03 sp, NOT libfive's 1e-8 -
+theirs merges only exactly-planar; ours should merge
+near-planar), (4) |f| oracle check at the merged vertex
+(tape_eval, batched), (5) NEVER collapse cells that touch:
+constrained-crease corridors (the law needs its support),
+dense drill-down bands, hidden-cell witnesses, tseed/contact
+seeds, or any cell whose group spans a live-pair tangle.
+Replace the group's surface verts with the single merged vert
+in the soup; keep provenance for NM_DEBUG.
+
+REFEREES: zeiss d1 wall + peak RSS (peak.py) vs the 14.7 min
+/ 3.87 GB default; FACE must hold 0.022%; bino FACE 0.077%
+bar; full battery (ladder r1+r2, cyl r1+r2, screws, suite).
+Expected win: insert time and RSS drop roughly with soup
+size on flat-heavy models; zeiss is mostly curved so measure
+before promising.  RISKS: (a) collapsing under-samples curved
+sheets - gate (3)'s bar is the dial, sweep 0.01/0.03/0.1 sp;
+(b) T-junction seams where a collapsed group borders an
+uncollapsed neighbor - our DT doesn't crack (it's not a dual
+grid walk) but witness density steps could print as texture;
+(c) interplay with autodense retreat (demoted leaves must
+first un-collapse).  Env-gate STIBIUM_DMESH_QCOLLAPSE, ship
+OFF until the referee table exists.
+
 ## CURRENT STATE (2026-07-20, post metric-audit)
 
 THE RANKING METRIC IS NOW FACE (area-weighted centroid
