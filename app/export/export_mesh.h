@@ -10,6 +10,16 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
+/*
+ *  --provenance: read only the mesh file's embedded stamp (STL
+ *  80-byte header or 3MF Description metadata) and print what it
+ *  records about how the mesh was made.  Needs no .sb / Shape.
+ *  Returns a process exit code; graceful (0) on files with no stamp.
+ */
+int meshProvenance(const QString& mesh);
+
+////////////////////////////////////////////////////////////////////////////////
+
 class ExportMeshWorker : public ExportWorker
 {
 public:

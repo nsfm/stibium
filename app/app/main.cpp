@@ -26,6 +26,7 @@
 #include "graph/proxy/graph.h"
 #include "graph/proxy/node.h"
 #include "export/export_worker.h"
+#include "export/export_mesh.h"
 #include "export/export_image.h"
 #include "export/gif_writer.h"
 #include "graph/serialize/serializer.h"
@@ -664,7 +665,8 @@ int main(int argc, char *argv[])
             arg == "--analyze" || arg == "--describe-nodes" ||
             arg == "--import-vm" || arg == "--diff" ||
             arg == "--turntable" || arg == "--wiggle" ||
-            arg == "--stereo" || arg == "--lightsweep")
+            arg == "--stereo" || arg == "--lightsweep" ||
+            arg == "--provenance")
         {
             if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM"))
                 qputenv("QT_QPA_PLATFORM", "offscreen");
@@ -856,12 +858,22 @@ int main(int argc, char *argv[])
                 "area-weighted face-deviation statistics "
                 "(--resolution sets the pitch), then exit", "MESH");
         parser.addOption(facedevOpt);
+        QCommandLineOption provenanceOpt("provenance",
+                "Print what a mesh FILE (binary STL or 3MF) records "
+                "about how it was made - mesher, resolution, date, "
+                "environment overrides, mesh report - then exit.  "
+                "Reads only the file; needs no .sb", "FILE");
+        parser.addOption(provenanceOpt);
         parser.addPositionalArgument("file", "File to open", "[file]");
 
         parser.process(app);
 
         if (parser.isSet(describeOpt))
             return describeNodes(app);
+
+        // --provenance reads only the mesh file: no project, no graph.
+        if (parser.isSet(provenanceOpt))
+            return meshProvenance(parser.value(provenanceOpt));
 
         const bool headless = parser.isSet(exportOpt) ||
                               parser.isSet(renderOpt) ||

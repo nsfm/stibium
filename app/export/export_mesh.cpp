@@ -9,6 +9,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QRegularExpression>
+#include <QStringList>
 #include <QDateTime>
 
 #include "app/settings.h"
@@ -467,11 +468,11 @@ static bool load_stl_mesh(const QString& path,
 }
 
 /*  Minimal central-directory zip walk + raw-deflate inflate:
- *  enough to read the 3D/*.model entry of any spec-conforming
- *  3MF (including our own writer's).  */
-static bool load_3mf_mesh(const QString& path,
-                          std::vector<float>& verts,
-                          std::vector<uint32_t>& tris)
+ *  reads the 3D/*.model entry (the OPC part holding the mesh and
+ *  our metadata) of any spec-conforming 3MF, including our own
+ *  writer's, into `model`.  Shared by the geometry loader and the
+ *  --provenance reader.  */
+static bool read_3mf_model_xml(const QString& path, std::string& model)
 {
     FILE* f = fopen(path.toLocal8Bit().constData(), "rb");
     if (!f)
@@ -498,7 +499,6 @@ static bool load_3mf_mesh(const QString& path,
                (uint32_t(tb[o+3]) << 24); };
     const uint32_t nent = rd16(eocd + 10);
     uint32_t cdofs = rd32(eocd + 16);
-    std::string model;
     for (uint32_t e = 0; e < nent; ++e)
     {
         unsigned char ch[46];
@@ -557,7 +557,15 @@ static bool load_3mf_mesh(const QString& path,
         break;
     }
     fclose(f);
-    if (model.empty())
+    return !model.empty();
+}
+
+static bool load_3mf_mesh(const QString& path,
+                          std::vector<float>& verts,
+                          std::vector<uint32_t>& tris)
+{
+    std::string model;
+    if (!read_3mf_model_xml(path, model))
         return false;
     /*  Light scan of the model XML: vertices in document order,
      *  triangles by index (matching our writer and the spec).  */
@@ -617,5 +625,117 @@ int ExportMeshWorker::facedevHeadless(const QString& mesh,
     dmesh_face_sweep(deck, mverts, mtris, 1.f / r2,
                      getenv("STIBIUM_DMESH_FACE_DUMP"));
     deck_free(deck);
+    return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+/*  --provenance support: read only the mesh file's embedded stamp
+ *  and print what it records about how the mesh was made.  No .sb,
+ *  no Shape, no sampling - staged exports with ambiguous names
+ *  ("r2mint" - revision or resolution?) explain themselves from the
+ *  header alone.  3MF carries the full config in its Description
+ *  metadata; a binary STL carries the short form in its 80-byte
+ *  header.  */
+
+static std::string xml_unescape(const std::string& s)
+{
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); )
+    {
+        if (s[i] == '&')
+        {
+            if (!s.compare(i, 5, "&amp;"))  { out += '&';  i += 5; continue; }
+            if (!s.compare(i, 4, "&lt;"))   { out += '<';  i += 4; continue; }
+            if (!s.compare(i, 4, "&gt;"))   { out += '>';  i += 4; continue; }
+            if (!s.compare(i, 6, "&quot;")) { out += '"';  i += 6; continue; }
+            if (!s.compare(i, 6, "&apos;")) { out += '\''; i += 6; continue; }
+        }
+        out += s[i++];
+    }
+    return out;
+}
+
+int meshProvenance(const QString& mesh)
+{
+    const QByteArray path = mesh.toLocal8Bit();
+
+    if (mesh.endsWith(".3mf", Qt::CaseInsensitive))
+    {
+        std::string model;
+        if (!read_3mf_model_xml(mesh, model))
+        {
+            fprintf(stderr, "provenance: could not read %s\n",
+                    path.constData());
+            return 1;
+        }
+        const char* key = "<metadata name=\"Description\">";
+        const size_t a = model.find(key);
+        if (a == std::string::npos)
+        {
+            printf("%s: 3MF carries no Stibium provenance "
+                   "(pre-stamp or foreign file)\n", path.constData());
+            return 0;
+        }
+        const size_t s = a + strlen(key);
+        const size_t e = model.find("</metadata>", s);
+        const QString desc = QString::fromStdString(xml_unescape(
+                model.substr(s, e == std::string::npos ? e : e - s)));
+
+        printf("%s: 3MF provenance\n", path.constData());
+        /*  One line per recorded field: the leading run of
+         *  space-separated key=value fields, then each "; "-delimited
+         *  mesh-report fragment.  A description with no delimiters
+         *  falls through as a single line.  */
+        const QStringList segs = desc.split("; ");
+        for (int i = 0; i < segs.size(); ++i)
+        {
+            if (i == 0)
+                for (const QString& kv :
+                     segs[0].split(' ', Qt::SkipEmptyParts))
+                    printf("  %s\n", kv.toLocal8Bit().constData());
+            else if (!segs[i].trimmed().isEmpty())
+                printf("  %s\n", segs[i].trimmed()
+                                       .toLocal8Bit().constData());
+        }
+        return 0;
+    }
+
+    // Binary STL: the provenance is the 80-byte header.
+    FILE* f = fopen(path.constData(), "rb");
+    if (!f)
+    {
+        fprintf(stderr, "provenance: could not open %s\n",
+                path.constData());
+        return 1;
+    }
+    char hdr[80];
+    const size_t got = fread(hdr, 1, sizeof(hdr), f);
+    fclose(f);
+    if (got != sizeof(hdr))
+    {
+        fprintf(stderr, "provenance: %s is too small to be a binary "
+                        "STL\n", path.constData());
+        return 1;
+    }
+
+    // Trim trailing NUL / space padding, then sanitize non-printables.
+    size_t n = sizeof(hdr);
+    while (n && (hdr[n-1] == '\0' || hdr[n-1] == ' '))
+        --n;
+    std::string stamp;
+    for (size_t i = 0; i < n; ++i)
+        stamp += (hdr[i] >= 0x20 && hdr[i] < 0x7f) ? hdr[i] : '.';
+
+    if (strncmp(hdr, "Stibium", 7))
+    {
+        printf("%s: STL header carries no Stibium stamp "
+               "(foreign or pre-stamp export)\n"
+               "  header: \"%s\"\n", path.constData(), stamp.c_str());
+        return 0;
+    }
+    printf("%s: STL provenance stamp\n  %s\n",
+           path.constData(), stamp.c_str());
     return 0;
 }
