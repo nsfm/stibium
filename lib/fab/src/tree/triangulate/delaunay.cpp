@@ -8780,13 +8780,24 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 getenv("STIBIUM_DMESH_STITCHLIC");
         const float lic_bar = (lb_env ? float(atof(lb_env))
                                       : 0.01f) * soup.spacing;
+        /*  Face-touching emission bar: tighter than the wall bar.
+         *  Ears/fans re-triangulate FLAT face area, so their
+         *  deviation should stay inside the clean-seam texture
+         *  band (seam2's 0.006 sp + headroom); the measured bino
+         *  population splits 61 tris at ~0.000 vs 7 riders at
+         *  0.0099 - the riders go back to the ordinary pipeline.  */
+        static const char* fb2_env =
+                getenv("STIBIUM_DMESH_STITCHFACE");
+        const float face_bar = (fb2_env ? float(atof(fb2_env))
+                                        : 0.008f) * soup.spacing;
         const bool st_dbg =
                 getenv("STIBIUM_DMESH_CHIP_DEBUG") != nullptr;
         FILE* st_dump = nullptr;
         if (const char* dp = getenv("STIBIUM_DMESH_STITCH_DUMP"))
             st_dump = fopen(dp, "w");
         uint64_t st_pairs = 0, st_lic = 0, st_spans = 0,
-                 st_ribbons = 0, st_rm = 0, st_add = 0;
+                 st_ribbons = 0, st_rm = 0, st_add = 0,
+                 st_face = 0;
         /*  fallback census: 0 edge-excess, 1 boundary-shape,
          *  2 transitions, 3 pre-existing diagonal, 4 certify  */
         uint64_t st_fb[5] = { 0, 0, 0, 0, 0 };
@@ -9016,6 +9027,12 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 }
             std::vector<char> rmflag(ntri0, 0);
             std::vector<uint32_t> stitched;
+            /*  vertex handle -> output id, for the tet-ring
+             *  sheet pairing at pinch fans  */
+            std::unordered_map<const void*, uint32_t> vhrev;
+            vhrev.reserve(xvh.size());
+            for (uint32_t i = 0; i < xvh.size(); ++i)
+                vhrev[&*xvh[i]] = i;
             const auto live_on = [&](uint64_t k) {
                 const auto it = emap.find(k);
                 if (it == emap.end()) return 0;
@@ -9375,95 +9392,188 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                     return T[e];
                             return UINT32_MAX;
                         };
-                        /*  traversal direction of edge (a2->b2)
-                         *  inside facet t: +1 forward, -1
-                         *  reverse, 0 absent  */
-                        const auto trav = [&](uint32_t t,
-                                uint32_t a2, uint32_t b2) {
-                            const uint32_t* T = &out->tris[3*t];
-                            for (int e = 0; e < 3; ++e)
+                        /*  extraction facets on an edge (t <
+                         *  ntri0; removed-by-earlier-span facets
+                         *  still identify DT facets - out->tris
+                         *  is only compacted at the very end)  */
+                        const auto ext_on = [&](uint64_t kk2,
+                                uint32_t skip) {
+                            uint32_t found = UINT32_MAX;
+                            const auto it = emap.find(kk2);
+                            if (it == emap.end())
+                                return found;
+                            for (const uint32_t t2 : it->second)
+                                if (t2 < ntri0 && t2 != skip)
+                                {
+                                    if (found != UINT32_MAX)
+                                        return UINT32_MAX; // >2
+                                    found = t2;
+                                }
+                            return found;
+                        };
+                        /*  sheet-mate of facet t across edge
+                         *  {va,vb}, by the TET RING (the manifold
+                         *  pass rule: the two facets bounding the
+                         *  same INSIDE cell run are one sheet).
+                         *  Exact at any fan size - the v1 winding
+                         *  parity could not pick between the two
+                         *  ring-adjacent candidates at the
+                         *  extract's nm pinch fans (the measured
+                         *  90%-ribbon gaps).  */
+                        const auto ring_mate = [&](uint32_t va,
+                                uint32_t vb, uint32_t t)
+                                -> uint32_t {
+                            if (va >= xvh.size() ||
+                                vb >= xvh.size() ||
+                                t >= tri_cells.size())
+                                return UINT32_MAX;
+                            const VH vp = xvh[va], vq = xvh[vb];
+                            typename Tri::Cell_handle ec;
+                            int ei, ej;
+                            if (!dt.is_edge(vp, vq, ec, ei, ej))
+                                return UINT32_MAX;
+                            auto circ = dt.incident_cells(ec,
+                                                          ei, ej);
+                            const auto done2 = circ;
+                            std::vector<CH> ring;
+                            do
+                                ring.push_back(CH(circ));
+                            while (++circ != done2);
+                            const auto csign = [&](CH c) {
+                                return dt.is_infinite(c) ? 1
+                                        : int(c->info());
+                            };
+                            struct Tr
                             {
-                                if (T[e] == a2 &&
-                                    T[(e+1)%3] == b2)
-                                    return 1;
-                                if (T[e] == b2 &&
-                                    T[(e+1)%3] == a2)
-                                    return -1;
+                                uint32_t w;
+                                int before;
+                            };
+                            std::vector<Tr> trs;
+                            for (size_t r = 0; r < ring.size();
+                                 ++r)
+                            {
+                                const CH c1 = ring[r];
+                                const CH c2 = ring[(r + 1) %
+                                        ring.size()];
+                                const int s1 = csign(c1);
+                                const int s2 = csign(c2);
+                                if (s1 == s2 || s1 == 0 ||
+                                    s2 == 0)
+                                    continue;
+                                int ni = -1;
+                                for (int q = 0; q < 4; ++q)
+                                    if (c1->neighbor(q) == c2)
+                                        ni = q;
+                                if (ni < 0)
+                                    return UINT32_MAX;
+                                VH wv = VH();
+                                for (int q = 0; q < 4; ++q)
+                                {
+                                    if (q == ni)
+                                        continue;
+                                    const VH cv = c1->vertex(q);
+                                    if (cv != vp && cv != vq)
+                                        wv = cv;
+                                }
+                                const auto wf = wv == VH()
+                                    ? vhrev.end()
+                                    : vhrev.find(&*wv);
+                                if (wf == vhrev.end())
+                                    return UINT32_MAX;
+                                trs.push_back({ wf->second, s1 });
                             }
-                            return 0;
+                            if (trs.size() < 2)
+                                return UINT32_MAX;
+                            const uint32_t tw = third(t, va, vb);
+                            size_t m = SIZE_MAX;
+                            for (size_t q = 0; q < trs.size();
+                                 ++q)
+                                if (trs[q].w == tw)
+                                    m = q;
+                            if (m == SIZE_MAX)
+                                return UINT32_MAX;
+                            /*  before > 0: the inside run
+                             *  follows in ring order - its far
+                             *  end is the next transition;
+                             *  before < 0: it precedes.  */
+                            const size_t k2 = trs.size();
+                            const uint32_t mw =
+                                trs[m].before > 0
+                                    ? trs[(m + 1) % k2].w
+                                    : trs[(m + k2 - 1) % k2].w;
+                            /*  map the mate's third vertex back
+                             *  to its output facet on this edge  */
+                            const auto it = emap.find(ek(va, vb));
+                            if (it == emap.end())
+                                return UINT32_MAX;
+                            for (const uint32_t t2 : it->second)
+                                if (t2 < ntri0 && t2 != t &&
+                                    third(t2, va, vb) == mw)
+                                    return t2;
+                            return UINT32_MAX;
                         };
                         /*  wedge walk: h = (u -> v), rotate
-                         *  around v from edge {v,u} through
-                         *  removed facets to the wedge's next
-                         *  boundary half-edge (v -> w).  Sheet-
-                         *  correct at pinch fans: adjacent facets
-                         *  of the oriented extraction traverse a
-                         *  shared edge in OPPOSITE directions, so
-                         *  each crossing requires the matching
-                         *  traversal - jumping sheets (the
-                         *  measured dead-end at the extract's two
-                         *  nm rail edges) fails the parity.  */
-                        const auto next_he = [&](uint64_t h,
-                                                 bool rev) {
+                         *  around v from rim edge {v,u} through
+                         *  the removed sheet to its next rim
+                         *  half-edge (v -> w).  Crossings follow
+                         *  the sheet-mate: trivial on 2-facet
+                         *  edges, tet-ring at fans.  */
+                        const auto next_he = [&](uint64_t h)
+                                -> uint64_t {
                             const uint32_t u = uint32_t(h >> 32);
                             const uint32_t v = uint32_t(h);
-                            uint32_t prev = UINT32_MAX;
+                            const uint64_t k0 = ek(v, u);
+                            const auto it0 = rmap.find(k0);
+                            if (it0 == rmap.end())
+                                return UINT64_MAX;
+                            uint32_t t;
+                            if (it0->second.size() == 1)
+                                t = it0->second[0];
+                            else
+                            {
+                                /*  nm rim edge: take the removed
+                                 *  facet sheet-adjacent to the
+                                 *  one LIVE facet  */
+                                uint32_t lt = UINT32_MAX;
+                                const auto le = emap.find(k0);
+                                if (le != emap.end())
+                                    for (const uint32_t t2 :
+                                         le->second)
+                                        if (t2 < ntri0 &&
+                                            !rmflag[t2] &&
+                                            !rset.count(t2))
+                                        { lt = t2; break; }
+                                t = lt == UINT32_MAX
+                                    ? UINT32_MAX
+                                    : ring_mate(v, u, lt);
+                                if (t == UINT32_MAX ||
+                                    !rset.count(t))
+                                {
+                                    if (getenv("STIBIUM_DMESH_"
+                                               "STITCH_DEBUG"))
+                                        fprintf(stderr,
+                                            "STITCHDBG walk: nm "
+                                            "rim start %u-%u "
+                                            "unresolved\n", v, u);
+                                    return UINT64_MAX;
+                                }
+                            }
                             uint32_t x = u;
-                            int need = 1;   // trav(t, x, v)
                             for (int g = 0; g < 4096; ++g)
                             {
-                                const auto it =
-                                        rmap.find(ek(v, x));
-                                if (it == rmap.end())
-                                {
-                                    if (getenv("STIBIUM_DMESH_"
-                                               "STITCH_DEBUG"))
-                                        fprintf(stderr,
-                                            "STITCHDBG walk: no "
-                                            "removed on %u-%u\n",
-                                            v, x);
-                                    return UINT64_MAX;
-                                }
-                                uint32_t t = UINT32_MAX;
-                                const auto& rts = it->second;
-                                for (size_t ri = 0;
-                                     ri < rts.size(); ++ri)
-                                {
-                                    const uint32_t rt = rev
-                                        ? rts[rts.size()-1-ri]
-                                        : rts[ri];
-                                    if (rt != prev &&
-                                        trav(rt, x, v) == need)
-                                    { t = rt; break; }
-                                }
-                                if (t == UINT32_MAX)
-                                {
-                                    if (getenv("STIBIUM_DMESH_"
-                                               "STITCH_DEBUG"))
-                                        fprintf(stderr,
-                                            "STITCHDBG walk: no "
-                                            "parity candidate on "
-                                            "%u-%u (%zu removed) "
-                                            "need %d\n", v, x,
-                                            it->second.size(),
-                                            need);
-                                    return UINT64_MAX;
-                                }
-                                const uint32_t w =
-                                        third(t, v, x);
+                                const uint32_t w = third(t, v, x);
                                 if (w == UINT32_MAX)
                                     return UINT64_MAX;
-                                const auto r2 =
-                                        rmap.find(ek(v, w));
+                                const uint64_t kw = ek(v, w);
+                                const auto rw = rmap.find(kw);
                                 const size_t nrm =
-                                    r2 == rmap.end() ? 0
-                                    : r2->second.size();
-                                const int lv2 =
-                                    live_on(ek(v, w)) - int(nrm);
+                                    rw == rmap.end() ? 0
+                                    : rw->second.size();
+                                const int lv2 = live_on(kw)
+                                        - int(nrm);
                                 if (lv2 == 1)
                                 {
-                                    /*  rim edge: the wedge ends
-                                     *  here  */
+                                    /*  rim: the wedge ends  */
                                     const uint64_t cand2 =
                                         (uint64_t(v) << 32) | w;
                                     if (!hset.count(cand2) &&
@@ -9471,61 +9581,43 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                                "STITCH_DEBUG"))
                                         fprintf(stderr,
                                             "STITCHDBG walk: rim "
-                                            "%u->%u not in hset\n",
-                                            v, w);
+                                            "%u->%u not in "
+                                            "hset\n", v, w);
                                     return hset.count(cand2)
                                             ? cand2 : UINT64_MAX;
                                 }
-                                if (nrm < 2)
+                                /*  cross to the sheet-mate  */
+                                uint32_t t2 = ext_on(kw, t);
+                                if (t2 == UINT32_MAX ||
+                                    nrm + size_t(lv2) != 2)
+                                    t2 = ring_mate(v, w, t);
+                                if (t2 == UINT32_MAX ||
+                                    !rset.count(t2))
                                 {
                                     if (getenv("STIBIUM_DMESH_"
                                                "STITCH_DEBUG"))
                                         fprintf(stderr,
                                             "STITCHDBG walk: "
-                                            "wedge ends at edge "
-                                            "%u-%u nrm=%zu "
-                                            "lv2=%d (%.4f,%.4f,"
-                                            "%.4f)\n", v, w, nrm,
-                                            lv2, out->verts[3*w],
-                                            out->verts[3*w+1],
-                                            out->verts[3*w+2]);
+                                            "cross %u-%u failed "
+                                            "(nrm %zu lv %d)\n",
+                                            v, w, nrm, lv2);
                                     return UINT64_MAX;
                                 }
-                                /*  t traverses (v,w) as td; the
-                                 *  sheet-adjacent neighbour must
-                                 *  traverse opposite, i.e.
-                                 *  trav(next, w, v) == td  */
-                                need = trav(t, v, w);
-                                prev = t;
+                                t = t2;
                                 x = w;
                             }
                             return UINT64_MAX;
                         };
                         /*  walk loops, zipper each (sorted start
                          *  order: determinism is part of the
-                         *  contract).  TWO deterministic
-                         *  attempts: at an all-removed pinch fan
-                         *  the sheet parity leaves two ring-
-                         *  adjacent candidates and winding alone
-                         *  cannot pick (the extract's two nm
-                         *  stations); if the first choice order
-                         *  knots the loops, the reversed order is
-                         *  tried once before the span falls
-                         *  back.  */
+                         *  contract)  */
                         std::vector<uint32_t> cand_tris;
                         std::vector<uint64_t> hsorted(
                                 hset.begin(), hset.end());
                         std::sort(hsorted.begin(),
                                   hsorted.end());
-                        const bool bok = ok;
-                        for (int att = 0; att < 2; ++att)
-                        {
-                        if (!bok)
-                            break;
-                        ok = true;
-                        fbr = -1;
-                        cand_tris.clear();
                         std::unordered_set<uint64_t> hused;
+                        if (ok)
                         for (const uint64_t h0 : hsorted)
                         {
                             if (!ok || hused.count(h0))
@@ -9536,7 +9628,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                             {
                                 L.push_back(uint32_t(cur >> 32));
                                 hused.insert(cur);
-                                cur = next_he(cur, att == 1);
+                                cur = next_he(cur);
                                 if (cur == UINT64_MAX ||
                                     (cur != h0 &&
                                      hused.count(cur)))
@@ -9781,9 +9873,6 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                 }
                             }
                         }
-                        if (ok || !(att == 0 && fbr == 1))
-                            break;
-                        }
                         /*  interior diagonals must not already
                          *  exist as live edges  */
                         if (ok)
@@ -9847,13 +9936,50 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                 }
                             }
                         }
-                        /*  oracle certification of the ribbon  */
+                        /*  per-tri class: rail-pure (all three
+                         *  verts exact-rail: the wall ribbon
+                         *  proper) vs face-touching (ears/fans
+                         *  re-attaching rim face vertices).
+                         *  Face-touching emission gets a TIGHTER
+                         *  certification bar: it re-triangulates
+                         *  flat face area, where anything beyond
+                         *  planar is a proud bump on the print
+                         *  (Nate's overlay read: the out-of-
+                         *  volume defects live in ribbon parts
+                         *  reaching onto the steps).  */
+                        std::vector<char> tface;
+                        std::vector<float> twr;
+                        if (ok && !cand_tris.empty())
+                        {
+                            tface.resize(cand_tris.size() / 3, 0);
+                            for (size_t q = 0;
+                                 q < cand_tris.size(); q += 3)
+                                for (int e = 0; e < 3; ++e)
+                                {
+                                    const auto f = cls.find(
+                                            cand_tris[q + e]);
+                                    if (f == cls.end() ||
+                                        !(f->second & 48))
+                                        tface[q / 3] = 1;
+                                }
+                        }
+                        /*  oracle certification of the ribbon.
+                         *  ADAPTIVE sampling density: a long ear
+                         *  can hold its centroid + midedges near
+                         *  the surface while its interior bulges
+                         *  (the bino overlay's out-of-volume
+                         *  class rode exactly that gap), so the
+                         *  barycentric lattice scales with the
+                         *  longest edge - size cannot dodge the
+                         *  oracle.  */
                         if (ok && !cand_tris.empty())
                         {
                             std::vector<std::array<float,3>> cpts;
+                            std::vector<size_t> coff;
                             for (size_t q = 0;
                                  q < cand_tris.size(); q += 3)
                             {
+                                coff.push_back(cpts.size());
                                 const float* a2 =
                                         &out->verts[3*cand_tris[q]];
                                 const float* b2 =
@@ -9862,50 +9988,87 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                 const float* c2 =
                                         &out->verts[
                                         3*cand_tris[q+2]];
-                                cpts.push_back({
-                                    (a2[0]+b2[0]+c2[0])/3,
-                                    (a2[1]+b2[1]+c2[1])/3,
-                                    (a2[2]+b2[2]+c2[2])/3 });
+                                float el = 0;
                                 for (int e = 0; e < 3; ++e)
                                 {
                                     const float* u2 = e == 0 ? a2
                                             : e == 1 ? b2 : c2;
                                     const float* w2 = e == 0 ? b2
                                             : e == 1 ? c2 : a2;
-                                    cpts.push_back({
-                                        0.5f*(u2[0]+w2[0]),
-                                        0.5f*(u2[1]+w2[1]),
-                                        0.5f*(u2[2]+w2[2]) });
+                                    const float dx = u2[0]-w2[0],
+                                                dy = u2[1]-w2[1],
+                                                dz = u2[2]-w2[2];
+                                    el = std::max(el,
+                                        dx*dx + dy*dy + dz*dz);
                                 }
+                                el = sqrtf(el);
+                                const int n = std::min(4,
+                                    std::max(2, int(ceilf(el /
+                                        (0.25f * sp)))));
+                                for (int i2 = 0; i2 <= n; ++i2)
+                                    for (int j2 = 0;
+                                         j2 <= n - i2; ++j2)
+                                    {
+                                        const int k3 = n-i2-j2;
+                                        /*  skip corners (mesh
+                                         *  vertices, on-surface
+                                         *  by construction)  */
+                                        if ((i2==n) || (j2==n) ||
+                                            (k3==n))
+                                            continue;
+                                        const float fa =
+                                            float(i2) / n;
+                                        const float fb =
+                                            float(j2) / n;
+                                        const float fc =
+                                            float(k3) / n;
+                                        cpts.push_back({
+                                            fa*a2[0] + fb*b2[0]
+                                                + fc*c2[0],
+                                            fa*a2[1] + fb*b2[1]
+                                                + fc*c2[1],
+                                            fa*a2[2] + fb*b2[2]
+                                                + fc*c2[2] });
+                                    }
                             }
+                            coff.push_back(cpts.size());
                             std::vector<float> cr;
                             lic_eval(cpts, cr);
-                            for (size_t i2 = 0; i2 < cr.size();
-                                 ++i2)
-                                if (!(cr[i2] < lic_bar))
+                            twr.assign(tface.size(), 0.f);
+                            for (size_t q = 0;
+                                 q < tface.size() && ok; ++q)
+                            {
+                                size_t wi = coff[q];
+                                for (size_t s2 = coff[q];
+                                     s2 < coff[q+1]; ++s2)
+                                    if (cr[s2] > cr[wi])
+                                        wi = s2;
+                                twr[q] = cr[wi];
+                                const float bar_t = tface[q]
+                                        ? face_bar : lic_bar;
+                                if (!(twr[q] < bar_t))
                                 {
-                                    near_poly(A, cpts[i2][0],
-                                        cpts[i2][1], cpts[i2][2],
+                                    near_poly(A, cpts[wi][0],
+                                        cpts[wi][1], cpts[wi][2],
                                         farc, nullptr);
                                     if (getenv("STIBIUM_DMESH_"
                                                "STITCH_DEBUG"))
                                     {
-                                        const size_t tq =
-                                                (i2 / 4) * 3;
                                         fprintf(stderr,
                                             "STITCHDBG cert fail "
-                                            "%.5f sp at (%.4f,"
-                                            "%.4f,%.4f) sub %zu "
+                                            "%.5f sp cls %d at "
+                                            "(%.4f,%.4f,%.4f) "
                                             "tri",
-                                            cr[i2] / sp,
-                                            cpts[i2][0],
-                                            cpts[i2][1],
-                                            cpts[i2][2], i2 % 4);
+                                            twr[q] / sp,
+                                            int(tface[q]),
+                                            cpts[wi][0],
+                                            cpts[wi][1],
+                                            cpts[wi][2]);
                                         for (int e = 0; e < 3;
                                              ++e)
                                         {
                                             const uint32_t w2 =
-                                                cand_tris[tq + e];
+                                                cand_tris[3*q + e];
                                             fprintf(stderr,
                                                 " v%u(%.4f,%.4f,"
                                                 "%.4f)", w2,
@@ -9917,8 +10080,9 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                         }
                                         fprintf(stderr, "\n");
                                     }
-                                    ok = false; fbr = 4; break;
+                                    ok = false; fbr = 4;
                                 }
+                            }
                         }
                         if (ok && !cand_tris.empty())
                         {
@@ -9938,6 +10102,8 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                     emap[ek(cand_tris[q+e],
                                         cand_tris[q+(e+1)%3])]
                                         .push_back(id);
+                                if (tface[q / 3])
+                                    ++st_face;
                                 if (st_dump)
                                 {
                                     const float* a2 = &out->verts[
@@ -9947,10 +10113,15 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                     const float* c2 = &out->verts[
                                             3*cand_tris[q+2]];
                                     fprintf(st_dump,
-                                        "T %.6g %.6g %.6g\n",
+                                        "T %.6g %.6g %.6g %d "
+                                        "%.6g\n",
                                         (a2[0]+b2[0]+c2[0])/3,
                                         (a2[1]+b2[1]+c2[1])/3,
-                                        (a2[2]+b2[2]+c2[2])/3);
+                                        (a2[2]+b2[2]+c2[2])/3,
+                                        int(tface[q / 3]),
+                                        twr.size() > q / 3
+                                            ? twr[q / 3] / sp
+                                            : -1.f);
                                 }
                             }
                             st_add += cand_tris.size() / 3;
@@ -10001,7 +10172,8 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         if (st_dbg && (st_pairs || st_spans))
             fprintf(stderr, "STITCH: %llu twin pairs, %llu "
                     "licensed, %llu spans, %llu ribbons stitched, "
-                    "%llu tris removed, %llu emitted, fallbacks "
+                    "%llu tris removed, %llu emitted (%llu "
+                    "face-touching), fallbacks "
                     "edge %llu shape %llu trans %llu diag %llu "
                     "cert %llu\n",
                     (unsigned long long)st_pairs,
@@ -10010,6 +10182,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     (unsigned long long)st_ribbons,
                     (unsigned long long)st_rm,
                     (unsigned long long)st_add,
+                    (unsigned long long)st_face,
                     (unsigned long long)st_fb[0],
                     (unsigned long long)st_fb[1],
                     (unsigned long long)st_fb[2],
