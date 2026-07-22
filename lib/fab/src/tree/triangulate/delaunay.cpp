@@ -6930,6 +6930,317 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 }
         }
     }
+    /*  LAW-JUNCTION UNIFICATION proof-of-concept (round 9,
+     *  STIBIUM_DMESH_LAWJOIN=1 opts in; design in doc/research/
+     *  2026-07-22-law-junction-unification.md).  The round-8
+     *  surgical tip extension is re-delivered at the LAW level:
+     *  each chain component end with a forward crossing-chain
+     *  target within 0.7 sp is marched to the junction with the
+     *  same oracle gates (0.05-0.08 sp steps, point 2e-3 sp,
+     *  segment midpoint 4e-3 sp, Newton-projected onto f=0), and
+     *  the marched points are delivered as CONSTRAINTS: the
+     *  extension segments join cseg under the owning chain, the
+     *  points join the insertion set, and the terminal point sits
+     *  ON the crossing constraint's interior - the through-vertex
+     *  pre-split then splits the crossing chain through it and
+     *  the network becomes a CONNECTED GRAPH at the junction.  No
+     *  mesh surgery; the stitch sees rails that reach their
+     *  junctions as law.  Extensions that would CROSS other law
+     *  (closest approach < 0.05 sp, interiors) are declined -
+     *  new law passes the same discipline as traced law.  */
+    std::vector<std::array<float, 3>> join_pts;
+    std::vector<std::vector<std::array<float, 3>>> join_chains;
+    {
+        static const char* lj_env = getenv("STIBIUM_DMESH_LAWJOIN");
+        const bool lawjoin = lj_env && atoi(lj_env) != 0;
+        if (lawjoin && cseg.size() > 1)
+        {
+            const float sp9 = soup.spacing;
+            const auto ratio_at = [&](
+                    const std::vector<std::array<float,3>>& pts,
+                    std::vector<float>& ratio) {
+                const float h = 1e-3f * sp9;
+                std::vector<float> qx, qy, qz, qv;
+                for (const auto& p : pts)
+                    for (int q = 0; q < 7; ++q)
+                    {
+                        qx.push_back(p[0] +
+                                (q==1 ? h : q==2 ? -h : 0));
+                        qy.push_back(p[1] +
+                                (q==3 ? h : q==4 ? -h : 0));
+                        qz.push_back(p[2] +
+                                (q==5 ? h : q==6 ? -h : 0));
+                    }
+                eval_points_mt(deck, ctx, qx, qy, qz, qv);
+                ratio.resize(pts.size());
+                for (size_t i = 0; i < pts.size(); ++i)
+                {
+                    const float f = qv[i*7];
+                    const float gx = qv[i*7+1] - qv[i*7+2];
+                    const float gy = qv[i*7+3] - qv[i*7+4];
+                    const float gz = qv[i*7+5] - qv[i*7+6];
+                    const float gl = sqrtf(gx*gx + gy*gy + gz*gz)
+                                     / (2 * h);
+                    ratio[i] = (gl > 1e-9f && std::isfinite(f))
+                            ? fabsf(f) / gl : 1e30f;
+                }
+            };
+            std::unordered_map<uint32_t, std::vector<size_t>> bych;
+            for (size_t i = 0; i < cseg.size(); ++i)
+                bych[cseg_chain[i]].push_back(i);
+            std::vector<uint32_t> chains;
+            for (const auto& [c, s] : bych)
+                chains.push_back(c);
+            std::sort(chains.begin(), chains.end());
+            uint64_t nends = 0, njoin = 0;
+            for (const uint32_t cid : chains)
+            {
+                const auto& segs = bych[cid];
+                /*  component walk (exact coordinates)  */
+                std::unordered_map<uint64_t,
+                        std::vector<std::pair<size_t,int>>> ends;
+                for (size_t qi = 0; qi < segs.size(); ++qi)
+                    for (int e = 0; e < 2; ++e)
+                    {
+                        const auto& s = cseg[segs[qi]];
+                        ends[coord_hash(s[3*e], s[3*e+1],
+                                        s[3*e+2])]
+                                .push_back({ qi, e });
+                    }
+                /*  free ends = degree-1 endpoints  */
+                for (size_t qi = 0; qi < segs.size(); ++qi)
+                    for (int e = 0; e < 2; ++e)
+                    {
+                        const auto& s = cseg[segs[qi]];
+                        const auto it = ends.find(coord_hash(
+                                s[3*e], s[3*e+1], s[3*e+2]));
+                        if (it == ends.end() ||
+                            it->second.size() != 1)
+                            continue;
+                        ++nends;
+                        const float pe[3] = { s[3*e], s[3*e+1],
+                                              s[3*e+2] };
+                        const int oe = 1 - e;
+                        const float pp[3] = { s[3*oe],
+                                s[3*oe+1], s[3*oe+2] };
+                        float dir[3] = { pe[0]-pp[0],
+                                pe[1]-pp[1], pe[2]-pp[2] };
+                        const float dl = sqrtf(dir[0]*dir[0] +
+                                dir[1]*dir[1] + dir[2]*dir[2]);
+                        if (!(dl > 1e-6f))
+                            continue;
+                        for (int d = 0; d < 3; ++d)
+                            dir[d] /= dl;
+                        const float step = std::min(std::max(
+                                dl, 0.05f * sp9), 0.08f * sp9);
+                        /*  forward crossing-chain target  */
+                        float tgt[3]; float tbest = 1e30f;
+                        for (size_t si = 0; si < cseg.size();
+                             ++si)
+                        {
+                            if (cseg_chain[si] == cid)
+                                continue;
+                            const auto& s2 = cseg[si];
+                            const float ax = s2[0], ay = s2[1],
+                                    az = s2[2];
+                            const float bx = s2[3]-ax,
+                                    by = s2[4]-ay,
+                                    bz = s2[5]-az;
+                            const float bb = bx*bx + by*by
+                                    + bz*bz;
+                            const float px = pe[0]-ax,
+                                    py = pe[1]-ay,
+                                    pz = pe[2]-az;
+                            float t = bb > 0 ?
+                                (px*bx+py*by+pz*bz)/bb : 0;
+                            t = t < 0 ? 0 : t > 1 ? 1 : t;
+                            const float fx = ax+t*bx,
+                                    fy = ay+t*by, fz = az+t*bz;
+                            const float ex2 = fx-pe[0],
+                                    ey2 = fy-pe[1],
+                                    ez2 = fz-pe[2];
+                            const float d2 = ex2*ex2 + ey2*ey2
+                                    + ez2*ez2;
+                            if (d2 >= tbest ||
+                                d2 > 0.49f * sp9 * sp9 ||
+                                d2 < 0.0025f * sp9 * sp9)
+                                continue;
+                            const float fl = sqrtf(d2);
+                            if (ex2*dir[0] + ey2*dir[1] +
+                                ez2*dir[2] < 0.5f * fl)
+                                continue;
+                            tbest = d2;
+                            tgt[0] = fx; tgt[1] = fy;
+                            tgt[2] = fz;
+                        }
+                        if (tbest > 1e29f)
+                            continue;
+                        /*  march (round-8 gates)  */
+                        std::vector<std::array<float,3>> pts9;
+                        float cur[3] = { pe[0], pe[1], pe[2] };
+                        float prv[3] = { pp[0], pp[1], pp[2] };
+                        for (int it2 = 0; it2 < 16; ++it2)
+                        {
+                            float dv[3] = { cur[0]-prv[0],
+                                    cur[1]-prv[1],
+                                    cur[2]-prv[2] };
+                            const float dvl = sqrtf(
+                                    dv[0]*dv[0] + dv[1]*dv[1] +
+                                    dv[2]*dv[2]);
+                            float tv[3] = { tgt[0]-cur[0],
+                                    tgt[1]-cur[1],
+                                    tgt[2]-cur[2] };
+                            const float tvl = sqrtf(
+                                    tv[0]*tv[0] + tv[1]*tv[1] +
+                                    tv[2]*tv[2]);
+                            if (tvl < 0.6f * step)
+                            {
+                                pts9.push_back({ tgt[0],
+                                        tgt[1], tgt[2] });
+                                break;
+                            }
+                            if (!(dvl > 0) || !(tvl > 0))
+                                break;
+                            float aim[3];
+                            for (int d = 0; d < 3; ++d)
+                                aim[d] = 0.5f*dv[d]/dvl +
+                                         0.5f*tv[d]/tvl;
+                            const float al = sqrtf(
+                                    aim[0]*aim[0] +
+                                    aim[1]*aim[1] +
+                                    aim[2]*aim[2]);
+                            if (!(al > 0))
+                                break;
+                            std::vector<float>
+                                nx(1, cur[0] + step*aim[0]/al),
+                                ny(1, cur[1] + step*aim[1]/al),
+                                nz(1, cur[2] + step*aim[2]/al),
+                                nh(1, 0.01f * sp9),
+                                nc(1, 0.1f * sp9);
+                            const float ox = nx[0], oy = ny[0],
+                                    oz = nz[0];
+                            project_points_impl(deck, ctx, nx,
+                                    ny, nz, nh, nc);
+                            const float mx2 = nx[0]-ox,
+                                    my2 = ny[0]-oy,
+                                    mz2 = nz[0]-oz;
+                            if (mx2*mx2 + my2*my2 + mz2*mz2 >
+                                0.01f * sp9 * sp9)
+                                break;
+                            std::vector<std::array<float,3>>
+                                vp2 = { { nx[0], ny[0], nz[0] },
+                                { 0.5f*(cur[0]+nx[0]),
+                                  0.5f*(cur[1]+ny[0]),
+                                  0.5f*(cur[2]+nz[0]) } };
+                            std::vector<float> vr2;
+                            ratio_at(vp2, vr2);
+                            if (!(vr2[0] < 2e-3f * sp9) ||
+                                !(vr2[1] < 4e-3f * sp9))
+                                break;
+                            pts9.push_back({ nx[0], ny[0],
+                                             nz[0] });
+                            for (int d = 0; d < 3; ++d)
+                                prv[d] = cur[d];
+                            cur[0] = nx[0]; cur[1] = ny[0];
+                            cur[2] = nz[0];
+                        }
+                        if (pts9.empty())
+                            continue;
+                        /*  crossing discipline: no extension
+                         *  segment may pass through OTHER law
+                         *  (interior closest approach
+                         *  < 0.05 sp); the terminal contact is
+                         *  endpoint-interior = the pre-split's
+                         *  legal T  */
+                        bool clean = true;
+                        std::array<float,3> prev9 =
+                                { pe[0], pe[1], pe[2] };
+                        for (size_t q = 0;
+                             q < pts9.size() && clean; ++q)
+                        {
+                            const float qx0 = prev9[0],
+                                    qy0 = prev9[1],
+                                    qz0 = prev9[2];
+                            const float qx1 = pts9[q][0],
+                                    qy1 = pts9[q][1],
+                                    qz1 = pts9[q][2];
+                            for (size_t si = 0;
+                                 si < cseg.size() && clean;
+                                 ++si)
+                            {
+                                if (cseg_chain[si] == cid)
+                                    continue;
+                                const auto& s2 = cseg[si];
+                                /*  coarse closest approach:
+                                 *  sample the ext segment at
+                                 *  interior fractions vs the
+                                 *  law segment  */
+                                for (int u = 1; u <= 3; ++u)
+                                {
+                                    const float f9 =
+                                            0.25f * float(u);
+                                    const float mx9 = qx0 +
+                                        f9*(qx1-qx0);
+                                    const float my9 = qy0 +
+                                        f9*(qy1-qy0);
+                                    const float mz9 = qz0 +
+                                        f9*(qz1-qz0);
+                                    const float ax = s2[0],
+                                        ay = s2[1], az = s2[2];
+                                    const float bx = s2[3]-ax,
+                                        by = s2[4]-ay,
+                                        bz = s2[5]-az;
+                                    const float bb = bx*bx +
+                                        by*by + bz*bz;
+                                    const float px = mx9-ax,
+                                        py = my9-ay,
+                                        pz = mz9-az;
+                                    float t = bb > 0 ?
+                                        (px*bx+py*by+pz*bz)/bb
+                                        : 0;
+                                    if (t < 0.02f || t > 0.98f)
+                                        continue;
+                                    const float dx = px-t*bx,
+                                        dy = py-t*by,
+                                        dz = pz-t*bz;
+                                    if (dx*dx + dy*dy + dz*dz <
+                                        0.0025f * sp9 * sp9 &&
+                                        !(q == pts9.size() - 1
+                                          && u == 3))
+                                        clean = false;
+                                }
+                            }
+                            prev9 = pts9[q];
+                        }
+                        if (!clean)
+                            continue;
+                        /*  deliver  */
+                        std::vector<std::array<float,3>> ch9;
+                        ch9.push_back({ pe[0], pe[1], pe[2] });
+                        std::array<float,3> pr9 =
+                                { pe[0], pe[1], pe[2] };
+                        for (const auto& p9 : pts9)
+                        {
+                            cseg.push_back({ pr9[0], pr9[1],
+                                    pr9[2], p9[0], p9[1],
+                                    p9[2] });
+                            cseg_chain.push_back(cid);
+                            join_pts.push_back(p9);
+                            ch9.push_back(p9);
+                            pr9 = p9;
+                        }
+                        join_chains.push_back(std::move(ch9));
+                        ++njoin;
+                    }
+            }
+            if (getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+                fprintf(stderr, "LAWJOIN: %llu free ends, %llu "
+                        "junction chains delivered (%zu pts)\n",
+                        (unsigned long long)nends,
+                        (unsigned long long)njoin,
+                        join_pts.size());
+        }
+    }
     const auto near_crease = [&](float x, float y, float z,
                                  float r) {
         for (const auto& s : cseg)
@@ -7544,6 +7855,12 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
      *  meshes rung-to-rung (see the densify block above).  */
     for (const auto& m : dens_pts)
         pts.push_back({ TPoint(m[0], m[1], m[2]), int8_t(0) });
+    /*  LAWJOIN extension points: on-crease junction vertices; the
+     *  terminal point of each chain sits ON the crossing
+     *  constraint's interior, so the pre-split fuses the network
+     *  there.  */
+    for (const auto& m : join_pts)
+        pts.push_back({ TPoint(m[0], m[1], m[2]), int8_t(0) });
     if constexpr (CCDT_MODE)
     {
         /*  No bulk constructor here: spatial-sort ourselves and
@@ -7927,6 +8244,156 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 dt.insert_constrained_edge(prev, vb, false);
                 ++constrained;
             }
+        }
+        /*  LAWJOIN extension constraints: chained through the
+         *  same pre-split scan as traced law.  Vertices are
+         *  resolved by exact coordinate in the vgrid; a chain
+         *  whose vertices did not all survive insertion is
+         *  declined whole (deterministic fallback).  */
+        if (!join_chains.empty())
+        {
+            uint64_t jseg = 0, jdrop = 0;
+            const auto find_vh = [&](const std::array<float,3>&
+                                     p) -> VH {
+                const auto gi = vgrid.find(cell_key(p[0], p[1],
+                                                   p[2]));
+                VH best{};
+                float bd = 1e-6f * soup.spacing *
+                           1e-6f * soup.spacing;
+                bd = std::max(bd, 1e-8f);
+                float bdd = 1e30f;
+                if (gi != vgrid.end())
+                    for (const VH& v : gi->second)
+                    {
+                        const float dx =
+                            float(v->point().x()) - p[0];
+                        const float dy =
+                            float(v->point().y()) - p[1];
+                        const float dz =
+                            float(v->point().z()) - p[2];
+                        const float d2 = dx*dx + dy*dy + dz*dz;
+                        if (d2 < bdd)
+                        { bdd = d2; best = v; }
+                    }
+                const float tol = 1e-3f * soup.spacing;
+                return bdd < tol * tol ? best : VH();
+            };
+            for (const auto& ch9 : join_chains)
+            {
+                std::vector<VH> vhs;
+                bool ok9 = true;
+                for (const auto& p : ch9)
+                {
+                    const VH v = find_vh(p);
+                    if (v == VH())
+                    { ok9 = false; break; }
+                    vhs.push_back(v);
+                }
+                if (!ok9)
+                { ++jdrop; continue; }
+                for (size_t q = 0; q + 1 < vhs.size(); ++q)
+                {
+                    VH va = vhs[q], vb = vhs[q + 1];
+                    if (va == vb)
+                        continue;
+                    va->info() = 0;
+                    vb->info() = 0;
+                    /*  pre-split scan for this segment (same
+                     *  rule as traced law)  */
+                    const float ax = float(va->point().x()),
+                            ay = float(va->point().y()),
+                            az = float(va->point().z());
+                    const float bx = float(vb->point().x()),
+                            by = float(vb->point().y()),
+                            bz = float(vb->point().z());
+                    const float ux = bx-ax, uy = by-ay,
+                            uz = bz-az;
+                    const float uu = ux*ux + uy*uy + uz*uz;
+                    std::vector<std::pair<float, VH>> mids;
+                    if (uu > 0)
+                    {
+                        const int jx0 = int(floorf(
+                            std::min(ax, bx)/bin)) - 1,
+                            jx1 = int(floorf(
+                            std::max(ax, bx)/bin)) + 1,
+                            jy0 = int(floorf(
+                            std::min(ay, by)/bin)) - 1,
+                            jy1 = int(floorf(
+                            std::max(ay, by)/bin)) + 1,
+                            jz0 = int(floorf(
+                            std::min(az, bz)/bin)) - 1,
+                            jz1 = int(floorf(
+                            std::max(az, bz)/bin)) + 1;
+                        for (int ix = jx0; ix <= jx1; ++ix)
+                        for (int iy = jy0; iy <= jy1; ++iy)
+                        for (int iz = jz0; iz <= jz1; ++iz)
+                        {
+                            const uint64_t k =
+                                (uint64_t(int64_t(ix) &
+                                    0x1FFFFF) << 42) |
+                                (uint64_t(int64_t(iy) &
+                                    0x1FFFFF) << 21) |
+                                 uint64_t(int64_t(iz) &
+                                    0x1FFFFF);
+                            const auto gi = vgrid.find(k);
+                            if (gi == vgrid.end())
+                                continue;
+                            for (const VH& v : gi->second)
+                            {
+                                if (v == va || v == vb)
+                                    continue;
+                                const float px = float(
+                                    v->point().x()) - ax,
+                                    py = float(
+                                    v->point().y()) - ay,
+                                    pz = float(
+                                    v->point().z()) - az;
+                                const float t = (px*ux +
+                                    py*uy + pz*uz) / uu;
+                                if (t <= 1e-4f ||
+                                    t >= 1.f - 1e-4f)
+                                    continue;
+                                const float dx = px - t*ux,
+                                    dy = py - t*uy,
+                                    dz = pz - t*uz;
+                                if (dx*dx + dy*dy + dz*dz <
+                                    eps2)
+                                    mids.push_back({ t, v });
+                            }
+                        }
+                    }
+                    std::sort(mids.begin(), mids.end(),
+                        [](const auto& l, const auto& r) {
+                            return l.first < r.first;
+                        });
+                    VH prev = va;
+                    for (const auto& [t, v] : mids)
+                    {
+                        (void)t;
+                        if (v == prev)
+                            continue;
+                        v->info() = 0;
+                        dt.insert_constrained_edge(prev, v,
+                                                   false);
+                        ++constrained;
+                        ++through_splits;
+                        prev = v;
+                    }
+                    if (prev != vb)
+                    {
+                        dt.insert_constrained_edge(prev, vb,
+                                                   false);
+                        ++constrained;
+                        ++jseg;
+                    }
+                }
+            }
+            if (getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+                fprintf(stderr, "LAWJOIN: %llu junction "
+                        "segments constrained, %llu chains "
+                        "dropped (missing vertex)\n",
+                        (unsigned long long)jseg,
+                        (unsigned long long)jdrop);
         }
         if (through_splits && getenv("STIBIUM_DMESH_SEG_DEBUG"))
             fprintf(stderr, "constraints: %llu split at "
