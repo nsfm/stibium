@@ -10416,6 +10416,57 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                         tface[q / 3] = 1;
                                 }
                         }
+                        /*  STRICT-IMPROVEMENT floor (round 7):
+                         *  the worst certified deviation among
+                         *  the facets this span REMOVES.  43 ear
+                         *  + 36 annulus cert refusals at 0.008-
+                         *  0.035 sp each excised a whole span -
+                         *  restoring baseline roofs measurably
+                         *  WORSE than the refused fill (zero
+                         *  rail-pure rung failures: the wall
+                         *  never over-reads; the wobble was a
+                         *  red herring).  A fill now passes at
+                         *  its bar OR when measurably no worse
+                         *  than what it replaces, capped at the
+                         *  0.05 sp law-acceptance band - never
+                         *  emit worse than baseline, never emit
+                         *  past the band, everything still
+                         *  measured.  */
+                        float rworst = 0;
+                        if (ok && !cand_tris.empty() &&
+                            !rset.empty())
+                        {
+                            std::vector<std::array<float,3>> rp;
+                            for (const uint32_t t : rset)
+                            {
+                                const float* a2 = &out->verts[
+                                        3*out->tris[3*t]];
+                                const float* b2 = &out->verts[
+                                        3*out->tris[3*t+1]];
+                                const float* c2 = &out->verts[
+                                        3*out->tris[3*t+2]];
+                                rp.push_back({
+                                    (a2[0]+b2[0]+c2[0])/3,
+                                    (a2[1]+b2[1]+c2[1])/3,
+                                    (a2[2]+b2[2]+c2[2])/3 });
+                                for (int e = 0; e < 3; ++e)
+                                {
+                                    const float* u2 = e == 0 ? a2
+                                            : e == 1 ? b2 : c2;
+                                    const float* w2 = e == 0 ? b2
+                                            : e == 1 ? c2 : a2;
+                                    rp.push_back({
+                                        0.5f*(u2[0]+w2[0]),
+                                        0.5f*(u2[1]+w2[1]),
+                                        0.5f*(u2[2]+w2[2]) });
+                                }
+                            }
+                            std::vector<float> rr;
+                            lic_eval(rp, rr);
+                            for (const float r2 : rr)
+                                if (r2 < 1e29f)
+                                    rworst = std::max(rworst, r2);
+                        }
                         /*  oracle certification of the ribbon.
                          *  ADAPTIVE sampling density: a long ear
                          *  can hold its centroid + midedges near
@@ -10509,8 +10560,13 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                     if (cr[s2] > cr[wi])
                                         wi = s2;
                                 twr[q] = cr[wi];
-                                const float bar_t = tface[q]
+                                float bar_t = tface[q]
                                         ? face_bar : lic_bar;
+                                /*  strict-improvement floor (see
+                                 *  rworst above)  */
+                                bar_t = std::max(bar_t,
+                                    std::min(rworst,
+                                             0.05f * sp));
                                 if (!(twr[q] < bar_t))
                                 {
                                     near_poly(A, cpts[wi][0],
@@ -10657,6 +10713,218 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                         }
                     }
                 }
+            }
+            /*  VERTEX-MINTING SPLIT (round 7, the edge-flip-
+             *  blocked residue): a measured-bad rail-join facet
+             *  whose quad cannot re-diagonalize (both diagonals
+             *  already live) needs the vertex the repair wants.
+             *  Split the bad EDGE at its midpoint Newton-
+             *  projected onto f=0: the two facets become four
+             *  around the minted vertex - outer directed edges
+             *  unchanged, interior edges minted in matched
+             *  pairs, manifold by construction.  Committed only
+             *  when all four certify at the face bar or
+             *  measurably better than the pair they replace
+             *  (capped at the 0.05 sp band).  */
+            if (!lockids.empty())
+            {
+                /*  candidates: live extraction facets touching
+                 *  a ribbon vertex, certified bad  */
+                std::vector<uint32_t> ann;
+                {
+                    std::unordered_set<uint32_t> seen3;
+                    std::vector<uint32_t> lsort(lockids.begin(),
+                                                lockids.end());
+                    std::sort(lsort.begin(), lsort.end());
+                    for (const uint32_t v : lsort)
+                        for (const uint32_t t : vtris[v])
+                            if (!rmflag[t] &&
+                                seen3.insert(t).second)
+                                ann.push_back(t);
+                }
+                std::sort(ann.begin(), ann.end());
+                std::vector<std::array<float,3>> apts;
+                for (const uint32_t t : ann)
+                {
+                    const float* a2 = &out->verts[
+                            3*out->tris[3*t]];
+                    const float* b2 = &out->verts[
+                            3*out->tris[3*t+1]];
+                    const float* c2 = &out->verts[
+                            3*out->tris[3*t+2]];
+                    apts.push_back({ (a2[0]+b2[0]+c2[0])/3,
+                                     (a2[1]+b2[1]+c2[1])/3,
+                                     (a2[2]+b2[2]+c2[2])/3 });
+                    for (int e = 0; e < 3; ++e)
+                    {
+                        const float* u2 = e == 0 ? a2
+                                : e == 1 ? b2 : c2;
+                        const float* w2 = e == 0 ? b2
+                                : e == 1 ? c2 : a2;
+                        apts.push_back({ 0.5f*(u2[0]+w2[0]),
+                                         0.5f*(u2[1]+w2[1]),
+                                         0.5f*(u2[2]+w2[2]) });
+                    }
+                }
+                std::vector<float> ar;
+                if (!apts.empty())
+                    lic_eval(apts, ar);
+                uint64_t nsplit = 0;
+                for (size_t q = 0; q < ann.size(); ++q)
+                {
+                    const uint32_t t = ann[q];
+                    if (rmflag[t])
+                        continue;
+                    float worst = 0; int wi = 0;
+                    for (int s2 = 0; s2 < 4; ++s2)
+                        if (ar[4*q + s2] > worst)
+                        { worst = ar[4*q + s2]; wi = s2; }
+                    if (worst < face_bar || worst > 1e29f ||
+                        wi < 1)
+                        continue;
+                    const int e = wi - 1;
+                    const uint32_t a2 = out->tris[3*t + e];
+                    const uint32_t b2 = out->tris[3*t + (e+1)%3];
+                    const uint32_t c1 = out->tris[3*t + (e+2)%3];
+                    /*  the one live extraction partner on the
+                     *  bad edge  */
+                    const uint64_t bk = ek(a2, b2);
+                    uint32_t t2 = UINT32_MAX; int nlive = 0;
+                    const auto it2 = emap.find(bk);
+                    if (it2 == emap.end())
+                        continue;
+                    for (const uint32_t tt : it2->second)
+                    {
+                        if (tt >= ntri0 || rmflag[tt])
+                        {
+                            if (tt >= ntri0)
+                                ++nlive;   // stitched: skip site
+                            continue;
+                        }
+                        ++nlive;
+                        if (tt != t)
+                            t2 = tt;
+                    }
+                    if (nlive != 2 || t2 == UINT32_MAX)
+                        continue;
+                    /*  t2's third vertex + its traversal of the
+                     *  edge must oppose t's  */
+                    uint32_t cc2 = UINT32_MAX;
+                    for (int e2 = 0; e2 < 3; ++e2)
+                        if (out->tris[3*t2 + e2] == b2 &&
+                            out->tris[3*t2 + (e2+1)%3] == a2)
+                            cc2 = out->tris[3*t2 + (e2+2)%3];
+                    if (cc2 == UINT32_MAX || cc2 == c1)
+                        continue;
+                    /*  mint the vertex: bad-edge midpoint
+                     *  projected onto f = 0  */
+                    std::vector<float> mx(1, 0.5f *
+                            (out->verts[3*a2] +
+                             out->verts[3*b2]));
+                    std::vector<float> my(1, 0.5f *
+                            (out->verts[3*a2+1] +
+                             out->verts[3*b2+1]));
+                    std::vector<float> mz(1, 0.5f *
+                            (out->verts[3*a2+2] +
+                             out->verts[3*b2+2]));
+                    std::vector<float> mh(1, 0.01f * sp);
+                    std::vector<float> mc(1, 0.2f * sp);
+                    project_points_impl(deck, ctx, mx, my, mz,
+                                        mh, mc);
+                    /*  certify the four candidate facets  */
+                    const uint32_t quad[4][3] = {
+                        { a2, UINT32_MAX, c1 },
+                        { UINT32_MAX, b2, c1 },
+                        { b2, UINT32_MAX, cc2 },
+                        { UINT32_MAX, a2, cc2 } };
+                    std::vector<std::array<float,3>> qp;
+                    const float mpt[3] = { mx[0], my[0], mz[0] };
+                    for (int f4 = 0; f4 < 4; ++f4)
+                    {
+                        const float* pv[3];
+                        for (int e2 = 0; e2 < 3; ++e2)
+                            pv[e2] = quad[f4][e2] == UINT32_MAX
+                                ? mpt
+                                : &out->verts[3*quad[f4][e2]];
+                        qp.push_back({
+                            (pv[0][0]+pv[1][0]+pv[2][0])/3,
+                            (pv[0][1]+pv[1][1]+pv[2][1])/3,
+                            (pv[0][2]+pv[1][2]+pv[2][2])/3 });
+                        for (int e2 = 0; e2 < 3; ++e2)
+                        {
+                            const float* u2 = pv[e2];
+                            const float* w2 = pv[(e2+1)%3];
+                            qp.push_back({
+                                0.5f*(u2[0]+w2[0]),
+                                0.5f*(u2[1]+w2[1]),
+                                0.5f*(u2[2]+w2[2]) });
+                        }
+                    }
+                    std::vector<float> qr;
+                    lic_eval(qp, qr);
+                    float qworst = 0;
+                    for (const float r2 : qr)
+                        if (r2 < 1e29f)
+                            qworst = std::max(qworst, r2);
+                        else
+                            qworst = 1e30f;
+                    /*  the pair's own measured worst = the
+                     *  improvement floor; t2 unmeasured here, so
+                     *  demand improvement on t alone with the
+                     *  face bar as the target  */
+                    const float sbar = std::max(face_bar,
+                        std::min(worst, 0.05f * sp));
+                    if (!(qworst < sbar))
+                        continue;
+                    /*  commit  */
+                    const uint32_t nv =
+                        uint32_t(out->verts.size() / 3);
+                    out->verts.push_back(mpt[0]);
+                    out->verts.push_back(mpt[1]);
+                    out->verts.push_back(mpt[2]);
+                    rmflag[t] = 1;
+                    rmflag[t2] = 1;
+                    st_rm += 2;
+                    for (int f4 = 0; f4 < 4; ++f4)
+                    {
+                        const uint32_t id = uint32_t(
+                            ntri0 + stitched.size() / 3);
+                        uint32_t tri3[3];
+                        for (int e2 = 0; e2 < 3; ++e2)
+                            tri3[e2] =
+                                quad[f4][e2] == UINT32_MAX
+                                    ? nv : quad[f4][e2];
+                        for (int e2 = 0; e2 < 3; ++e2)
+                            stitched.push_back(tri3[e2]);
+                        for (int e2 = 0; e2 < 3; ++e2)
+                            emap[ek(tri3[e2],
+                                    tri3[(e2+1)%3])]
+                                    .push_back(id);
+                        if (st_dump)
+                            fprintf(st_dump,
+                                "T %.6g %.6g %.6g 3 %.6g\n",
+                                qp[4*f4][0], qp[4*f4][1],
+                                qp[4*f4][2], qworst / sp);
+                    }
+                    st_add += 4;
+                    ++nsplit;
+                    lockids.insert(nv);
+                    for (const uint32_t lv : { a2, b2, c1, cc2,
+                                               nv })
+                    {
+                        out->stitch_lock.push_back(
+                                out->verts[3*lv]);
+                        out->stitch_lock.push_back(
+                                out->verts[3*lv+1]);
+                        out->stitch_lock.push_back(
+                                out->verts[3*lv+2]);
+                    }
+                }
+                st_annp += nsplit;
+                if (nsplit && getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+                    fprintf(stderr, "STITCH split-repairs: %llu "
+                            "minted vertices\n",
+                            (unsigned long long)nsplit);
             }
             /*  F census (round 6): the join facets between the
              *  ribbon rails and the surrounding faces - LIVE
