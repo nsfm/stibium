@@ -21,10 +21,15 @@
 #include "dialog/resolution.h"
 
 #include "fab/util/region.h"
+#include "fab/tree/tree.h"
 #include "fab/tree/triangulate.h"
 #include "fab/tree/triangulate/delaunay.h"
 #include "fab/formats/stl.h"
 #include "fab/formats/threemf.h"
+
+#ifdef STIBIUM_HAS_LIBFIVE
+#include "libfive_bridge.h"
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -264,10 +269,71 @@ void ExportMeshWorker::async()
     std::vector<float> verts;
     std::vector<uint32_t> indices;
     _stats.clear();
+    /*  EXPERIMENTAL: libfive Dual Contouring comparison path.
+     *  STIBIUM_EXPORT_LIBFIVE=1 routes the same headless export through
+     *  the vendored libfive DC mesher (lib/fab/vendor/libfive) instead of
+     *  stibnite/classic, for a head-to-head.  min_feature = 1/resolution
+     *  (libfive subdivides until the smallest cell edge is below it);
+     *  max_err keeps libfive's own DC-collapse default unless overridden
+     *  by STIBIUM_LIBFIVE_MAXERR.  Output is written raw - none of the
+     *  stibnite post-passes (QEM, pinch split) touch it.  */
+    bool used_libfive = false;
+#ifdef STIBIUM_HAS_LIBFIVE
+    if (getenv("STIBIUM_EXPORT_LIBFIVE"))
+    {
+        const double min_feature = 1.0 / double(_resolution);
+        double max_err = 1e-8;
+        if (const char* me = getenv("STIBIUM_LIBFIVE_MAXERR"))
+            max_err = atof(me);
+        unsigned workers = std::thread::hardware_concurrency();
+        if (const char* w = getenv("STIBIUM_LIBFIVE_WORKERS"))
+            workers = unsigned(atoi(w));
+
+        const auto t0 = std::chrono::steady_clock::now();
+        std::string err;
+        const int rc = stibium_libfive::mesh_shape(
+                shape.tree.get()->head,
+                bounds.xmin, bounds.ymin, bounds.zmin,
+                bounds.xmax, bounds.ymax, bounds.zmax,
+                min_feature, max_err, workers,
+                verts, indices, err);
+        const double wall = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - t0).count();
+        if (rc != 0)
+        {
+            fprintf(stderr, "libfive mesh FAILED (rc=%d): %s\n",
+                    rc, err.c_str());
+            free_arrays(&r);
+            return;
+        }
+        fprintf(stderr, "libfive DC mesh report: %zu tris, %zu verts, "
+                "min_feature=%g max_err=%g workers=%u, meshing time %.1f s\n",
+                indices.size() / 3, verts.size() / 3,
+                min_feature, max_err, workers, wall);
+        _stats = QString(
+                "<b>libfive DC mesh report</b><br><br>"
+                "%1 triangles, %2 vertices<br>"
+                "min_feature: %3 (res %4)<br>"
+                "max_err: %5<br>"
+                "meshing time: %6 s")
+                .arg(indices.size() / 3)
+                .arg(verts.size() / 3)
+                .arg(min_feature)
+                .arg(_resolution)
+                .arg(max_err)
+                .arg(wall, 0, 'f', 1);
+        used_libfive = true;
+    }
+#endif
+
     /*  Stibnite (the adaptive-Delaunay mesher, doc/MESH-WAR.md) is
      *  the default; Classic is the dialog's other choice or
      *  STIBIUM_EXPORT_CLASSIC=1 headless.  */
-    if (_mesher == 0)
+    if (used_libfive)
+    {
+        // Mesh already produced above; skip stibnite/classic.
+    }
+    else if (_mesher == 0)
     {
         /*  Dialog knobs -> process environment.  Safe: one export
          *  at a time is law, and the headless path never enters
@@ -394,6 +460,8 @@ void ExportMeshWorker::async()
     if (_mesher == 0)
         if (const char* se = getenv("STIBIUM_DMESH_SIMPLIFY"))
             simplify = float(atof(se));
+    if (used_libfive)
+        simplify = 0;   // libfive output is written raw
     if (simplify > 0 && indices.size() >= 3 && !halt)
     {
         progress_phase = PHASE_SIMPLIFYING;
@@ -411,7 +479,7 @@ void ExportMeshWorker::async()
      *  their own (bino 274 -> 325 nm edges, measured) - the tail
      *  position cures both.  Zero vertex motion; index-level
      *  only, which 3MF preserves.  */
-    if (_mesher == 0 && indices.size() >= 3 && !halt)
+    if (_mesher == 0 && !used_libfive && indices.size() >= 3 && !halt)
     {
         const uint64_t copies = dmesh_split_pinches(verts, indices);
         if (copies && !_stats.isEmpty())

@@ -200,3 +200,46 @@ set_property(TARGET SbFabTest PROPERTY CXX_STANDARD 17)
 set_property(TARGET SbFabTest PROPERTY C_STANDARD 99)
 
 add_test(NAME SbFabTest COMMAND SbFabTest)
+
+################################################################################
+# libfive Dual Contouring mesher (vendored) + Stibium bridge.
+#
+# EXPERIMENTAL side-by-side comparison target (STIBIUM_EXPORT_LIBFIVE=1 on the
+# headless export path).  Built as an ISOLATED SHARED library so libfive's
+# Eigen (system, >= 3.3) never collides at link time with the kernel's
+# vendored Eigen 3.2.4: visibility is hidden, so only the plain-array bridge
+# symbol (stibium_libfive::mesh_shape) is exported; every Eigen template
+# instantiation stays internal to the .so.  Only plain arrays cross the
+# boundary.  See lib/fab/vendor/libfive/ATTRIBUTION.md (MPL-2.0).
+find_path(SYSTEM_EIGEN3_INCLUDE_DIR
+    NAMES signature_of_eigen3_matrix_library
+    PATHS /usr/include/eigen3 /usr/local/include/eigen3)
+
+if (SYSTEM_EIGEN3_INCLUDE_DIR)
+    file(GLOB_RECURSE LIBFIVE_DC_SRC
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/libfive/src/*.cpp)
+    add_library(libfive_dc SHARED
+        ${LIBFIVE_DC_SRC}
+        vendor/libfive/libfive_bridge.cpp)
+    target_include_directories(libfive_dc SYSTEM PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/libfive/include
+        ${SYSTEM_EIGEN3_INCLUDE_DIR}
+        ${Boost_INCLUDE_DIRS})
+    # The bridge reads the kernel's plain-C Node headers (Eigen-free).
+    target_include_directories(libfive_dc PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/inc
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/libfive)
+    set_target_properties(libfive_dc PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+        POSITION_INDEPENDENT_CODE ON)
+    target_compile_options(libfive_dc PRIVATE
+        -O2 -Wno-deprecated-declarations)
+    target_link_libraries(libfive_dc Threads::Threads)
+    message(STATUS "Stibium: libfive DC comparison mesher ENABLED (libfive_dc)")
+else()
+    message(STATUS "Stibium: system Eigen3 not found - libfive DC comparison "
+                   "mesher disabled")
+endif()

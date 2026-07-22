@@ -73,6 +73,25 @@ THE SOFTWARE.
 - **Full text:** [`lib/fab/vendor/Eigen/COPYING.MPL2`](lib/fab/vendor/Eigen/COPYING.MPL2)
   (and the sibling `COPYING.*` files).
 
+### libfive (Dual Contouring mesher subset)
+
+- **Role:** vendored subset of the libfive CAD kernel, used to run libfive's
+  flagship Dual Contouring mesher head-to-head against Stibium's stibnite
+  mesher (experimental `STIBIUM_EXPORT_LIBFIVE=1` export path). Built as an
+  isolated shared library; not part of the default mesher.
+- **Location:** [`lib/fab/vendor/libfive/`](lib/fab/vendor/libfive/)
+- **Upstream:** <https://github.com/libfive/libfive>
+- **Vendored commit:** `c9e97343e0af998cd1696e85583eccba95532b96` (2025-11-12)
+- **License:** MPL-2.0 (the `libfive/` core layer; the GPL Studio is **not**
+  vendored). Full text:
+  [`lib/fab/vendor/libfive/LICENSE.MPL2`](lib/fab/vendor/libfive/LICENSE.MPL2).
+  Every vendored file retains its per-file MPL-2.0 notice.
+- **Copyright:** © 2015–2025 Matt Keeter and libfive contributors.
+- **Modifications & provenance:**
+  [`lib/fab/vendor/libfive/ATTRIBUTION.md`](lib/fab/vendor/libfive/ATTRIBUTION.md)
+  (one file trimmed to DC-only; the Stibium↔libfive bridge is Stibium's own
+  AGPL work). MPL-2.0 is file-level copyleft and AGPL-3.0-compatible.
+
 ### stb_truetype
 
 - **Role:** glyph outline extraction for the Text (font) node.

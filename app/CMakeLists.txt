@@ -197,6 +197,15 @@ target_link_libraries(${STIBIUM_APP}
     SbGraph
     SbFab)
 
+# Experimental libfive Dual Contouring comparison mesher (see
+# lib/fab/CMakeLists.txt).  Present only when system Eigen3 was found.
+if (TARGET libfive_dc)
+    target_link_libraries(${STIBIUM_APP} libfive_dc)
+    target_compile_definitions(${STIBIUM_APP} PRIVATE STIBIUM_HAS_LIBFIVE)
+    target_include_directories(${STIBIUM_APP} PRIVATE
+        ${CMAKE_SOURCE_DIR}/lib/fab/vendor/libfive)
+endif()
+
 ################################################################################
 
 execute_process(COMMAND git log --pretty=format:'%h' -n 1
