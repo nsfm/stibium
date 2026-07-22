@@ -1304,17 +1304,19 @@ void sample_block(Collector& c, const Region& r, Tape* tape,
             }
 }
 
-/*  Phase wall-clock under STIBIUM_DMESH_TIME=1: the profile that
- *  aims the performance pass (measure before optimizing - the
- *  house rule applies to speed too).  TIME=2 adds sub-stage
- *  lines (indented TIME2) - repair-round anatomy, snap
- *  internals, the fix-stage trio - without disturbing the
- *  level-1 phase deltas.  */
+/*  Phase wall-clock: DEFAULT ON since the perf campaign (Nate,
+ *  2026-07-22 - "eyes on this situation as we push further"):
+ *  the silent 14.7->21.6 min zeiss regression proved unwatched
+ *  phases drift.  STIBIUM_DMESH_TIME=0 silences; TIME=2 adds
+ *  sub-stage lines (indented TIME2) - repair-round anatomy,
+ *  snap internals, the fix-stage trio - without disturbing the
+ *  level-1 phase deltas.  Presence-gated debug sites elsewhere
+ *  (CONTACT/STEP census prints) remain opt-in via the env.  */
 struct PhaseTimer
 {
     const int level = [] {
         const char* e = getenv("STIBIUM_DMESH_TIME");
-        return e ? std::max(1, atoi(e)) : 0;
+        return e ? atoi(e) : 1;
     }();
     std::chrono::steady_clock::time_point t0 =
             std::chrono::steady_clock::now();
