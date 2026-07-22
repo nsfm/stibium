@@ -196,6 +196,16 @@ struct DMesh
      *  repair can never reach (keep-out and chip target scale
      *  together at every band density; measured 2026-07-15).  */
     uint64_t snapped = 0;
+    /*  Wall-stitch vertex lock (STIBIUM_DMESH_STITCH): xyz triples
+     *  of law-generated ribbon vertices.  weld_slivers must not
+     *  MOVE these - collapsing the ribbon's dense on-rail rungs
+     *  cascades neighbours off-law (measured: every residual
+     *  off-law tri at the extract seams was weld-minted; the
+     *  pre-weld stitched mesh reads 0).  Collapses INTO a locked
+     *  vertex stay legal - the lock protects positions, not the
+     *  neighbourhood.  Coordinate-keyed so manifold-pass copies
+     *  and downstream reindexing keep the protection.  */
+    std::vector<float> stitch_lock;
 };
 
 /*  Progress reporting for long exports (app integration): a

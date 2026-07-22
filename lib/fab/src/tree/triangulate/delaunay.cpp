@@ -8855,7 +8855,25 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             }
             return best;
         };
-        std::unordered_map<uint32_t, uint32_t> partner;
+        /*  Directional contact tallies.  The v2 rule - single
+         *  best partner + endpoint MAJORITY - starved every twin
+         *  whose chains extend beyond the wall: the tilted bino
+         *  stations pair a short rail with a LONG chain twinned
+         *  along part of its length (measured V records: 156/156
+         *  votes from the short side, 158/552 from the long side
+         *  = 100% vs 29%, majority fails, nothing licenses -
+         *  Nate's "the extract region generates no ribbons on
+         *  the tilted version"; the straightened extract only
+         *  licensed because its chains are CROPPED to the seam).
+         *  Candidacy is now an ABSOLUTE mutual contact bar
+         *  (STITCHVOTES endpoints, default 8, both directions,
+         *  multi-partner); truth stays with the oracle license,
+         *  the vote only prunes the pair walk.  */
+        static const char* vm_env =
+                getenv("STIBIUM_DMESH_STITCHVOTES");
+        const int vote_min = vm_env ? atoi(vm_env) : 8;
+        std::unordered_map<uint64_t, int> vmap;
+        std::unordered_map<uint32_t, int> nmap;
         for (const auto& [c, segs] : bych)
         {
             std::unordered_map<uint32_t, int> votes;
@@ -8885,20 +8903,33 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     }
                 }
             }
-            uint32_t best_c = UINT32_MAX; int best_v = 0;
+            nmap[c] = npts;
             for (const auto& [c2, v] : votes)
-                if (v > best_v) { best_v = v; best_c = c2; }
-            if (best_c != UINT32_MAX && best_v * 2 > npts)
-                partner[c] = best_c;
+                vmap[(uint64_t(c) << 32) | c2] = v;
+            /*  V records: every contact's vote tally - the
+             *  instrument that adjudicates "why does this pair
+             *  not license" (the tilt round)  */
+            if (st_dump)
+                for (const auto& [c2, v] : votes)
+                    fprintf(st_dump, "V %u %u %d %d\n",
+                            c, c2, v, npts);
         }
         std::vector<std::pair<uint32_t, uint32_t>> prs;
-        for (const auto& [c, p] : partner)
-            if (c < p)
-            {
-                const auto q = partner.find(p);
-                if (q != partner.end() && q->second == c)
-                    prs.push_back({ c, p });
-            }
+        for (const auto& [k9, v] : vmap)
+        {
+            const uint32_t c = uint32_t(k9 >> 32);
+            const uint32_t p = uint32_t(k9);
+            if (c >= p)
+                continue;
+            const auto rv = vmap.find((uint64_t(p) << 32) | c);
+            if (rv == vmap.end())
+                continue;
+            const auto pass = [&](uint32_t cc, int vv) {
+                return vv >= vote_min || vv * 2 > nmap[cc];
+            };
+            if (pass(c, v) && pass(p, rv->second))
+                prs.push_back({ c, p });
+        }
         std::sort(prs.begin(), prs.end());
         st_pairs = prs.size();
         if (!prs.empty())
@@ -9033,6 +9064,55 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             vhrev.reserve(xvh.size());
             for (uint32_t i = 0; i < xvh.size(); ++i)
                 vhrev[&*xvh[i]] = i;
+            /*  REGION-CUT awareness (the round-3 false-negative
+             *  bug): the extract's bounding planes are model
+             *  CLOSURE, not iso-surface - f-certifying a sample
+             *  there is a category error that excised both rail
+             *  ends (Nate's "two visibly inexplicable
+             *  interruptions"; FPROBE reads the wall itself
+             *  clean at 2e-4 sp right up to the cut).  Samples
+             *  dominated by cut-plane geometry are exempt.  */
+            float bb_lo[3] = { 1e30f, 1e30f, 1e30f };
+            float bb_hi[3] = { -1e30f, -1e30f, -1e30f };
+            for (size_t vi2 = 0; vi2 + 2 < out->verts.size();
+                 vi2 += 3)
+                for (int d = 0; d < 3; ++d)
+                {
+                    bb_lo[d] = std::min(bb_lo[d],
+                                        out->verts[vi2 + d]);
+                    bb_hi[d] = std::max(bb_hi[d],
+                                        out->verts[vi2 + d]);
+                }
+            const float cut_eps = 2e-3f * soup.spacing;
+            /*  a bounding plane is a CUT only when a population
+             *  of vertices lies exactly on it (the extract's box
+             *  intersection); a closed model's extremes are real
+             *  surface and keep full certification  */
+            int cut_pop[6] = { 0, 0, 0, 0, 0, 0 };
+            {
+                const float pe = 1e-3f * soup.spacing;
+                for (size_t vi2 = 0; vi2 + 2 < out->verts.size();
+                     vi2 += 3)
+                    for (int d = 0; d < 3; ++d)
+                    {
+                        if (out->verts[vi2+d] < bb_lo[d] + pe)
+                            ++cut_pop[d];
+                        if (out->verts[vi2+d] > bb_hi[d] - pe)
+                            ++cut_pop[3 + d];
+                    }
+            }
+            const auto on_cut = [&](const float* p) {
+                for (int d = 0; d < 3; ++d)
+                {
+                    if (cut_pop[d] >= 50 &&
+                        p[d] < bb_lo[d] + cut_eps)
+                        return true;
+                    if (cut_pop[3 + d] >= 50 &&
+                        p[d] > bb_hi[d] - cut_eps)
+                        return true;
+                }
+                return false;
+            };
             const auto live_on = [&](uint64_t k) {
                 const auto it = emap.find(k);
                 if (it == emap.end()) return 0;
@@ -9102,10 +9182,15 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     for (int q = 1; q <= 3; ++q)
                     {
                         const float f = 0.25f * float(q);
-                        spts.push_back({
+                        const std::array<float,3> sp2 = {
                             A.p[k][0] + f*(foot[k][0]-A.p[k][0]),
                             A.p[k][1] + f*(foot[k][1]-A.p[k][1]),
-                            A.p[k][2] + f*(foot[k][2]-A.p[k][2])});
+                            A.p[k][2] + f*(foot[k][2]-A.p[k][2])};
+                        /*  cut-plane samples are closure, not
+                         *  surface: exempt  */
+                        if (on_cut(sp2.data()))
+                            continue;
+                        spts.push_back(sp2);
                         sown.push_back(k);
                     }
                 }
@@ -9161,6 +9246,8 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                         /*  ---- one span: classify, cut, zip ---- */
                         const size_t k = ka, j = kb;
                         float farc = -1e30f;
+                        std::vector<std::pair<uint32_t,
+                                std::array<float,3>>> vundo;
                         const float s0 = A.s[k] - atol;
                         const float s1 = A.s[j] + atol;
                         float bmin = 1e30f, bmax = -1e30f;
@@ -9704,6 +9791,18 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                     side[q] = f->second[2] <=
                                               0.5f ? 0 : 1;
                             }
+                            /*  single-vertex side islands are
+                             *  lateral jitter around 0.5 on
+                             *  tilted rims (they read as extra
+                             *  transitions and cost the span);
+                             *  smooth them to their neighbours -
+                             *  the zipper, diagonal accounting
+                             *  and certification still judge the
+                             *  result  */
+                            for (size_t q = 0; q < n; ++q)
+                                if (side[q] != side[(q+n-1)%n] &&
+                                    side[q] != side[(q+1)%n])
+                                    side[q] = side[(q+1)%n];
                             int ntrans = 0; size_t first0 = 0;
                             for (size_t q = 0; q < n; ++q)
                                 if (side[q] != side[(q+1)%n])
@@ -9832,6 +9931,52 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                     }
                                 }
                             };
+                            /*  NEAR-RAIL SNAP (round 3): hover
+                             *  verts 2e-3..1e-2 sp off a rail
+                             *  spawned sliver ears that
+                             *  weld_slivers then collapsed,
+                             *  dragging shared rung vertices
+                             *  (measured ribbon survival to the
+                             *  final STL: 262/433 default vs
+                             *  424/433 with WELDSLIV=0 - the
+                             *  chaos at the interruptions).
+                             *  Move them ONTO the rail instead:
+                             *  no sliver is ever emitted, rungs
+                             *  attach plumb, outer facets
+                             *  conform to the crease (the snap
+                             *  pass's own doctrine).  Undone on
+                             *  span fallback.  */
+                            const auto rail_snap = [&](
+                                    std::vector<uint32_t>& R,
+                                    const Poly& P, uint8_t exb) {
+                                for (const uint32_t v2 : R)
+                                {
+                                    const auto f = cls.find(v2);
+                                    if (f == cls.end())
+                                        continue;
+                                    const uint8_t wide =
+                                        exb == 16 ? 1 : 2;
+                                    if (!(f->second & wide) ||
+                                        (f->second & exb))
+                                        continue;
+                                    float* p = &out->verts[3*v2];
+                                    float arc;
+                                    float ft[3];
+                                    const float d2v = near_poly(
+                                        P, p[0], p[1], p[2],
+                                        arc, ft);
+                                    if (!(d2v < rtol2))
+                                        continue;
+                                    vundo.push_back({ v2,
+                                        { p[0], p[1], p[2] } });
+                                    p[0] = ft[0];
+                                    p[1] = ft[1];
+                                    p[2] = ft[2];
+                                    f->second |= exb;
+                                }
+                            };
+                            rail_snap(P2, A, 16);
+                            rail_snap(Q2, B, 32);
                             clip_run(P2, 16);
                             clip_run(Q2, 32);
                             /*  zipper P2 fwd vs Q2 bwd  */
@@ -10005,6 +10150,9 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                 const int n = std::min(4,
                                     std::max(2, int(ceilf(el /
                                         (0.25f * sp)))));
+                                const bool bnd[3] = {
+                                    on_cut(a2), on_cut(b2),
+                                    on_cut(c2) };
                                 for (int i2 = 0; i2 <= n; ++i2)
                                     for (int j2 = 0;
                                          j2 <= n - i2; ++j2)
@@ -10015,6 +10163,15 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                          *  by construction)  */
                                         if ((i2==n) || (j2==n) ||
                                             (k3==n))
+                                            continue;
+                                        /*  cut-plane-dominated
+                                         *  samples are closure,
+                                         *  not surface  */
+                                        const float bw =
+                                            (bnd[0] ? i2 : 0) +
+                                            (bnd[1] ? j2 : 0) +
+                                            (bnd[2] ? k3 : 0);
+                                        if (bw >= 0.5f * n)
                                             continue;
                                         const float fa =
                                             float(i2) / n;
@@ -10090,6 +10247,22 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                             for (const uint32_t t : rset)
                                 rmflag[t] = 1;
                             st_rm += rset.size();
+                            /*  lock ribbon vertices against
+                             *  weld_slivers (see DMesh doc)  */
+                            {
+                                std::unordered_set<uint32_t> lv2(
+                                    cand_tris.begin(),
+                                    cand_tris.end());
+                                for (const uint32_t v2 : lv2)
+                                {
+                                    out->stitch_lock.push_back(
+                                        out->verts[3*v2]);
+                                    out->stitch_lock.push_back(
+                                        out->verts[3*v2+1]);
+                                    out->stitch_lock.push_back(
+                                        out->verts[3*v2+2]);
+                                }
+                            }
                             for (size_t q = 0;
                                  q < cand_tris.size(); q += 3)
                             {
@@ -10129,6 +10302,14 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                         }
                         else
                         {
+                            /*  side-effect-free fallback: undo
+                             *  the provisional rail snaps  */
+                            for (const auto& [v2, p0] : vundo)
+                            {
+                                out->verts[3*v2]   = p0[0];
+                                out->verts[3*v2+1] = p0[1];
+                                out->verts[3*v2+2] = p0[2];
+                            }
                             if (fbr >= 0 && fbr < 5)
                                 ++st_fb[fbr];
                             /*  excise the wounded station,
@@ -10144,11 +10325,21 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                     if (d < bd)
                                     { bd = d; m = q; }
                                 }
+                                if (st_dump)
+                                    fprintf(st_dump, "X %.6g "
+                                        "%.6g %.6g %d %zu %zu\n",
+                                        A.p[m][0], A.p[m][1],
+                                        A.p[m][2], fbr, k, j);
                                 if (m > k + 1)
                                     swork.push_back({ k, m - 1 });
                                 if (m + 1 < j)
                                     swork.push_back({ m + 1, j });
                             }
+                            else if (st_dump)
+                                fprintf(st_dump, "X %.6g %.6g "
+                                    "%.6g %d %zu %zu\n",
+                                    A.p[k][0], A.p[k][1],
+                                    A.p[k][2], fbr, k, j);
                         }
                     }
                 }
@@ -12112,6 +12303,21 @@ static void weld_slivers(const Deck* deck, DMesh* out, float sp)
     };
     const float hbar = 0.02f * sp;
     const float ebar = 0.15f * sp;
+    /*  Wall-stitch vertex lock (see DMesh::stitch_lock): ribbon
+     *  vertices must not MOVE - collapsing the ribbon's dense
+     *  on-rail rungs cascades neighbours off-law (the extract's
+     *  entire residual off-law census was weld-minted).  Welds
+     *  INTO a locked vertex remain legal.  */
+    std::unordered_set<uint64_t> lockset;
+    for (size_t q = 0; q + 2 < out->stitch_lock.size(); q += 3)
+        lockset.insert(coord_hash(out->stitch_lock[q],
+                                  out->stitch_lock[q + 1],
+                                  out->stitch_lock[q + 2]));
+    const auto locked = [&](uint32_t v) {
+        return !lockset.empty() &&
+               lockset.count(coord_hash(vp(v, 0), vp(v, 1),
+                                        vp(v, 2))) != 0;
+    };
     /*  24 passes (was 10): the independent-set fan-claim defers
      *  same-pass neighbour welds; the queue needs more rounds to
      *  drain (measured: +20 surviving structures on screws at 10
@@ -12251,6 +12457,8 @@ static void weld_slivers(const Deck* deck, DMesh* out, float sp)
                 keep = pa < pb ? a : b;
                 drop = pa < pb ? b : a;
             }
+            if (locked(drop))
+                continue;         // never move a ribbon vertex
             /*  Orientation guard: every surviving triangle of
              *  drop's fan keeps its own normal direction.  */
             bool ok = true;
