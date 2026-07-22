@@ -112,6 +112,15 @@ struct DSoup
      *  chain extractor.  */
     std::vector<std::vector<uint32_t>> tchains;
     std::vector<uint8_t> tclosed;    // parallel to tchains
+    /*  Twin-step seed mint provenance (the zeiss wart-line round):
+     *  twin_seeds carries the mint's hypothesis seeds SEPARATELY
+     *  from the shallow channel so chains born from them can be
+     *  flagged (tchain_twin, parallel to tchains) - a twin-born
+     *  chain with no near-parallel partner within the twin band is
+     *  a PHANTOM (the hypothesis failed) and is dropped at
+     *  constraint acceptance.  */
+    std::vector<DSurfPoint> twin_seeds;
+    std::vector<uint8_t> tchain_twin;
     uint64_t traced = 0;
 
     /*  Contact-curve chains (strategy-doc #4a, 2026-07-19):

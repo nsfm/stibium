@@ -3384,7 +3384,12 @@ void feature_points(Collector& c)
          *  plates and grooves out (their faces read anti-
          *  parallel); the offset band is the sub-cell twin-rail
          *  bar.  The tracer referees every mint - a wrong twin
-         *  hypothesis dies in correct(), delivering nothing.  */
+         *  hypothesis dies in correct(), delivering nothing.
+         *  STIBIUM_DMESH_TWINMINT=0 reverts (the zeiss wart-line
+         *  round: the mint had no off switch).  */
+        static const char* tm_env =
+                getenv("STIBIUM_DMESH_TWINMINT");
+        if (!tm_env || atoi(tm_env) != 0)
         {
             const float cell9 = fc.hi[0] - fc.lo[0];
             const float off9 = nr * cell9;
@@ -4655,15 +4660,17 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
         /*  Contact chains were traced on the pass-1 collector;
          *  the drill-down soup is the one that ships.  */
         c2.soup.contact_chains = std::move(c.soup.contact_chains);
-        /*  Twin-step mints from BOTH passes ship as tracer-only
-         *  seeds: pass 1's base cells carry the same-facing
-         *  offset signature that pass 2's densified cells lose
-         *  (each fine cell sees one face of a diagonal sub-cell
-         *  step).  The tracer verifies every mint.  */
-        c2.soup.tseeds.insert(c2.soup.tseeds.end(),
+        /*  Twin-step mints from BOTH passes ship SEPARATELY
+         *  (soup.twin_seeds) so the tracer can flag their chains
+         *  for the phantom filter: pass 1's base cells carry the
+         *  same-facing offset signature that pass 2's densified
+         *  cells lose (each fine cell sees one face of a
+         *  diagonal sub-cell step).  The tracer verifies every
+         *  mint; acceptance kills the un-partnered ones.  */
+        c2.soup.twin_seeds.insert(c2.soup.twin_seeds.end(),
                               c.twin_seeds.begin(),
                               c.twin_seeds.end());
-        c2.soup.tseeds.insert(c2.soup.tseeds.end(),
+        c2.soup.twin_seeds.insert(c2.soup.twin_seeds.end(),
                               c2.twin_seeds.begin(),
                               c2.twin_seeds.end());
         return std::move(c2.soup);
@@ -4671,7 +4678,7 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
 
     if (census.dump)
         fclose(census.dump);
-    c.soup.tseeds.insert(c.soup.tseeds.end(),
+    c.soup.twin_seeds.insert(c.soup.twin_seeds.end(),
                          c.twin_seeds.begin(),
                          c.twin_seeds.end());
     return std::move(c.soup);
@@ -5139,7 +5146,8 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
     const unsigned nabs = tape_abs_pairs(base, nullptr, 0);
     const unsigned npairs = nmm + nabs;
     if (!npairs ||
-        (soup->feature_points == 0 && soup->tseeds.empty()))
+        (soup->feature_points == 0 && soup->tseeds.empty() &&
+         soup->twin_seeds.empty()))
         return false;
     std::vector<TapePair> pairs(npairs);
     tape_pairs(base, pairs.data(), nmm);
@@ -5160,10 +5168,16 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
                                   soup->surface.end());
     seeds.insert(seeds.end(), soup->tseeds.begin(),
                  soup->tseeds.end());
+    /*  twin-mint hypothesis seeds LAST, so chains born from them
+     *  are flaggable (seed index >= twin_lo)  */
+    const size_t twin_lo = seeds.size();
+    seeds.insert(seeds.end(), soup->twin_seeds.begin(),
+                 soup->twin_seeds.end());
     if (getenv("STIBIUM_DMESH_TRACE_DEBUG"))
-        fprintf(stderr, "TRACE seeds: %llu feature + %zu shallow\n",
+        fprintf(stderr, "TRACE seeds: %llu feature + %zu shallow "
+                "+ %zu twin\n",
                 (unsigned long long)soup->feature_points,
-                soup->tseeds.size());
+                soup->tseeds.size(), soup->twin_seeds.size());
 
     CreaseTracer tr;
     tr.deck = deck;
@@ -5218,6 +5232,7 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
     std::vector<std::vector<DSurfPoint>> polys;
     std::vector<uint8_t> closed;
     std::vector<uint32_t> poly_pair;
+    std::vector<uint8_t> poly_twin;
 
     /*  Seed gate (perf round, 2026-07-15: the tracer was 69% of a
      *  zeiss export - 957 s - because every pair ran full Newton
@@ -5666,6 +5681,7 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
                 polys.push_back(std::move(poly));
                 closed.push_back(loop ? 1 : 0);
                 poly_pair.push_back(tp.clause);
+                poly_twin.push_back(s >= twin_lo ? 1 : 0);
             }
         }
     }
@@ -5908,8 +5924,167 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
      *  chains reference them by absolute surface index.  QEF
      *  features stay in the soup as plain surface points (the
      *  crease band drop retires the redundant ones).  */
-    for (auto& poly : polys)
+    /*  PHANTOM TWIN FILTER (the zeiss wart-line round,
+     *  2026-07-22): the twin-step mint hypothesizes "a sub-cell
+     *  twin-rail step lives here"; at flagship scale the
+     *  same-facing-offset signature also fires on curvature and
+     *  tangent geometry, and a phantom mint that finds an
+     *  attractor traces a REAL-looking arc the referee cannot
+     *  fault (the (-6.393, 34.897, 55.611) wart-line: a lone
+     *  7-segment arc on a smooth cylinder wall; mint on/off A-B
+     *  convicted).  The identity story the distance band lacks:
+     *  the hypothesis is TWIN rails, so a twin-born poly must
+     *  have a near-parallel partner poly within the twin band
+     *  (0.10 sp, |dot| > 0.9, >= 4 vertex contacts).  Judged at
+     *  the POLY level, before commit, so a failed hypothesis
+     *  leaves nothing behind - no law, no surface points.
+     *  Ordinary traced polys are never judged (the collective-
+     *  punishment lesson stands).  */
     {
+        bool any_twin = false;
+        for (const uint8_t t9 : poly_twin)
+            any_twin |= t9 != 0;
+        if (any_twin)
+        {
+            /*  segment grid over all polys, half-cell bins  */
+            const float gcell = 0.5f * sp;
+            const auto gkey = [&](float x, float y, float z) {
+                const int64_t ix = int64_t(floorf(x / gcell));
+                const int64_t iy = int64_t(floorf(y / gcell));
+                const int64_t iz = int64_t(floorf(z / gcell));
+                return (uint64_t(ix & 0x1FFFFF) << 42) |
+                       (uint64_t(iy & 0x1FFFFF) << 21) |
+                        uint64_t(iz & 0x1FFFFF);
+            };
+            std::unordered_map<uint64_t,
+                    std::vector<std::pair<uint32_t,uint32_t>>>
+                    sgrid;
+            for (uint32_t p9 = 0; p9 < polys.size(); ++p9)
+                for (uint32_t q9 = 0;
+                     q9 + 1 < polys[p9].size(); ++q9)
+                {
+                    const DSurfPoint& a = polys[p9][q9];
+                    sgrid[gkey(a.x, a.y, a.z)]
+                            .push_back({ p9, q9 });
+                }
+            const float fbar = 0.10f * sp;
+            const float fbar2 = fbar * fbar;
+            std::vector<char> drop(polys.size(), 0);
+            uint64_t ndropped = 0;
+            for (uint32_t p9 = 0; p9 < polys.size(); ++p9)
+            {
+                if (p9 >= poly_twin.size() || !poly_twin[p9])
+                    continue;
+                int hits = 0;
+                for (size_t q9 = 0;
+                     q9 < polys[p9].size() && hits < 4; ++q9)
+                {
+                    const DSurfPoint& v9 = polys[p9][q9];
+                    /*  local direction  */
+                    const size_t qn = q9 + 1 < polys[p9].size()
+                            ? q9 + 1 : q9 - 1;
+                    float ux = polys[p9][qn].x - v9.x,
+                          uy = polys[p9][qn].y - v9.y,
+                          uz = polys[p9][qn].z - v9.z;
+                    const float ul = sqrtf(ux*ux + uy*uy
+                            + uz*uz);
+                    if (!(ul > 0))
+                        continue;
+                    ux /= ul; uy /= ul; uz /= ul;
+                    bool found = false;
+                    const int ix = int(floorf(v9.x / gcell));
+                    const int iy = int(floorf(v9.y / gcell));
+                    const int iz = int(floorf(v9.z / gcell));
+                    for (int dx9 = -1; dx9 <= 1 && !found;
+                         ++dx9)
+                    for (int dy9 = -1; dy9 <= 1 && !found;
+                         ++dy9)
+                    for (int dz9 = -1; dz9 <= 1 && !found;
+                         ++dz9)
+                    {
+                        const uint64_t k =
+                            (uint64_t(int64_t(ix+dx9) &
+                                0x1FFFFF) << 42) |
+                            (uint64_t(int64_t(iy+dy9) &
+                                0x1FFFFF) << 21) |
+                             uint64_t(int64_t(iz+dz9) &
+                                0x1FFFFF);
+                        const auto gi = sgrid.find(k);
+                        if (gi == sgrid.end())
+                            continue;
+                        for (const auto& [op, oq] :
+                             gi->second)
+                        {
+                            if (op == p9)
+                                continue;
+                            const DSurfPoint& a =
+                                    polys[op][oq];
+                            const DSurfPoint& b =
+                                    polys[op][oq + 1];
+                            const float bx = b.x-a.x,
+                                    by = b.y-a.y,
+                                    bz = b.z-a.z;
+                            const float bb = bx*bx + by*by
+                                    + bz*bz;
+                            const float qx = v9.x-a.x,
+                                    qy = v9.y-a.y,
+                                    qz = v9.z-a.z;
+                            float tt = bb > 0 ?
+                                (qx*bx+qy*by+qz*bz)/bb : 0;
+                            tt = tt < 0 ? 0
+                               : tt > 1 ? 1 : tt;
+                            const float ex = qx-tt*bx,
+                                    ey = qy-tt*by,
+                                    ez = qz-tt*bz;
+                            if (ex*ex + ey*ey + ez*ez > fbar2)
+                                continue;
+                            const float bl = bb > 0 ?
+                                1.f/sqrtf(bb) : 0;
+                            if (fabsf(ux*bx*bl + uy*by*bl +
+                                      uz*bz*bl) > 0.9f)
+                            { found = true; break; }
+                        }
+                    }
+                    if (found)
+                        ++hits;
+                }
+                if (hits < 4)
+                {
+                    drop[p9] = 1;
+                    ++ndropped;
+                }
+            }
+            if (ndropped)
+            {
+                std::vector<std::vector<DSurfPoint>> np;
+                std::vector<uint8_t> nc, nt;
+                std::vector<uint32_t> npp;
+                for (size_t p9 = 0; p9 < polys.size(); ++p9)
+                {
+                    if (drop[p9])
+                        continue;
+                    np.push_back(std::move(polys[p9]));
+                    nc.push_back(closed[p9]);
+                    npp.push_back(poly_pair[p9]);
+                    nt.push_back(p9 < poly_twin.size()
+                                 ? poly_twin[p9] : 0);
+                }
+                polys.swap(np);
+                closed.swap(nc);
+                poly_pair.swap(npp);
+                poly_twin.swap(nt);
+                if (getenv("STIBIUM_DMESH_TRACE_DEBUG") ||
+                    getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+                    fprintf(stderr, "TWINMINT: %llu phantom "
+                            "lone twin polys dropped "
+                            "pre-commit\n",
+                            (unsigned long long)ndropped);
+            }
+        }
+    }
+    for (size_t pi9 = 0; pi9 < polys.size(); ++pi9)
+    {
+        auto& poly = polys[pi9];
         std::vector<uint32_t> chain;
         chain.reserve(poly.size());
         for (const DSurfPoint& q : poly)
@@ -5919,6 +6094,8 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
             ++soup->traced;
         }
         soup->tchains.push_back(std::move(chain));
+        soup->tchain_twin.push_back(
+                pi9 < poly_twin.size() ? poly_twin[pi9] : 0);
     }
     soup->tclosed = closed;
     return true;
@@ -15940,6 +16117,7 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
      *  for experiments; the 18 s re-trace is the price of law.  */
     std::vector<std::vector<std::array<float, 3>>> carried;
     std::vector<uint8_t> carried_closed;
+    std::vector<uint8_t> carried_twin;
     bool have_carry = false;
     for (int attempt = 0; attempt < 4; ++attempt)
     {
@@ -15970,6 +16148,9 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                 }
                 soup.tchains.push_back(std::move(chain));
                 soup.tclosed.push_back(carried_closed[c2]);
+                soup.tchain_twin.push_back(
+                        c2 < carried_twin.size()
+                            ? carried_twin[c2] : 0);
             }
         }
         else if (!tr_env || atoi(tr_env) != 0)
@@ -15981,6 +16162,8 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                 carried.clear();
                 carried_closed.assign(soup.tclosed.begin(),
                                       soup.tclosed.end());
+                carried_twin.assign(soup.tchain_twin.begin(),
+                                    soup.tchain_twin.end());
                 for (const auto& ch : soup.tchains)
                 {
                     std::vector<std::array<float, 3>> pts2;
