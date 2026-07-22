@@ -41,6 +41,11 @@ jobs:
             python3-dev libboost-python-dev \
             libpng-dev lemon flex \
             libcgal-dev
+        # Ubuntu 24.04 ships CGAL 5.6, which is too old (the mesher needs
+        # 6.0+). CMake rejects it and fetches header-only CGAL 6.0.1 at
+        # configure time, so this build DOES exercise the CGAL path. We
+        # still install libcgal-dev because its dependency closure
+        # (Boost/GMP/MPFR) is exactly what the fetched CGAL needs to build.
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release

@@ -8,10 +8,15 @@ Requirements
 - [Lemon](https://www.hwaci.com/sw/lemon/)
 - [Flex](https://github.com/westes/flex)
 - [ninja](https://ninja-build.org/) (recommended)
-- [CGAL](https://www.cgal.org/) — *optional but recommended*; enables the
-  constrained-Delaunay meshing path. Used header-only and auto-detected
-  (`find_package(CGAL QUIET)`); the build proceeds without it, but the
-  high-quality triangulation is disabled.
+- [CGAL](https://www.cgal.org/) **6.0 or later** — enables the
+  constrained-Delaunay meshing path (uses a feature new in CGAL 6.0).
+  Header-only, so you don't strictly need a distro package: if a system
+  CGAL ≥ 6.0 isn't found, the build **automatically fetches** the
+  header-only release at configure time (needs network access plus
+  Boost/GMP/MPFR, which every distro ships). Older system CGAL (e.g.
+  Ubuntu 24.04's 5.6) is ignored in favour of the fetch. To forbid the
+  fetch — offline builds, distro packaging — pass
+  `-DSTIBIUM_FETCH_CGAL=OFF`; the build then proceeds without the feature.
 
 --------------------------------------------------------------------------------
 

@@ -103,17 +103,46 @@ if (OpenGL_EGL_FOUND)
 endif()
 
 # Adaptive-Delaunay mesher (src/tree/triangulate/delaunay.cpp):
-# stages B+C need CGAL's robust incremental Delaunay (header-only,
-# exact predicates).  Without it, stage A still builds and
-# delaunay_mesh reports unavailable.
-# (CGAL's config runs its own find_package(Boost), which clobbers
-# the parent's component results - save and restore.)
+# stages B+C need CGAL's constrained Delaunay (header-only, exact
+# predicates).  Without it, stage A still builds and delaunay_mesh
+# reports unavailable.
+#
+# delaunay.cpp uses Conforming_constrained_Delaunay_triangulation_3, new in
+# CGAL 6.0, so we require >= 6.0.  A system CGAL is preferred; if it's
+# missing or too old (e.g. Ubuntu 24.04 ships 5.6) we fetch the header-only
+# release at configure time so this major feature is never silently dropped.
+# CGAL is header-only but still needs Boost/GMP/MPFR from the system.
+# Set -DSTIBIUM_FETCH_CGAL=OFF to forbid the network fetch (offline builds,
+# distro packaging) and fall back to graceful-skip.
+#
+# (CGAL's config runs its own find_package(Boost), which clobbers the
+# parent's component results - save and restore around the whole block.)
+option(STIBIUM_FETCH_CGAL
+    "Fetch header-only CGAL >= 6.0 when the system copy is missing or too old" ON)
+
 set(_stibium_boost_libs ${Boost_LIBRARIES})
-find_package(CGAL QUIET)
+
+find_package(CGAL 6.0 QUIET)
+if (NOT CGAL_FOUND AND STIBIUM_FETCH_CGAL)
+    message(STATUS
+        "Stibium: system CGAL >= 6.0 not found - fetching header-only CGAL 6.0.1")
+    include(FetchContent)
+    FetchContent_Declare(CGAL
+        URL https://github.com/CGAL/cgal/releases/download/v6.0.1/CGAL-6.0.1-library.tar.xz
+        # TODO: pin URL_HASH SHA256=<hash> once chosen, for verified/reproducible fetches
+    )
+    FetchContent_MakeAvailable(CGAL)
+endif()
+
 set(Boost_LIBRARIES ${_stibium_boost_libs})
-if (CGAL_FOUND)
+
+# CGAL::CGAL exists whether it came from find_package or FetchContent.
+if (TARGET CGAL::CGAL)
     target_compile_definitions(SbFab PRIVATE STIBIUM_HAS_CGAL)
     target_link_libraries(SbFab CGAL::CGAL)
+    message(STATUS "Stibium: constrained-Delaunay mesher ENABLED (CGAL)")
+else()
+    message(STATUS "Stibium: CGAL unavailable - constrained-Delaunay mesher disabled")
 endif()
 
 # Add the binary dir to include generated files
