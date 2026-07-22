@@ -107,7 +107,33 @@ r1 (reference-clean seam2 carries ~20 itself); regular, not
 chaotic.  Nate's slicer test (0.15mm layers stop blipping) is
 the field referee.
 
-## THE SEED-POACHING FIX (2026-07-20 - the dense-detail class ROOT CAUSE)
+## THE LAW-GENERATIVE WALL STITCH (2026-07-21, third step round)
+
+The re-promotion path bca5362b/9ccde844 named - "explicit wall
+stitching instead of tie-winning" - is LANDED, default on
+(STIBIUM_DMESH_STITCH=0 reverts).  After extract+repair, mutual
+twin pairs (the STEPDENSE vote, 0.10 sp bar) are stitched with an
+arc-length zippered rail-to-rail ribbon emitted straight from the
+traced law; the roofing facets across each licensed span are
+removed; the hole rim (one live facet per rim edge) is chained by
+an orientation-parity wedge walk, ear-clipped to exact-rail runs,
+and zippered - every rim edge ends with exactly 2 facets.  THE
+ORACLE LICENSE is the identity story: |f|/|grad| < 0.01 sp at 3
+lateral fractions per station AND at every emitted triangle's
+centroid + edge midpoints; no license = no stitch = baseline,
+deterministically (failed spans excise the wounded station and
+retry the halves).  Extract r1: seam1 off-law 53 -> 19 (area
+-70%), |depth| std 0.0091 -> 0.0050; seam2 17 -> 5; the 26-row
+deep-air class (0.027-0.030) is GONE except SIX rows at the two
+pre-existing nm pinch stations (all-removed pinch fans leave two
+parity-legal sheet pairings - needs the tet ring; those stations
+excise cleanly to baseline).  FULL BINO one-variable A/B: FACE
+0.069% = 0.069%, nm 310 = 310, repairs 7467 = 7467, FACE_DUMP
+cluster diff ZERO - the stitch engages model-wide (8 pairs, 20
+ribbons) with zero collateral, because it runs DOWNSTREAM of
+extraction and repair: no lattice phase to be unlucky about, the
+exact failure that demoted STEPDENSE.  res-7 + ladder + cyl +
+screws: 0 candidate pairs, knob inert, referees unchanged.
 
 Nate's ladder models (examples/detail_spacing_test.sb + _cyl.sb -
 PERMANENT BENCH: groove pairs at gaps 8/4/2/1/0.5 sp, flat and

@@ -8728,6 +8728,1298 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                        "_1_extract_repair.stl").c_str(),
                       out->verts, out->tris);
 
+    /*  LAW-GENERATIVE WALL STITCH (the sub-cell twin-rail step
+     *  class, 2026-07-20 arc: 3b71787e mechanism, 640e0cdd tie-win,
+     *  bca5362b demotion, 9ccde844 tilt verdict).  Two near-parallel
+     *  constrained rails under the half-cell bar are a real wall the
+     *  lattice cannot afford: the rails are exact mesh edges (the
+     *  through-vertex pre-split chains them in vertex-for-vertex),
+     *  but the wall BETWEEN them is delivered by whatever Delaunay
+     *  ties its way to - roofing railA-railB-face facets that dive
+     *  half the riser into air.  Every lattice-mediated treatment is
+     *  phase-dependent (bisection wins axis-aligned stretches and
+     *  churns tilted ones - the site-dump verdict), so the wall is
+     *  emitted DIRECTLY from the law instead: an arc-length zippered
+     *  rail-to-rail strip over each certified span, and the facets
+     *  the extraction roofed across that span are removed.  The law
+     *  becomes generative for sub-lattice walls, not just
+     *  constraining.
+     *
+     *  THE ORACLE LICENSE is the identity story (the 20d0fee9
+     *  lesson: distance bars alone have none).  A candidate pair is
+     *  stitched ONLY where the FIELD certifies a wall between the
+     *  rails: |f|/|grad| ~ 0 sampled across the ribbon (3 lateral
+     *  fractions per rail station), and every emitted triangle is
+     *  re-certified at its centroid + edge midpoints before commit.
+     *  No license = no stitch = current behavior, deterministically.
+     *
+     *  Manifold bookkeeping is hole-filling by construction: remove
+     *  the roofing/in-strip facets, take the directed boundary loop
+     *  of the hole (each boundary edge keeps exactly one live facet;
+     *  the new half-edge is its reverse), and triangulate the loop
+     *  with a shortest-diagonal zipper between its two rail-side
+     *  runs.  Every boundary edge ends with exactly 2 incident
+     *  facets (one outer, one ribbon); interior diagonals are minted
+     *  in matched pairs.  Any irregularity (an edge left with 2+
+     *  facets, a branching boundary, >2 rail-side transitions, a
+     *  pre-existing diagonal, a failed certification) falls back
+     *  PER SPAN: nothing removed, nothing emitted, census printed -
+     *  the deterministic clean fallback.
+     *
+     *  Disengages exactly like the drop: pairs past the bar (seam2
+     *  r7 = 0.44 sp) are never candidates, so at resolvable scale
+     *  the knob is inert.  STIBIUM_DMESH_STITCH=0 reverts;
+     *  _STITCHLIC retunes the license bar (sp units);  _STEPBAR is
+     *  shared with the corridor drop; _STITCH_DUMP=path writes the
+     *  station license verdicts + emitted centroids (the 9ccde844
+     *  site-dump pattern).  Census prints under CHIP_DEBUG.  */
+    {
+        static const char* st_env = getenv("STIBIUM_DMESH_STITCH");
+        const bool st_on = !st_env || atoi(st_env) != 0;
+        static const char* lb_env =
+                getenv("STIBIUM_DMESH_STITCHLIC");
+        const float lic_bar = (lb_env ? float(atof(lb_env))
+                                      : 0.01f) * soup.spacing;
+        const bool st_dbg =
+                getenv("STIBIUM_DMESH_CHIP_DEBUG") != nullptr;
+        FILE* st_dump = nullptr;
+        if (const char* dp = getenv("STIBIUM_DMESH_STITCH_DUMP"))
+            st_dump = fopen(dp, "w");
+        uint64_t st_pairs = 0, st_lic = 0, st_spans = 0,
+                 st_ribbons = 0, st_rm = 0, st_add = 0;
+        /*  fallback census: 0 edge-excess, 1 boundary-shape,
+         *  2 transitions, 3 pre-existing diagonal, 4 certify  */
+        uint64_t st_fb[5] = { 0, 0, 0, 0, 0 };
+        if (st_on && cseg.size() > 1 && !out->tris.empty())
+        {
+        const float sp = soup.spacing;
+        const float bar = step_bar;      // shared 0.10 sp pair bar
+        const float bar2 = bar * bar;
+        /*  On-rail tolerances, TWO of them (measured tradeoff on
+         *  the extract): chain vertices are exact, but the
+         *  extraction leaves refinement separators hovering up to
+         *  ~6e-3 sp off the rails (the crease-snap pass's own
+         *  clientele).  The WIDE band (0.01 sp) feeds the removal
+         *  rules so roofs hanging on near-rail verts are reached
+         *  (tight-only left riser-spanning rim edges alive); the
+         *  EXACT band (2e-3 sp) gates run membership so rungs are
+         *  emitted only between exact rail vertices (wide-band
+         *  rungs lean up to 9 degrees = off-law, measured seam2
+         *  offlaw 5 -> 20).  Near-rail verts ear-clip out of the
+         *  runs as on-rail slivers.  */
+        const float rtol = 0.01f * sp;
+        const float rtol2 = rtol * rtol;
+        const float rte = 2e-3f * sp;
+        const float rte2 = rte * rte;
+        const float sep_floor = 5e-3f * sp;
+        const float atol = 1e-3f * sp;   // arc-window slack
+        std::unordered_map<uint32_t, std::vector<size_t>> bych;
+        for (size_t i = 0; i < cseg.size(); ++i)
+            bych[cseg_chain[i]].push_back(i);
+        /*  mutual twin partners: same vote as the drop/densify  */
+        const auto near_dir = [&](const std::vector<size_t>& segs,
+                float x, float y, float z, float& dx, float& dy,
+                float& dz) {
+            float best = 1e30f;
+            for (size_t si : segs)
+            {
+                const auto& s = cseg[si];
+                const float ax = s[0], ay = s[1], az = s[2];
+                const float bx = s[3]-ax, by = s[4]-ay,
+                            bz = s[5]-az;
+                const float bb = bx*bx + by*by + bz*bz;
+                const float px = x-ax, py = y-ay, pz = z-az;
+                float t = bb > 0 ? (px*bx+py*by+pz*bz)/bb : 0;
+                t = t < 0 ? 0 : t > 1 ? 1 : t;
+                const float fx = ax+t*bx, fy = ay+t*by,
+                            fz = az+t*bz;
+                const float ex = x-fx, ey = y-fy, ez = z-fz;
+                const float d = ex*ex + ey*ey + ez*ez;
+                if (d < best)
+                {
+                    best = d;
+                    const float bl = bb > 0 ? 1.f/sqrtf(bb) : 0;
+                    dx = bx*bl; dy = by*bl; dz = bz*bl;
+                }
+            }
+            return best;
+        };
+        std::unordered_map<uint32_t, uint32_t> partner;
+        for (const auto& [c, segs] : bych)
+        {
+            std::unordered_map<uint32_t, int> votes;
+            int npts = 0;
+            for (size_t si : segs)
+            {
+                const auto& s = cseg[si];
+                const float sbx = s[3]-s[0], sby = s[4]-s[1],
+                            sbz = s[5]-s[2];
+                const float sl = sqrtf(sbx*sbx+sby*sby+sbz*sbz);
+                const float ux = sl>0?sbx/sl:0, uy = sl>0?sby/sl:0,
+                            uz = sl>0?sbz/sl:0;
+                for (int e = 0; e < 2; ++e)
+                {
+                    ++npts;
+                    const float px = s[3*e], py = s[3*e+1],
+                                pz = s[3*e+2];
+                    for (const auto& [c2, segs2] : bych)
+                    {
+                        if (c2 == c) continue;
+                        float dx,dy,dz;
+                        const float d2 = near_dir(segs2, px,py,pz,
+                                dx,dy,dz);
+                        if (d2 > 1e-12f && d2 < bar2 &&
+                            fabsf(ux*dx+uy*dy+uz*dz) > 0.9f)
+                            ++votes[c2];
+                    }
+                }
+            }
+            uint32_t best_c = UINT32_MAX; int best_v = 0;
+            for (const auto& [c2, v] : votes)
+                if (v > best_v) { best_v = v; best_c = c2; }
+            if (best_c != UINT32_MAX && best_v * 2 > npts)
+                partner[c] = best_c;
+        }
+        std::vector<std::pair<uint32_t, uint32_t>> prs;
+        for (const auto& [c, p] : partner)
+            if (c < p)
+            {
+                const auto q = partner.find(p);
+                if (q != partner.end() && q->second == c)
+                    prs.push_back({ c, p });
+            }
+        std::sort(prs.begin(), prs.end());
+        st_pairs = prs.size();
+        if (!prs.empty())
+        {
+            /*  ordered polyline per chain (exact-coordinate walk;
+             *  raw segment order as fallback)  */
+            struct Poly
+            {
+                std::vector<std::array<float, 3>> p;
+                std::vector<float> s;    // cumulative arc length
+            };
+            const auto assemble = [&](const std::vector<size_t>&
+                                      segs) -> Poly {
+                Poly P;
+                std::unordered_map<uint64_t,
+                        std::vector<std::pair<size_t, int>>> ends;
+                for (size_t qi = 0; qi < segs.size(); ++qi)
+                    for (int e = 0; e < 2; ++e)
+                    {
+                        const auto& s = cseg[segs[qi]];
+                        ends[coord_hash(s[3*e], s[3*e+1],
+                                        s[3*e+2])]
+                                .push_back({ qi, e });
+                    }
+                /*  start at a degree-1 endpoint (open chain) or
+                 *  seg 0 (ring)  */
+                size_t at = 0; int aend = 0;
+                for (size_t qi = 0; qi < segs.size(); ++qi)
+                {
+                    bool found = false;
+                    for (int e = 0; e < 2 && !found; ++e)
+                    {
+                        const auto& s = cseg[segs[qi]];
+                        const auto it = ends.find(coord_hash(
+                                s[3*e], s[3*e+1], s[3*e+2]));
+                        if (it != ends.end() &&
+                            it->second.size() == 1)
+                        {
+                            at = qi; aend = e; found = true;
+                        }
+                    }
+                    if (found) break;
+                }
+                std::vector<char> used(segs.size(), 0);
+                float cx = cseg[segs[at]][3*aend];
+                float cy = cseg[segs[at]][3*aend+1];
+                float cz = cseg[segs[at]][3*aend+2];
+                P.p.push_back({ cx, cy, cz });
+                P.s.push_back(0);
+                for (size_t n = 0; n < segs.size(); ++n)
+                {
+                    /*  find unused segment with an end at c  */
+                    const auto it = ends.find(
+                            coord_hash(cx, cy, cz));
+                    size_t ni = SIZE_MAX; int ne = 0;
+                    if (it != ends.end())
+                        for (const auto& [qi, e] : it->second)
+                            if (!used[qi] &&
+                                cseg[segs[qi]][3*e] == cx &&
+                                cseg[segs[qi]][3*e+1] == cy &&
+                                cseg[segs[qi]][3*e+2] == cz)
+                            { ni = qi; ne = e; break; }
+                    if (ni == SIZE_MAX)
+                        break;
+                    used[ni] = 1;
+                    const auto& s = cseg[segs[ni]];
+                    const int oe = 1 - ne;
+                    const float nx = s[3*oe], ny = s[3*oe+1],
+                                nz = s[3*oe+2];
+                    const float dx = nx-cx, dy = ny-cy, dz = nz-cz;
+                    P.s.push_back(P.s.back() +
+                            sqrtf(dx*dx + dy*dy + dz*dz));
+                    P.p.push_back({ nx, ny, nz });
+                    cx = nx; cy = ny; cz = nz;
+                }
+                if (P.p.size() != segs.size() + 1 &&
+                    P.p.size() < 2)
+                    P.p.clear();
+                return P;
+            };
+            /*  nearest point on polyline: d2, arc, foot  */
+            const auto near_poly = [](const Poly& P, float x,
+                    float y, float z, float& arc, float* foot) {
+                float best = 1e30f;
+                for (size_t i = 0; i + 1 < P.p.size(); ++i)
+                {
+                    const float ax = P.p[i][0], ay = P.p[i][1],
+                                az = P.p[i][2];
+                    const float bx = P.p[i+1][0]-ax,
+                                by = P.p[i+1][1]-ay,
+                                bz = P.p[i+1][2]-az;
+                    const float bb = bx*bx + by*by + bz*bz;
+                    const float px = x-ax, py = y-ay, pz = z-az;
+                    float t = bb > 0 ? (px*bx+py*by+pz*bz)/bb : 0;
+                    t = t < 0 ? 0 : t > 1 ? 1 : t;
+                    const float fx = ax+t*bx, fy = ay+t*by,
+                                fz = az+t*bz;
+                    const float ex = x-fx, ey = y-fy, ez = z-fz;
+                    const float d = ex*ex + ey*ey + ez*ez;
+                    if (d < best)
+                    {
+                        best = d;
+                        arc = P.s[i] + t * (P.s[i+1] - P.s[i]);
+                        if (foot)
+                        { foot[0]=fx; foot[1]=fy; foot[2]=fz; }
+                    }
+                }
+                return best;
+            };
+            const size_t ntri0 = out->tris.size() / 3;
+            const size_t nv0 = out->verts.size() / 3;
+            const auto ek = [](uint32_t a, uint32_t b) {
+                if (a > b) std::swap(a, b);
+                return (uint64_t(a) << 32) | b;
+            };
+            std::unordered_map<uint64_t, std::vector<uint32_t>>
+                    emap;
+            std::vector<std::vector<uint32_t>> vtris(nv0);
+            for (uint32_t t = 0; t < ntri0; ++t)
+                for (int e = 0; e < 3; ++e)
+                {
+                    const uint32_t a = out->tris[3*t + e];
+                    const uint32_t b = out->tris[3*t + (e+1)%3];
+                    emap[ek(a, b)].push_back(t);
+                    vtris[a].push_back(t);
+                }
+            std::vector<char> rmflag(ntri0, 0);
+            std::vector<uint32_t> stitched;
+            const auto live_on = [&](uint64_t k) {
+                const auto it = emap.find(k);
+                if (it == emap.end()) return 0;
+                int n = 0;
+                for (const uint32_t t : it->second)
+                    if (t >= ntri0 || !rmflag[t])
+                        ++n;
+                return n;
+            };
+            /*  license stencil eval: |f|/|grad| at points  */
+            const auto lic_eval = [&](
+                    const std::vector<std::array<float,3>>& pts,
+                    std::vector<float>& ratio) {
+                const float h = 1e-3f * sp;
+                std::vector<float> qx, qy, qz, qv;
+                qx.reserve(pts.size() * 7);
+                for (const auto& p : pts)
+                    for (int q = 0; q < 7; ++q)
+                    {
+                        qx.push_back(p[0] +
+                                (q==1 ? h : q==2 ? -h : 0));
+                        qy.push_back(p[1] +
+                                (q==3 ? h : q==4 ? -h : 0));
+                        qz.push_back(p[2] +
+                                (q==5 ? h : q==6 ? -h : 0));
+                    }
+                eval_points_mt(deck, ctx, qx, qy, qz, qv);
+                ratio.resize(pts.size());
+                for (size_t i = 0; i < pts.size(); ++i)
+                {
+                    const float f = qv[i*7];
+                    const float gx = qv[i*7+1] - qv[i*7+2];
+                    const float gy = qv[i*7+3] - qv[i*7+4];
+                    const float gz = qv[i*7+5] - qv[i*7+6];
+                    const float gl = sqrtf(gx*gx + gy*gy + gz*gz)
+                                     / (2 * h);
+                    ratio[i] = (gl > 1e-9f && std::isfinite(f))
+                            ? fabsf(f) / gl : 1e30f;
+                }
+            };
+            for (const auto& [ca, cb] : prs)
+            {
+                const Poly A = assemble(bych[ca]);
+                const Poly B = assemble(bych[cb]);
+                if (A.p.size() < 2 || B.p.size() < 2)
+                    continue;
+                /*  stations at A vertices  */
+                const size_t ns = A.p.size();
+                std::vector<float> sepv(ns, 1e30f);
+                std::vector<std::array<float,3>> foot(ns);
+                for (size_t k = 0; k < ns; ++k)
+                {
+                    float arc;
+                    const float d2 = near_poly(B, A.p[k][0],
+                            A.p[k][1], A.p[k][2], arc,
+                            foot[k].data());
+                    sepv[k] = sqrtf(d2);
+                }
+                std::vector<char> cand(ns, 0), lic(ns, 0);
+                std::vector<std::array<float,3>> spts;
+                std::vector<size_t> sown;
+                for (size_t k = 0; k < ns; ++k)
+                {
+                    if (!(sepv[k] > sep_floor && sepv[k] < bar))
+                        continue;
+                    cand[k] = 1;
+                    for (int q = 1; q <= 3; ++q)
+                    {
+                        const float f = 0.25f * float(q);
+                        spts.push_back({
+                            A.p[k][0] + f*(foot[k][0]-A.p[k][0]),
+                            A.p[k][1] + f*(foot[k][1]-A.p[k][1]),
+                            A.p[k][2] + f*(foot[k][2]-A.p[k][2])});
+                        sown.push_back(k);
+                    }
+                }
+                if (spts.empty())
+                    continue;
+                std::vector<float> ratio;
+                lic_eval(spts, ratio);
+                std::vector<char> bad(ns, 0);
+                for (size_t i = 0; i < sown.size(); ++i)
+                    if (!(ratio[i] < lic_bar))
+                        bad[sown[i]] = 1;
+                bool any_lic = false;
+                for (size_t k = 0; k < ns; ++k)
+                {
+                    lic[k] = cand[k] && !bad[k];
+                    any_lic |= lic[k] != 0;
+                    if (st_dump && cand[k])
+                        fprintf(st_dump, "S %.6g %.6g %.6g "
+                                "%.6g %d\n", A.p[k][0], A.p[k][1],
+                                A.p[k][2], sepv[k] / sp,
+                                int(lic[k]));
+                }
+                if (any_lic)
+                    ++st_lic;
+                /*  maximal licensed spans (>= 2 stations), on a
+                 *  work stack: a failed span is re-tried with the
+                 *  wounded station excised (split in two), so one
+                 *  pre-existing pinch or junction irregularity
+                 *  cannot forfeit a whole seam.  Budget-capped;
+                 *  every abandoned piece is a clean fallback.  */
+                std::vector<std::pair<size_t, size_t>> swork;
+                for (size_t k = 0; k < ns; )
+                {
+                    if (!lic[k]) { ++k; continue; }
+                    size_t j = k;
+                    while (j + 1 < ns && lic[j + 1])
+                        ++j;
+                    if (j > k)
+                    {
+                        ++st_spans;
+                        swork.push_back({ k, j });
+                    }
+                    k = j + 1;
+                }
+                int sbudget = 64;
+                while (!swork.empty())
+                {
+                    const auto [ka, kb] = swork.back();
+                    swork.pop_back();
+                    if (kb <= ka || --sbudget < 0)
+                        continue;
+                    {
+                        /*  ---- one span: classify, cut, zip ---- */
+                        const size_t k = ka, j = kb;
+                        float farc = -1e30f;
+                        const float s0 = A.s[k] - atol;
+                        const float s1 = A.s[j] + atol;
+                        float bmin = 1e30f, bmax = -1e30f;
+                        float lo[3] = { 1e30f, 1e30f, 1e30f };
+                        float hi[3] = { -1e30f, -1e30f, -1e30f };
+                        for (size_t q = k; q <= j; ++q)
+                        {
+                            float arc;
+                            near_poly(B, A.p[q][0], A.p[q][1],
+                                      A.p[q][2], arc, nullptr);
+                            bmin = std::min(bmin, arc);
+                            bmax = std::max(bmax, arc);
+                            for (int d = 0; d < 3; ++d)
+                            {
+                                lo[d] = std::min({ lo[d],
+                                        A.p[q][d], foot[q][d] });
+                                hi[d] = std::max({ hi[d],
+                                        A.p[q][d], foot[q][d] });
+                            }
+                        }
+                        bmin -= atol; bmax += atol;
+                        const float infl = 1.5f * bar;
+                        for (int d = 0; d < 3; ++d)
+                        { lo[d] -= infl; hi[d] += infl; }
+                        /*  vertex classification in the box:
+                         *  bit0 onA, bit1 onB, bit2 interior,
+                         *  bit3 in-window  */
+                        std::unordered_map<uint32_t, uint8_t> cls;
+                        std::unordered_map<uint32_t,
+                                std::array<float,3>> vdst;
+                        for (uint32_t v = 0; v < nv0; ++v)
+                        {
+                            const float* p = &out->verts[3*v];
+                            if (p[0] < lo[0] || p[0] > hi[0] ||
+                                p[1] < lo[1] || p[1] > hi[1] ||
+                                p[2] < lo[2] || p[2] > hi[2])
+                                continue;
+                            float aarc, barc;
+                            float fA[3], fB[3];
+                            const float dA2 = near_poly(A, p[0],
+                                    p[1], p[2], aarc, fA);
+                            const float dB2 = near_poly(B, p[0],
+                                    p[1], p[2], barc, fB);
+                            const bool winA = aarc >= s0 &&
+                                              aarc <= s1;
+                            const bool winB = barc >= bmin &&
+                                              barc <= bmax;
+                            /*  lateral fraction across the riser
+                             *  (0 = rail-A level, 1 = rail-B)  */
+                            float lat = 0.5f;
+                            {
+                                const float gx = fB[0]-fA[0],
+                                            gy = fB[1]-fA[1],
+                                            gz = fB[2]-fA[2];
+                                const float gg = gx*gx + gy*gy
+                                               + gz*gz;
+                                if (gg > 0)
+                                    lat = ((p[0]-fA[0])*gx +
+                                           (p[1]-fA[1])*gy +
+                                           (p[2]-fA[2])*gz) / gg;
+                            }
+                            uint8_t c = 0;
+                            if (dA2 < rtol2 && winA) c |= 1;
+                            if (dB2 < rtol2 && winB) c |= 2;
+                            if (!c && dA2 < bar2 && dB2 < bar2 &&
+                                winA && lat > 0.1f && lat < 0.9f)
+                                c |= 4;
+                            if (winA || winB)
+                                c |= 8;
+                            if (dA2 < rte2 && winA) c |= 16;
+                            if (dB2 < rte2 && winB) c |= 32;
+                            if (c)
+                            {
+                                cls[v] = c;
+                                vdst[v] = { dA2, dB2, lat };
+                            }
+                        }
+                        /*  removal set: roofs (A+B) and in-strip
+                         *  zigzag (interior, fully classified);
+                         *  straddlers (interior + face) stay and
+                         *  join the boundary loop  */
+                        std::unordered_set<uint32_t> rset;
+                        std::unordered_set<uint32_t> seen;
+                        for (const auto& [v, c] : cls)
+                        {
+                            if (!(c & 7))
+                                continue;
+                            for (const uint32_t t : vtris[v])
+                            {
+                                if (rmflag[t] ||
+                                    !seen.insert(t).second)
+                                    continue;
+                                bool hasA = false, hasB = false;
+                                bool lowout = false,
+                                     highout = false;
+                                int nin = 0, ncls = 0, nwin = 0;
+                                for (int e = 0; e < 3; ++e)
+                                {
+                                    const uint32_t w =
+                                            out->tris[3*t + e];
+                                    const auto f = cls.find(w);
+                                    const uint8_t wc =
+                                        f == cls.end() ? 0
+                                                       : f->second;
+                                    if (wc & 1) hasA = true;
+                                    if (wc & 2) hasB = true;
+                                    if (wc & 4) ++nin;
+                                    if (wc & 7) ++ncls;
+                                    if (wc & 8) ++nwin;
+                                    if (wc == 8)
+                                    {
+                                        /*  off-corridor face
+                                         *  vertex: which lateral
+                                         *  level does it sit
+                                         *  at?  */
+                                        const float lt =
+                                                vdst[w][2];
+                                        if (lt < 0.35f)
+                                            lowout = true;
+                                        if (lt > 0.65f)
+                                            highout = true;
+                                    }
+                                }
+                                if (nwin != 3)
+                                    continue;
+                                /*  full roofs / wall rungs (A+B),
+                                 *  in-strip zigzag (interior),
+                                 *  and HALF-roofs: a rail facet
+                                 *  whose face vertex sits at the
+                                 *  OPPOSITE lateral level dives
+                                 *  the riser (the far-rail-edge
+                                 *  roof railB-railB'-faceLow the
+                                 *  A+B rule cannot see)  */
+                                if ((hasA && hasB) ||
+                                    (nin && ncls == 3) ||
+                                    (hasB && lowout) ||
+                                    (hasA && highout))
+                                    rset.insert(t);
+                            }
+                        }
+                        if (rset.empty())
+                            continue;
+                        if (getenv("STIBIUM_DMESH_STITCH_DEBUG"))
+                        {
+                            int cA = 0, cB = 0, cI = 0;
+                            for (const auto& [v, c] : cls)
+                            {
+                                if (c & 1) ++cA;
+                                if (c & 2) ++cB;
+                                if (c & 4) ++cI;
+                            }
+                            fprintf(stderr, "STITCHDBG span "
+                                    "chains %u/%u stations "
+                                    "%zu-%zu: %d onA %d onB "
+                                    "%d interior, rset %zu\n",
+                                    ca, cb, k, j, cA, cB, cI,
+                                    rset.size());
+                        }
+                        /*  hole boundary: per removed-region edge,
+                         *  live-after-cut must be 0 or 1.  The
+                         *  boundary can REVISIT a vertex (a face
+                         *  vertex shared by two non-adjacent
+                         *  removed roofs is a bowtie), so loops
+                         *  are chained on HALF-EDGES with a wedge
+                         *  walk through the removed fans - each
+                         *  incoming half-edge rotates around its
+                         *  head through removed facets until the
+                         *  next boundary edge of the SAME wedge.  */
+                        std::vector<uint32_t> rlist(rset.begin(),
+                                                    rset.end());
+                        std::sort(rlist.begin(), rlist.end());
+                        std::unordered_map<uint64_t,
+                                std::vector<uint32_t>> rmap;
+                        for (const uint32_t t : rlist)
+                            for (int e = 0; e < 3; ++e)
+                                rmap[ek(out->tris[3*t + e],
+                                        out->tris[3*t + (e+1)%3])]
+                                        .push_back(t);
+                        bool ok = true;
+                        int fbr = -1;
+                        std::unordered_set<uint64_t> hset;
+                        for (const auto& [kk, rts] : rmap)
+                        {
+                            const int liv = live_on(kk) -
+                                            int(rts.size());
+                            /*  liv 0 = interior; liv 2 = the cut
+                             *  HEALED a pre-existing pinch (two
+                             *  roofs + two outer facets on one
+                             *  rail edge - the extract's two nm
+                             *  edges are exactly this) and the
+                             *  edge is manifold again, off the
+                             *  rim; only liv 1 edges are rim.
+                             *  liv >= 3 stays non-manifold and
+                             *  off the rim; the loop walk
+                             *  validates whatever remains.  */
+                            if (liv != 1)
+                                continue;
+                            /*  the one live facet on this edge  */
+                            const uint32_t ia = uint32_t(kk >> 32);
+                            const uint32_t ib = uint32_t(kk);
+                            uint32_t lt = UINT32_MAX;
+                            for (const uint32_t t : emap[kk])
+                                if ((t >= ntri0 || !rmflag[t]) &&
+                                    !rset.count(t))
+                                { lt = t; break; }
+                            if (lt == UINT32_MAX)
+                            { ok = false; fbr = 1; break; }
+                            /*  direction in the live facet  */
+                            const uint32_t* T = lt < ntri0
+                                ? &out->tris[3*lt]
+                                : &stitched[3*(lt - ntri0)];
+                            uint32_t u = 0, w = 0;
+                            for (int e = 0; e < 3; ++e)
+                                if ((T[e] == ia &&
+                                     T[(e+1)%3] == ib) ||
+                                    (T[e] == ib &&
+                                     T[(e+1)%3] == ia))
+                                { u = T[e]; w = T[(e+1)%3]; }
+                            /*  hole half-edge = reverse  */
+                            hset.insert((uint64_t(w) << 32) | u);
+                        }
+                        if (ok && hset.size() < 3)
+                        { ok = false; fbr = 1; }
+                        const auto third = [&](uint32_t t,
+                                uint32_t a2, uint32_t b2) {
+                            const uint32_t* T = &out->tris[3*t];
+                            for (int e = 0; e < 3; ++e)
+                                if (T[e] != a2 && T[e] != b2)
+                                    return T[e];
+                            return UINT32_MAX;
+                        };
+                        /*  traversal direction of edge (a2->b2)
+                         *  inside facet t: +1 forward, -1
+                         *  reverse, 0 absent  */
+                        const auto trav = [&](uint32_t t,
+                                uint32_t a2, uint32_t b2) {
+                            const uint32_t* T = &out->tris[3*t];
+                            for (int e = 0; e < 3; ++e)
+                            {
+                                if (T[e] == a2 &&
+                                    T[(e+1)%3] == b2)
+                                    return 1;
+                                if (T[e] == b2 &&
+                                    T[(e+1)%3] == a2)
+                                    return -1;
+                            }
+                            return 0;
+                        };
+                        /*  wedge walk: h = (u -> v), rotate
+                         *  around v from edge {v,u} through
+                         *  removed facets to the wedge's next
+                         *  boundary half-edge (v -> w).  Sheet-
+                         *  correct at pinch fans: adjacent facets
+                         *  of the oriented extraction traverse a
+                         *  shared edge in OPPOSITE directions, so
+                         *  each crossing requires the matching
+                         *  traversal - jumping sheets (the
+                         *  measured dead-end at the extract's two
+                         *  nm rail edges) fails the parity.  */
+                        const auto next_he = [&](uint64_t h,
+                                                 bool rev) {
+                            const uint32_t u = uint32_t(h >> 32);
+                            const uint32_t v = uint32_t(h);
+                            uint32_t prev = UINT32_MAX;
+                            uint32_t x = u;
+                            int need = 1;   // trav(t, x, v)
+                            for (int g = 0; g < 4096; ++g)
+                            {
+                                const auto it =
+                                        rmap.find(ek(v, x));
+                                if (it == rmap.end())
+                                {
+                                    if (getenv("STIBIUM_DMESH_"
+                                               "STITCH_DEBUG"))
+                                        fprintf(stderr,
+                                            "STITCHDBG walk: no "
+                                            "removed on %u-%u\n",
+                                            v, x);
+                                    return UINT64_MAX;
+                                }
+                                uint32_t t = UINT32_MAX;
+                                const auto& rts = it->second;
+                                for (size_t ri = 0;
+                                     ri < rts.size(); ++ri)
+                                {
+                                    const uint32_t rt = rev
+                                        ? rts[rts.size()-1-ri]
+                                        : rts[ri];
+                                    if (rt != prev &&
+                                        trav(rt, x, v) == need)
+                                    { t = rt; break; }
+                                }
+                                if (t == UINT32_MAX)
+                                {
+                                    if (getenv("STIBIUM_DMESH_"
+                                               "STITCH_DEBUG"))
+                                        fprintf(stderr,
+                                            "STITCHDBG walk: no "
+                                            "parity candidate on "
+                                            "%u-%u (%zu removed) "
+                                            "need %d\n", v, x,
+                                            it->second.size(),
+                                            need);
+                                    return UINT64_MAX;
+                                }
+                                const uint32_t w =
+                                        third(t, v, x);
+                                if (w == UINT32_MAX)
+                                    return UINT64_MAX;
+                                const auto r2 =
+                                        rmap.find(ek(v, w));
+                                const size_t nrm =
+                                    r2 == rmap.end() ? 0
+                                    : r2->second.size();
+                                const int lv2 =
+                                    live_on(ek(v, w)) - int(nrm);
+                                if (lv2 == 1)
+                                {
+                                    /*  rim edge: the wedge ends
+                                     *  here  */
+                                    const uint64_t cand2 =
+                                        (uint64_t(v) << 32) | w;
+                                    if (!hset.count(cand2) &&
+                                        getenv("STIBIUM_DMESH_"
+                                               "STITCH_DEBUG"))
+                                        fprintf(stderr,
+                                            "STITCHDBG walk: rim "
+                                            "%u->%u not in hset\n",
+                                            v, w);
+                                    return hset.count(cand2)
+                                            ? cand2 : UINT64_MAX;
+                                }
+                                if (nrm < 2)
+                                {
+                                    if (getenv("STIBIUM_DMESH_"
+                                               "STITCH_DEBUG"))
+                                        fprintf(stderr,
+                                            "STITCHDBG walk: "
+                                            "wedge ends at edge "
+                                            "%u-%u nrm=%zu "
+                                            "lv2=%d (%.4f,%.4f,"
+                                            "%.4f)\n", v, w, nrm,
+                                            lv2, out->verts[3*w],
+                                            out->verts[3*w+1],
+                                            out->verts[3*w+2]);
+                                    return UINT64_MAX;
+                                }
+                                /*  t traverses (v,w) as td; the
+                                 *  sheet-adjacent neighbour must
+                                 *  traverse opposite, i.e.
+                                 *  trav(next, w, v) == td  */
+                                need = trav(t, v, w);
+                                prev = t;
+                                x = w;
+                            }
+                            return UINT64_MAX;
+                        };
+                        /*  walk loops, zipper each (sorted start
+                         *  order: determinism is part of the
+                         *  contract).  TWO deterministic
+                         *  attempts: at an all-removed pinch fan
+                         *  the sheet parity leaves two ring-
+                         *  adjacent candidates and winding alone
+                         *  cannot pick (the extract's two nm
+                         *  stations); if the first choice order
+                         *  knots the loops, the reversed order is
+                         *  tried once before the span falls
+                         *  back.  */
+                        std::vector<uint32_t> cand_tris;
+                        std::vector<uint64_t> hsorted(
+                                hset.begin(), hset.end());
+                        std::sort(hsorted.begin(),
+                                  hsorted.end());
+                        const bool bok = ok;
+                        for (int att = 0; att < 2; ++att)
+                        {
+                        if (!bok)
+                            break;
+                        ok = true;
+                        fbr = -1;
+                        cand_tris.clear();
+                        std::unordered_set<uint64_t> hused;
+                        for (const uint64_t h0 : hsorted)
+                        {
+                            if (!ok || hused.count(h0))
+                                continue;
+                            std::vector<uint32_t> L;
+                            uint64_t cur = h0;
+                            do
+                            {
+                                L.push_back(uint32_t(cur >> 32));
+                                hused.insert(cur);
+                                cur = next_he(cur, att == 1);
+                                if (cur == UINT64_MAX ||
+                                    (cur != h0 &&
+                                     hused.count(cur)))
+                                { ok = false; fbr = 1; break; }
+                            } while (cur != h0 &&
+                                     L.size() <= hset.size());
+                            if (!ok || cur != h0 ||
+                                L.size() < 3)
+                            {
+                                if (!L.empty())
+                                    near_poly(A,
+                                        out->verts[3*L.back()],
+                                        out->verts[3*L.back()+1],
+                                        out->verts[3*L.back()+2],
+                                        farc, nullptr);
+                                if (getenv(
+                                    "STIBIUM_DMESH_STITCH_DEBUG"))
+                                {
+                                    fprintf(stderr, "STITCHDBG "
+                                        "loop walk dead-end/"
+                                        "short (%zu of %zu)",
+                                        L.size(), hset.size());
+                                    if (!L.empty())
+                                    {
+                                        const uint32_t lv =
+                                                L.back();
+                                        fprintf(stderr, " at v%u "
+                                            "(%.4f,%.4f,%.4f)",
+                                            lv,
+                                            out->verts[3*lv],
+                                            out->verts[3*lv+1],
+                                            out->verts[3*lv+2]);
+                                    }
+                                    fprintf(stderr, "\n");
+                                }
+                                ok = false; fbr = fbr<0?1:fbr;
+                                break;
+                            }
+                            /*  side per loop vertex, by LATERAL
+                             *  fraction (which face level the
+                             *  vertex belongs to) - distance-
+                             *  based sides flip-flop on near-rail
+                             *  hover verts (measured ntrans 4)  */
+                            const size_t n = L.size();
+                            std::vector<char> side(n, 0);
+                            for (size_t q = 0; q < n; ++q)
+                            {
+                                const auto f = vdst.find(L[q]);
+                                if (f == vdst.end())
+                                {
+                                    float arc;
+                                    float fA[3], fB[3];
+                                    const float* p =
+                                            &out->verts[3*L[q]];
+                                    near_poly(A, p[0], p[1],
+                                            p[2], arc, fA);
+                                    near_poly(B, p[0], p[1],
+                                            p[2], arc, fB);
+                                    const float gx = fB[0]-fA[0],
+                                                gy = fB[1]-fA[1],
+                                                gz = fB[2]-fA[2];
+                                    const float gg = gx*gx +
+                                            gy*gy + gz*gz;
+                                    float lt = 0.5f;
+                                    if (gg > 0)
+                                        lt = ((p[0]-fA[0])*gx +
+                                              (p[1]-fA[1])*gy +
+                                              (p[2]-fA[2])*gz)
+                                             / gg;
+                                    side[q] = lt <= 0.5f ? 0 : 1;
+                                }
+                                else
+                                    side[q] = f->second[2] <=
+                                              0.5f ? 0 : 1;
+                            }
+                            int ntrans = 0; size_t first0 = 0;
+                            for (size_t q = 0; q < n; ++q)
+                                if (side[q] != side[(q+1)%n])
+                                {
+                                    ++ntrans;
+                                    if (side[q] == 1)
+                                        first0 = (q+1)%n;
+                                }
+                            if (ntrans == 0)
+                            {
+                                /*  one-sided pocket (in-strip
+                                 *  zigzag hole): fan fill keeps
+                                 *  the loop orientation  */
+                                for (size_t q = 1; q + 1 < n; ++q)
+                                {
+                                    cand_tris.push_back(L[0]);
+                                    cand_tris.push_back(L[q]);
+                                    cand_tris.push_back(L[q+1]);
+                                }
+                                continue;
+                            }
+                            if (ntrans != 2)
+                            {
+                                for (size_t q = 0; q < n; ++q)
+                                    if (side[q] !=
+                                        side[(q+n-1)%n])
+                                    {
+                                        near_poly(A,
+                                            out->verts[3*L[q]],
+                                            out->verts[3*L[q]+1],
+                                            out->verts[3*L[q]+2],
+                                            farc, nullptr);
+                                        break;
+                                    }
+                                if (getenv(
+                                    "STIBIUM_DMESH_STITCH_DEBUG"))
+                                {
+                                    fprintf(stderr, "STITCHDBG "
+                                        "loop len %zu ntrans %d:",
+                                        n, ntrans);
+                                    for (size_t q = 0; q < n; ++q)
+                                    {
+                                        if (side[q] !=
+                                            side[(q+n-1)%n])
+                                            fprintf(stderr,
+                                                " [%c v%u "
+                                                "%.4f,%.4f,%.4f]",
+                                                side[q]?'B':'A',
+                                                L[q],
+                                                out->verts[3*L[q]],
+                                                out->verts[
+                                                    3*L[q]+1],
+                                                out->verts[
+                                                    3*L[q]+2]);
+                                    }
+                                    fprintf(stderr, "\n");
+                                }
+                                ok = false; fbr = 2; break;
+                            }
+                            /*  rotate: P run (side 0) first  */
+                            std::vector<uint32_t> P2, Q2;
+                            for (size_t q = 0; q < n; ++q)
+                            {
+                                const size_t at = (first0+q) % n;
+                                (side[at] == 0 ? P2 : Q2)
+                                        .push_back(L[at]);
+                            }
+                            /*  ear-clip non-rail vertices out of
+                             *  each run first: a removed roof
+                             *  leaves its face vertex on the rim,
+                             *  and zippering THROUGH it re-roofs
+                             *  the riser (measured: cert kept
+                             *  rejecting exactly those spots).
+                             *  The ear (prev, F, next) lies on
+                             *  the flat face - certifiable - and
+                             *  the runs collapse to pure rail
+                             *  chains for the wall zipper.  */
+                            const auto clip_run = [&](
+                                    std::vector<uint32_t>& R,
+                                    uint8_t railbit) {
+                                bool again = true;
+                                while (again && R.size() >= 3)
+                                {
+                                    again = false;
+                                    for (size_t q = 1;
+                                         q + 1 < R.size(); ++q)
+                                    {
+                                        const auto f =
+                                                cls.find(R[q]);
+                                        const uint8_t c =
+                                            f == cls.end() ? 0
+                                            : f->second;
+                                        if (c & railbit)
+                                            continue;
+                                        /*  the ear's base edge
+                                         *  must be FREE: a hover
+                                         *  vertex can detour
+                                         *  around a live rail
+                                         *  edge that already
+                                         *  carries two facets
+                                         *  (measured: 13 diag
+                                         *  rejections) - keep it
+                                         *  in the run instead,
+                                         *  the license bar caps
+                                         *  the rung lean  */
+                                        const uint64_t bk =
+                                            ek(R[q-1], R[q+1]);
+                                        const auto rf =
+                                            rmap.find(bk);
+                                        const int brc =
+                                            rf == rmap.end() ? 0
+                                            : int(rf->second
+                                                  .size());
+                                        if (live_on(bk) - brc
+                                            != 0)
+                                            continue;
+                                        cand_tris.push_back(
+                                                R[q-1]);
+                                        cand_tris.push_back(
+                                                R[q]);
+                                        cand_tris.push_back(
+                                                R[q+1]);
+                                        R.erase(R.begin() + q);
+                                        again = true;
+                                        break;
+                                    }
+                                }
+                            };
+                            clip_run(P2, 16);
+                            clip_run(Q2, 32);
+                            /*  zipper P2 fwd vs Q2 bwd  */
+                            const auto vp = [&](uint32_t v) {
+                                return &out->verts[3*v];
+                            };
+                            const auto d2 = [&](uint32_t a2,
+                                                uint32_t b2) {
+                                const float* pa = vp(a2);
+                                const float* pb = vp(b2);
+                                const float dx = pa[0]-pb[0],
+                                            dy = pa[1]-pb[1],
+                                            dz = pa[2]-pb[2];
+                                return dx*dx + dy*dy + dz*dz;
+                            };
+                            size_t i2 = 0, j2 = Q2.size() - 1;
+                            const size_t pn = P2.size() - 1;
+                            while (i2 < pn || j2 > 0)
+                            {
+                                bool adv_p;
+                                if (i2 >= pn)      adv_p = false;
+                                else if (j2 == 0)  adv_p = true;
+                                else adv_p =
+                                    d2(P2[i2+1], Q2[j2]) <=
+                                    d2(P2[i2], Q2[j2-1]);
+                                if (adv_p)
+                                {
+                                    cand_tris.push_back(P2[i2]);
+                                    cand_tris.push_back(P2[i2+1]);
+                                    cand_tris.push_back(Q2[j2]);
+                                    ++i2;
+                                }
+                                else
+                                {
+                                    cand_tris.push_back(Q2[j2-1]);
+                                    cand_tris.push_back(Q2[j2]);
+                                    cand_tris.push_back(P2[i2]);
+                                    --j2;
+                                }
+                            }
+                        }
+                        if (ok || !(att == 0 && fbr == 1))
+                            break;
+                        }
+                        /*  interior diagonals must not already
+                         *  exist as live edges  */
+                        if (ok)
+                        {
+                            /*  no degenerate ids  */
+                            for (size_t q = 0;
+                                 q < cand_tris.size() && ok;
+                                 q += 3)
+                                if (cand_tris[q] ==
+                                        cand_tris[q+1] ||
+                                    cand_tris[q+1] ==
+                                        cand_tris[q+2] ||
+                                    cand_tris[q] ==
+                                        cand_tris[q+2])
+                                {
+                                    near_poly(A,
+                                        out->verts[
+                                            3*cand_tris[q]],
+                                        out->verts[
+                                            3*cand_tris[q]+1],
+                                        out->verts[
+                                            3*cand_tris[q]+2],
+                                        farc, nullptr);
+                                    ok = false; fbr = 1;
+                                }
+                        }
+                        if (ok)
+                        {
+                            std::unordered_map<uint64_t, int>
+                                    dcount;
+                            for (size_t q = 0;
+                                 q < cand_tris.size(); q += 3)
+                                for (int e = 0; e < 3; ++e)
+                                    ++dcount[ek(cand_tris[q+e],
+                                        cand_tris[q+(e+1)%3])];
+                            std::vector<uint64_t> dkeys;
+                            dkeys.reserve(dcount.size());
+                            for (const auto& [kk2, dc2] : dcount)
+                                dkeys.push_back(kk2);
+                            std::sort(dkeys.begin(), dkeys.end());
+                            for (const uint64_t kk : dkeys)
+                            {
+                                const int dc = dcount[kk];
+                                const auto rf = rmap.find(kk);
+                                const int rc = rf == rmap.end()
+                                        ? 0
+                                        : int(rf->second.size());
+                                const int liv = live_on(kk) - rc;
+                                /*  boundary edge: 1 live + 1 new;
+                                 *  diagonal: 0 live + 2 new  */
+                                if (liv + dc != 2)
+                                {
+                                    const uint32_t ia =
+                                            uint32_t(kk >> 32);
+                                    near_poly(A,
+                                        out->verts[3*ia],
+                                        out->verts[3*ia+1],
+                                        out->verts[3*ia+2],
+                                        farc, nullptr);
+                                    ok = false; fbr = 3; break;
+                                }
+                            }
+                        }
+                        /*  oracle certification of the ribbon  */
+                        if (ok && !cand_tris.empty())
+                        {
+                            std::vector<std::array<float,3>> cpts;
+                            for (size_t q = 0;
+                                 q < cand_tris.size(); q += 3)
+                            {
+                                const float* a2 =
+                                        &out->verts[3*cand_tris[q]];
+                                const float* b2 =
+                                        &out->verts[
+                                        3*cand_tris[q+1]];
+                                const float* c2 =
+                                        &out->verts[
+                                        3*cand_tris[q+2]];
+                                cpts.push_back({
+                                    (a2[0]+b2[0]+c2[0])/3,
+                                    (a2[1]+b2[1]+c2[1])/3,
+                                    (a2[2]+b2[2]+c2[2])/3 });
+                                for (int e = 0; e < 3; ++e)
+                                {
+                                    const float* u2 = e == 0 ? a2
+                                            : e == 1 ? b2 : c2;
+                                    const float* w2 = e == 0 ? b2
+                                            : e == 1 ? c2 : a2;
+                                    cpts.push_back({
+                                        0.5f*(u2[0]+w2[0]),
+                                        0.5f*(u2[1]+w2[1]),
+                                        0.5f*(u2[2]+w2[2]) });
+                                }
+                            }
+                            std::vector<float> cr;
+                            lic_eval(cpts, cr);
+                            for (size_t i2 = 0; i2 < cr.size();
+                                 ++i2)
+                                if (!(cr[i2] < lic_bar))
+                                {
+                                    near_poly(A, cpts[i2][0],
+                                        cpts[i2][1], cpts[i2][2],
+                                        farc, nullptr);
+                                    if (getenv("STIBIUM_DMESH_"
+                                               "STITCH_DEBUG"))
+                                    {
+                                        const size_t tq =
+                                                (i2 / 4) * 3;
+                                        fprintf(stderr,
+                                            "STITCHDBG cert fail "
+                                            "%.5f sp at (%.4f,"
+                                            "%.4f,%.4f) sub %zu "
+                                            "tri",
+                                            cr[i2] / sp,
+                                            cpts[i2][0],
+                                            cpts[i2][1],
+                                            cpts[i2][2], i2 % 4);
+                                        for (int e = 0; e < 3;
+                                             ++e)
+                                        {
+                                            const uint32_t w2 =
+                                                cand_tris[tq + e];
+                                            fprintf(stderr,
+                                                " v%u(%.4f,%.4f,"
+                                                "%.4f)", w2,
+                                                out->verts[3*w2],
+                                                out->verts[
+                                                    3*w2+1],
+                                                out->verts[
+                                                    3*w2+2]);
+                                        }
+                                        fprintf(stderr, "\n");
+                                    }
+                                    ok = false; fbr = 4; break;
+                                }
+                        }
+                        if (ok && !cand_tris.empty())
+                        {
+                            /*  commit  */
+                            for (const uint32_t t : rset)
+                                rmflag[t] = 1;
+                            st_rm += rset.size();
+                            for (size_t q = 0;
+                                 q < cand_tris.size(); q += 3)
+                            {
+                                const uint32_t id = uint32_t(
+                                    ntri0 + stitched.size() / 3);
+                                for (int e = 0; e < 3; ++e)
+                                    stitched.push_back(
+                                            cand_tris[q + e]);
+                                for (int e = 0; e < 3; ++e)
+                                    emap[ek(cand_tris[q+e],
+                                        cand_tris[q+(e+1)%3])]
+                                        .push_back(id);
+                                if (st_dump)
+                                {
+                                    const float* a2 = &out->verts[
+                                            3*cand_tris[q]];
+                                    const float* b2 = &out->verts[
+                                            3*cand_tris[q+1]];
+                                    const float* c2 = &out->verts[
+                                            3*cand_tris[q+2]];
+                                    fprintf(st_dump,
+                                        "T %.6g %.6g %.6g\n",
+                                        (a2[0]+b2[0]+c2[0])/3,
+                                        (a2[1]+b2[1]+c2[1])/3,
+                                        (a2[2]+b2[2]+c2[2])/3);
+                                }
+                            }
+                            st_add += cand_tris.size() / 3;
+                            ++st_ribbons;
+                        }
+                        else
+                        {
+                            if (fbr >= 0 && fbr < 5)
+                                ++st_fb[fbr];
+                            /*  excise the wounded station,
+                             *  retry the two halves  */
+                            if (farc > -1e29f)
+                            {
+                                size_t m = k;
+                                float bd = 1e30f;
+                                for (size_t q = k; q <= j; ++q)
+                                {
+                                    const float d =
+                                            fabsf(A.s[q] - farc);
+                                    if (d < bd)
+                                    { bd = d; m = q; }
+                                }
+                                if (m > k + 1)
+                                    swork.push_back({ k, m - 1 });
+                                if (m + 1 < j)
+                                    swork.push_back({ m + 1, j });
+                            }
+                        }
+                    }
+                }
+            }
+            /*  compact removed + append stitched  */
+            if (st_rm || !stitched.empty())
+            {
+                std::vector<uint32_t> nt;
+                nt.reserve(out->tris.size() -
+                           3 * size_t(st_rm) + stitched.size());
+                for (uint32_t t = 0; t < ntri0; ++t)
+                    if (!rmflag[t])
+                        for (int e = 0; e < 3; ++e)
+                            nt.push_back(out->tris[3*t + e]);
+                nt.insert(nt.end(), stitched.begin(),
+                          stitched.end());
+                out->tris.swap(nt);
+            }
+        }
+        }
+        if (st_dbg && (st_pairs || st_spans))
+            fprintf(stderr, "STITCH: %llu twin pairs, %llu "
+                    "licensed, %llu spans, %llu ribbons stitched, "
+                    "%llu tris removed, %llu emitted, fallbacks "
+                    "edge %llu shape %llu trans %llu diag %llu "
+                    "cert %llu\n",
+                    (unsigned long long)st_pairs,
+                    (unsigned long long)st_lic,
+                    (unsigned long long)st_spans,
+                    (unsigned long long)st_ribbons,
+                    (unsigned long long)st_rm,
+                    (unsigned long long)st_add,
+                    (unsigned long long)st_fb[0],
+                    (unsigned long long)st_fb[1],
+                    (unsigned long long)st_fb[2],
+                    (unsigned long long)st_fb[3],
+                    (unsigned long long)st_fb[4]);
+        if (st_dump)
+            fclose(st_dump);
+        pt.sub("wall stitch");
+    }
+
     /*  Manifold pass (Manifold-DC after Schaefer/Ju/Warren 2007;
      *  see doc/research/2026-07-15-pinch-manifoldness.md): our
      *  extraction is restricted-Delaunay class, so a separator or
