@@ -3401,6 +3401,11 @@ void feature_points(Collector& c)
                             x(0) + s9 * off9 * nm(0),
                             x(1) + s9 * off9 * nm(1),
                             x(2) + s9 * off9 * nm(2) });
+                    if (c.census && c.census->dump)
+                        fprintf(c.census->dump,
+                                "TWINSEED %.6g %.6g %.6g "
+                                "off=%.5g\n", x(0), x(1), x(2),
+                                off9);
                 }
             }
         }
@@ -8896,6 +8901,28 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         std::unordered_map<uint32_t, std::vector<size_t>> bych;
         for (size_t i = 0; i < cseg.size(); ++i)
             bych[cseg_chain[i]].push_back(i);
+        /*  C records: per accepted chain, id + extent - the map
+         *  that lets V-record vote tallies be located in space
+         *  (the mirror round)  */
+        if (st_dump)
+            for (const auto& [c9, segs9] : bych)
+            {
+                float lo9[3] = { 1e30f, 1e30f, 1e30f };
+                float hi9[3] = { -1e30f, -1e30f, -1e30f };
+                for (const size_t si9 : segs9)
+                    for (int e9 = 0; e9 < 2; ++e9)
+                        for (int d9 = 0; d9 < 3; ++d9)
+                        {
+                            const float v9 =
+                                cseg[si9][3*e9 + d9];
+                            lo9[d9] = std::min(lo9[d9], v9);
+                            hi9[d9] = std::max(hi9[d9], v9);
+                        }
+                fprintf(st_dump, "C %u %zu %.6g %.6g %.6g "
+                        "%.6g %.6g %.6g\n", c9, segs9.size(),
+                        lo9[0], lo9[1], lo9[2],
+                        hi9[0], hi9[1], hi9[2]);
+            }
         /*  mutual twin partners: same vote as the drop/densify  */
         const auto near_dir = [&](const std::vector<size_t>& segs,
                 float x, float y, float z, float& dx, float& dy,
@@ -9003,12 +9030,24 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         st_pairs = prs.size();
         if (!prs.empty())
         {
-            /*  ordered polyline per chain (exact-coordinate walk;
-             *  raw segment order as fallback)  */
+            /*  Ordered polyline per chain, ALL COMPONENTS (the
+             *  mirror round, 2026-07-21): bino chains fragment at
+             *  junctions into several exact-coordinate components,
+             *  and v4's walk covered only the one containing the
+             *  first degree-1 endpoint - WHICH component that is
+             *  depends on segment iteration order, which differs
+             *  between mirror twins (measured: pair 77-1168 votes
+             *  218/218 mutual contact yet assembled at sep 0.1775+
+             *  with 0 in-band stations, while its mirror 70-1176
+             *  reads 0.0624/110; chain 111 with 68 segments
+             *  assembled 2 vertices).  Every component is walked;
+             *  comp ids keep spans and distance queries from
+             *  bridging the gaps.  */
             struct Poly
             {
                 std::vector<std::array<float, 3>> p;
                 std::vector<float> s;    // cumulative arc length
+                std::vector<int> comp;   // component id per vertex
             };
             const auto assemble = [&](const std::vector<size_t>&
                                       segs) -> Poly {
@@ -9023,68 +9062,89 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                         s[3*e+2])]
                                 .push_back({ qi, e });
                     }
-                /*  start at a degree-1 endpoint (open chain) or
-                 *  seg 0 (ring)  */
-                size_t at = 0; int aend = 0;
-                for (size_t qi = 0; qi < segs.size(); ++qi)
+                std::vector<char> used(segs.size(), 0);
+                int compid = 0;
+                for (size_t remain = segs.size(); remain > 0; )
                 {
-                    bool found = false;
-                    for (int e = 0; e < 2 && !found; ++e)
+                    /*  start at an unused degree-1 endpoint
+                     *  (open component) or any unused segment
+                     *  (ring)  */
+                    size_t at = SIZE_MAX; int aend = 0;
+                    for (size_t qi = 0;
+                         qi < segs.size() && at == SIZE_MAX; ++qi)
                     {
-                        const auto& s = cseg[segs[qi]];
-                        const auto it = ends.find(coord_hash(
-                                s[3*e], s[3*e+1], s[3*e+2]));
-                        if (it != ends.end() &&
-                            it->second.size() == 1)
+                        if (used[qi])
+                            continue;
+                        for (int e = 0; e < 2; ++e)
                         {
-                            at = qi; aend = e; found = true;
+                            const auto& s = cseg[segs[qi]];
+                            const auto it = ends.find(coord_hash(
+                                    s[3*e], s[3*e+1], s[3*e+2]));
+                            if (it != ends.end() &&
+                                it->second.size() == 1)
+                            { at = qi; aend = e; break; }
                         }
                     }
-                    if (found) break;
-                }
-                std::vector<char> used(segs.size(), 0);
-                float cx = cseg[segs[at]][3*aend];
-                float cy = cseg[segs[at]][3*aend+1];
-                float cz = cseg[segs[at]][3*aend+2];
-                P.p.push_back({ cx, cy, cz });
-                P.s.push_back(0);
-                for (size_t n = 0; n < segs.size(); ++n)
-                {
-                    /*  find unused segment with an end at c  */
-                    const auto it = ends.find(
-                            coord_hash(cx, cy, cz));
-                    size_t ni = SIZE_MAX; int ne = 0;
-                    if (it != ends.end())
-                        for (const auto& [qi, e] : it->second)
-                            if (!used[qi] &&
-                                cseg[segs[qi]][3*e] == cx &&
-                                cseg[segs[qi]][3*e+1] == cy &&
-                                cseg[segs[qi]][3*e+2] == cz)
-                            { ni = qi; ne = e; break; }
-                    if (ni == SIZE_MAX)
+                    if (at == SIZE_MAX)
+                        for (size_t qi = 0; qi < segs.size();
+                             ++qi)
+                            if (!used[qi])
+                            { at = qi; aend = 0; break; }
+                    if (at == SIZE_MAX)
                         break;
-                    used[ni] = 1;
-                    const auto& s = cseg[segs[ni]];
-                    const int oe = 1 - ne;
-                    const float nx = s[3*oe], ny = s[3*oe+1],
-                                nz = s[3*oe+2];
-                    const float dx = nx-cx, dy = ny-cy, dz = nz-cz;
-                    P.s.push_back(P.s.back() +
-                            sqrtf(dx*dx + dy*dy + dz*dz));
-                    P.p.push_back({ nx, ny, nz });
-                    cx = nx; cy = ny; cz = nz;
+                    float cx = cseg[segs[at]][3*aend];
+                    float cy = cseg[segs[at]][3*aend+1];
+                    float cz = cseg[segs[at]][3*aend+2];
+                    const float base_s = P.s.empty() ? 0
+                            : P.s.back();
+                    P.p.push_back({ cx, cy, cz });
+                    P.s.push_back(base_s);
+                    P.comp.push_back(compid);
+                    for (size_t n = 0; n < segs.size(); ++n)
+                    {
+                        const auto it = ends.find(
+                                coord_hash(cx, cy, cz));
+                        size_t ni = SIZE_MAX; int ne = 0;
+                        if (it != ends.end())
+                            for (const auto& [qi, e] :
+                                 it->second)
+                                if (!used[qi] &&
+                                    cseg[segs[qi]][3*e] == cx &&
+                                    cseg[segs[qi]][3*e+1] == cy &&
+                                    cseg[segs[qi]][3*e+2] == cz)
+                                { ni = qi; ne = e; break; }
+                        if (ni == SIZE_MAX)
+                            break;
+                        used[ni] = 1;
+                        --remain;
+                        const auto& s = cseg[segs[ni]];
+                        const int oe = 1 - ne;
+                        const float nx = s[3*oe],
+                                    ny = s[3*oe+1],
+                                    nz = s[3*oe+2];
+                        const float dx = nx-cx, dy = ny-cy,
+                                    dz = nz-cz;
+                        P.s.push_back(P.s.back() +
+                                sqrtf(dx*dx + dy*dy + dz*dz));
+                        P.p.push_back({ nx, ny, nz });
+                        P.comp.push_back(compid);
+                        cx = nx; cy = ny; cz = nz;
+                    }
+                    ++compid;
                 }
-                if (P.p.size() != segs.size() + 1 &&
-                    P.p.size() < 2)
+                if (P.p.size() < 2)
                     P.p.clear();
                 return P;
             };
-            /*  nearest point on polyline: d2, arc, foot  */
+            /*  nearest point on polyline: d2, arc, foot (bridge
+             *  segments between components are skipped)  */
             const auto near_poly = [](const Poly& P, float x,
                     float y, float z, float& arc, float* foot) {
                 float best = 1e30f;
                 for (size_t i = 0; i + 1 < P.p.size(); ++i)
                 {
+                    if (P.comp[i] != P.comp[i + 1])
+                        continue;
                     const float ax = P.p[i][0], ay = P.p[i][1],
                                 az = P.p[i][2];
                     const float bx = P.p[i+1][0]-ax,
@@ -9240,6 +9300,29 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                             foot[k].data());
                     sepv[k] = sqrtf(d2);
                 }
+                /*  P records: per candidate pair, the station
+                 *  separation profile - sub-floor stations are
+                 *  invisible in S rows (the mirror round's
+                 *  instrument)  */
+                if (st_dump)
+                {
+                    float smin = 1e30f, smax = -1e30f;
+                    int inband = 0;
+                    for (size_t k = 0; k < ns; ++k)
+                    {
+                        if (sepv[k] > 1e29f)
+                            continue;
+                        smin = std::min(smin, sepv[k]);
+                        smax = std::max(smax, sepv[k]);
+                        if (sepv[k] > sep_floor &&
+                            sepv[k] < bar)
+                            ++inband;
+                    }
+                    fprintf(st_dump, "P %u %u %zu %.6g %.6g %d "
+                            "%.6g %.6g %.6g\n", ca, cb, ns,
+                            smin / sp, smax / sp, inband,
+                            A.p[0][0], A.p[0][1], A.p[0][2]);
+                }
                 std::vector<char> cand(ns, 0), lic(ns, 0);
                 std::vector<std::array<float,3>> spts;
                 std::vector<size_t> sown;
@@ -9295,7 +9378,8 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 {
                     if (!lic[k]) { ++k; continue; }
                     size_t j = k;
-                    while (j + 1 < ns && lic[j + 1])
+                    while (j + 1 < ns && lic[j + 1] &&
+                           A.comp[j + 1] == A.comp[j])
                         ++j;
                     if (j > k)
                     {
