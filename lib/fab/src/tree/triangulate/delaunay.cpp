@@ -9168,6 +9168,568 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 }
                 return best;
             };
+            /*  END-TIP EXTENSION PRE-PASS (round 8, calibrated
+             *  on Nate's coordinate pair): traced rails stop
+             *  ~0.3-0.5 sp short of the JUNCTION WITH A CROSSING
+             *  CHAIN (the calibration target sits ON the top-face
+             *  rim chain), leaving a dimple of lawless facets.
+             *  The extension path is CURVED (the straight chord
+             *  reads 0.013 sp of air mid-gap), so each rail end
+             *  with a forward crossing-chain target within 0.7 sp
+             *  is extended by small oracle-projected steps that
+             *  bend toward the target, ending on it.  Each
+             *  extension point then SPLITS the nearest crossing
+             *  mesh edge (the split-repair surgery at a chosen
+             *  point: two facets become four around a minted
+             *  on-rail vertex, manifold by construction,
+             *  certified against what it replaces).  The rebuilt
+             *  mesh then has on-rail vertices through the gap and
+             *  the extended polylines carry stations across it -
+             *  the ordinary license/removal/zipper machinery
+             *  stitches the tip like any other stretch.  No
+             *  march/correct changes; scoped to ends with a
+             *  confidently identified target.  */
+            std::unordered_map<uint64_t,
+                    std::vector<std::array<float,3>>> chain_ext;
+            {
+                const auto pre_eval = [&](
+                        const std::vector<std::array<float,3>>&
+                                pts, std::vector<float>& ratio) {
+                    const float h = 1e-3f * sp;
+                    std::vector<float> qx, qy, qz, qv;
+                    for (const auto& p : pts)
+                        for (int q = 0; q < 7; ++q)
+                        {
+                            qx.push_back(p[0] +
+                                    (q==1 ? h : q==2 ? -h : 0));
+                            qy.push_back(p[1] +
+                                    (q==3 ? h : q==4 ? -h : 0));
+                            qz.push_back(p[2] +
+                                    (q==5 ? h : q==6 ? -h : 0));
+                        }
+                    eval_points_mt(deck, ctx, qx, qy, qz, qv);
+                    ratio.resize(pts.size());
+                    for (size_t i = 0; i < pts.size(); ++i)
+                    {
+                        const float f = qv[i*7];
+                        const float gx = qv[i*7+1] - qv[i*7+2];
+                        const float gy = qv[i*7+3] - qv[i*7+4];
+                        const float gz = qv[i*7+5] - qv[i*7+6];
+                        const float gl = sqrtf(gx*gx + gy*gy
+                                + gz*gz) / (2 * h);
+                        ratio[i] = (gl > 1e-9f &&
+                                    std::isfinite(f))
+                                ? fabsf(f) / gl : 1e30f;
+                    }
+                };
+                /*  1. extension polylines per (chain, end)  */
+                struct Ext
+                {
+                    uint32_t chain;
+                    uint64_t endkey;
+                    std::vector<std::array<float,3>> pts;
+                };
+                std::vector<Ext> exts;
+                std::unordered_set<uint64_t> edone;
+                for (const auto& [ca, cb] : prs)
+                for (const uint32_t cid : { ca, cb })
+                {
+                    const Poly P = assemble(bych[cid]);
+                    if (P.p.size() < 2)
+                        continue;
+                    /*  component end indices  */
+                    std::vector<std::pair<size_t,size_t>> cends;
+                    size_t c0 = 0;
+                    for (size_t i = 1; i <= P.p.size(); ++i)
+                        if (i == P.p.size() ||
+                            P.comp[i] != P.comp[c0])
+                        {
+                            cends.push_back({ c0, i - 1 });
+                            c0 = i;
+                        }
+                    for (const auto& [i0, i1] : cends)
+                    {
+                        if (i1 <= i0)
+                            continue;
+                        for (int side = 0; side < 2; ++side)
+                        {
+                            const size_t ie = side ? i1 : i0;
+                            const size_t ip = side ? i1 - 1
+                                                   : i0 + 1;
+                            const uint64_t ekey =
+                                (uint64_t(cid) << 32) ^
+                                coord_hash(P.p[ie][0],
+                                           P.p[ie][1],
+                                           P.p[ie][2]);
+                            if (!edone.insert(ekey).second)
+                                continue;
+                            float dir[3] = {
+                                P.p[ie][0] - P.p[ip][0],
+                                P.p[ie][1] - P.p[ip][1],
+                                P.p[ie][2] - P.p[ip][2] };
+                            float dl = sqrtf(dir[0]*dir[0] +
+                                    dir[1]*dir[1] +
+                                    dir[2]*dir[2]);
+                            if (!(dl > 1e-6f))
+                                continue;
+                            for (int d = 0; d < 3; ++d)
+                                dir[d] /= dl;
+                            const float step = std::min(
+                                std::max(dl, 0.05f * sp),
+                                0.15f * sp);
+                            /*  target: nearest CROSSING chain
+                             *  foot, forward  */
+                            float tgt[3]; float tbest = 1e30f;
+                            for (size_t si = 0;
+                                 si < cseg.size(); ++si)
+                            {
+                                const uint32_t oc =
+                                        cseg_chain[si];
+                                if (oc == ca || oc == cb)
+                                    continue;
+                                const auto& s = cseg[si];
+                                const float ax = s[0],
+                                        ay = s[1], az = s[2];
+                                const float bx = s[3]-ax,
+                                        by = s[4]-ay,
+                                        bz = s[5]-az;
+                                const float bb = bx*bx + by*by
+                                        + bz*bz;
+                                const float px =
+                                        P.p[ie][0]-ax,
+                                        py = P.p[ie][1]-ay,
+                                        pz = P.p[ie][2]-az;
+                                float t = bb > 0 ?
+                                    (px*bx+py*by+pz*bz)/bb : 0;
+                                t = t < 0 ? 0 : t > 1 ? 1 : t;
+                                const float fx = ax+t*bx,
+                                        fy = ay+t*by,
+                                        fz = az+t*bz;
+                                const float ex2 =
+                                        fx-P.p[ie][0],
+                                        ey2 = fy-P.p[ie][1],
+                                        ez2 = fz-P.p[ie][2];
+                                const float d2 = ex2*ex2 +
+                                        ey2*ey2 + ez2*ez2;
+                                if (d2 >= tbest ||
+                                    d2 > 0.49f * sp * sp ||
+                                    d2 < 0.01f * sp * sp)
+                                    continue;
+                                const float fl = sqrtf(d2);
+                                if (ex2*dir[0] + ey2*dir[1] +
+                                    ez2*dir[2] < 0.5f * fl)
+                                    continue;
+                                tbest = d2;
+                                tgt[0] = fx; tgt[1] = fy;
+                                tgt[2] = fz;
+                            }
+                            if (tbest > 1e29f)
+                                continue;
+                            /*  march: bend toward the target,
+                             *  project each step onto f=0  */
+                            std::vector<std::array<float,3>>
+                                    pts;
+                            float cur[3] = { P.p[ie][0],
+                                    P.p[ie][1], P.p[ie][2] };
+                            float prv[3] = { P.p[ip][0],
+                                    P.p[ip][1], P.p[ip][2] };
+                            for (int it2 = 0; it2 < 12; ++it2)
+                            {
+                                float dv[3] = { cur[0]-prv[0],
+                                        cur[1]-prv[1],
+                                        cur[2]-prv[2] };
+                                float dvl = sqrtf(dv[0]*dv[0] +
+                                        dv[1]*dv[1] +
+                                        dv[2]*dv[2]);
+                                float tv[3] = { tgt[0]-cur[0],
+                                        tgt[1]-cur[1],
+                                        tgt[2]-cur[2] };
+                                const float tvl = sqrtf(
+                                        tv[0]*tv[0] +
+                                        tv[1]*tv[1] +
+                                        tv[2]*tv[2]);
+                                if (tvl < 0.6f * step)
+                                {
+                                    pts.push_back({ tgt[0],
+                                            tgt[1], tgt[2] });
+                                    break;
+                                }
+                                if (!(dvl > 0) || !(tvl > 0))
+                                    break;
+                                float aim[3];
+                                for (int d = 0; d < 3; ++d)
+                                    aim[d] = 0.5f*dv[d]/dvl +
+                                             0.5f*tv[d]/tvl;
+                                const float al = sqrtf(
+                                        aim[0]*aim[0] +
+                                        aim[1]*aim[1] +
+                                        aim[2]*aim[2]);
+                                if (!(al > 0))
+                                    break;
+                                std::vector<float>
+                                    nx(1, cur[0] +
+                                       step*aim[0]/al),
+                                    ny(1, cur[1] +
+                                       step*aim[1]/al),
+                                    nz(1, cur[2] +
+                                       step*aim[2]/al),
+                                    nh(1, 0.01f * sp),
+                                    nc(1, 0.1f * sp);
+                                const float ox = nx[0],
+                                        oy = ny[0],
+                                        oz = nz[0];
+                                project_points_impl(deck, ctx,
+                                        nx, ny, nz, nh, nc);
+                                const float mx2 = nx[0]-ox,
+                                        my2 = ny[0]-oy,
+                                        mz2 = nz[0]-oz;
+                                if (mx2*mx2 + my2*my2 +
+                                    mz2*mz2 >
+                                    0.01f * sp * sp)
+                                    break;
+                                std::vector<std::array<float,3>>
+                                        vp2 = { { nx[0], ny[0],
+                                                  nz[0] } };
+                                std::vector<float> vr2;
+                                pre_eval(vp2, vr2);
+                                if (!(vr2[0] < 2e-3f * sp))
+                                    break;
+                                pts.push_back({ nx[0], ny[0],
+                                                nz[0] });
+                                for (int d = 0; d < 3; ++d)
+                                    prv[d] = cur[d];
+                                cur[0] = nx[0];
+                                cur[1] = ny[0];
+                                cur[2] = nz[0];
+                            }
+                            if (pts.empty())
+                                continue;
+                            exts.push_back({ cid,
+                                coord_hash(P.p[ie][0],
+                                           P.p[ie][1],
+                                           P.p[ie][2]),
+                                pts });
+                        }
+                    }
+                }
+                /*  2. split crossing mesh edges at extension
+                 *  points (certified 2->4 surgery)  */
+                if (!exts.empty())
+                {
+                    const size_t pn = out->tris.size() / 3;
+                    const auto pek = [](uint32_t a, uint32_t b) {
+                        if (a > b) std::swap(a, b);
+                        return (uint64_t(a) << 32) | b;
+                    };
+                    /*  bbox of all extension points  */
+                    float xlo[3] = { 1e30f, 1e30f, 1e30f };
+                    float xhi[3] = { -1e30f, -1e30f, -1e30f };
+                    for (const auto& E : exts)
+                        for (const auto& p : E.pts)
+                            for (int d = 0; d < 3; ++d)
+                            {
+                                xlo[d] = std::min(xlo[d],
+                                                  p[d]);
+                                xhi[d] = std::max(xhi[d],
+                                                  p[d]);
+                            }
+                    for (int d = 0; d < 3; ++d)
+                    { xlo[d] -= sp; xhi[d] += sp; }
+                    std::unordered_map<uint64_t,
+                            std::array<uint32_t,3>> pmap;
+                    for (uint32_t t = 0; t < pn; ++t)
+                        for (int e = 0; e < 3; ++e)
+                        {
+                            const uint32_t a =
+                                    out->tris[3*t + e];
+                            const uint32_t b = out->tris[
+                                    3*t + (e+1)%3];
+                            const float* pa = &out->verts[3*a];
+                            bool in = true;
+                            for (int d = 0; d < 3; ++d)
+                                if (pa[d] < xlo[d] ||
+                                    pa[d] > xhi[d])
+                                    in = false;
+                            if (!in)
+                                continue;
+                            auto& sl = pmap[pek(a, b)];
+                            if (sl[2] == 0)
+                            { sl[0] = t; sl[2] = 1; }
+                            else if (sl[2] == 1)
+                            { sl[1] = t; sl[2] = 2; }
+                            else
+                                sl[2] = 3;
+                        }
+                    struct Pend
+                    {
+                        uint32_t t1, t2, a, b, c1, c2;
+                        float p[3];
+                    };
+                    std::vector<Pend> pend;
+                    std::unordered_set<uint32_t> claimed;
+                    for (const auto& E : exts)
+                        for (const auto& xp : E.pts)
+                        {
+                            /*  nearest interior crossing edge  */
+                            float best = 0.0064f * sp * sp;
+                            uint64_t bk = 0;
+                            for (const auto& [k2, sl] : pmap)
+                            {
+                                if (sl[2] != 2)
+                                    continue;
+                                const uint32_t a =
+                                        uint32_t(k2 >> 32);
+                                const uint32_t b =
+                                        uint32_t(k2);
+                                const float* pa =
+                                        &out->verts[3*a];
+                                const float* pb =
+                                        &out->verts[3*b];
+                                const float bx = pb[0]-pa[0],
+                                        by = pb[1]-pa[1],
+                                        bz = pb[2]-pa[2];
+                                const float bb = bx*bx +
+                                        by*by + bz*bz;
+                                if (!(bb > 0))
+                                    continue;
+                                const float px = xp[0]-pa[0],
+                                        py = xp[1]-pa[1],
+                                        pz = xp[2]-pa[2];
+                                const float t = (px*bx +
+                                        py*by + pz*bz) / bb;
+                                if (t < 0.15f || t > 0.85f)
+                                    continue;
+                                const float dx = px-t*bx,
+                                        dy = py-t*by,
+                                        dz = pz-t*bz;
+                                const float d2 = dx*dx +
+                                        dy*dy + dz*dz;
+                                if (d2 < best)
+                                { best = d2; bk = k2; }
+                            }
+                            if (!bk)
+                                continue;
+                            const auto sl = pmap[bk];
+                            if (claimed.count(sl[0]) ||
+                                claimed.count(sl[1]))
+                                continue;
+                            const uint32_t a =
+                                    uint32_t(bk >> 32);
+                            const uint32_t b = uint32_t(bk);
+                            /*  orientations  */
+                            uint32_t t1 = sl[0], t2 = sl[1];
+                            uint32_t c1 = UINT32_MAX,
+                                     c2 = UINT32_MAX;
+                            for (int e = 0; e < 3; ++e)
+                                if (out->tris[3*t1+e] == a &&
+                                    out->tris[3*t1+(e+1)%3]
+                                        == b)
+                                    c1 = out->tris[
+                                            3*t1+(e+2)%3];
+                            if (c1 == UINT32_MAX)
+                            {
+                                std::swap(t1, t2);
+                                for (int e = 0; e < 3; ++e)
+                                    if (out->tris[3*t1+e]
+                                            == a &&
+                                        out->tris[
+                                            3*t1+(e+1)%3]
+                                            == b)
+                                        c1 = out->tris[
+                                            3*t1+(e+2)%3];
+                            }
+                            for (int e = 0; e < 3; ++e)
+                                if (out->tris[3*t2+e] == b &&
+                                    out->tris[3*t2+(e+1)%3]
+                                        == a)
+                                    c2 = out->tris[
+                                            3*t2+(e+2)%3];
+                            if (c1 == UINT32_MAX ||
+                                c2 == UINT32_MAX ||
+                                c1 == c2)
+                                continue;
+                            claimed.insert(t1);
+                            claimed.insert(t2);
+                            pend.push_back({ t1, t2, a, b,
+                                    c1, c2, { xp[0], xp[1],
+                                              xp[2] } });
+                        }
+                    /*  certify: 4 new vs 2 old, improvement
+                     *  floor  */
+                    if (!pend.empty())
+                    {
+                        std::vector<std::array<float,3>> cp;
+                        const auto push_tri = [&](
+                                const float* a2,
+                                const float* b2,
+                                const float* c2) {
+                            cp.push_back({
+                                (a2[0]+b2[0]+c2[0])/3,
+                                (a2[1]+b2[1]+c2[1])/3,
+                                (a2[2]+b2[2]+c2[2])/3 });
+                            const float* ps[3] =
+                                    { a2, b2, c2 };
+                            for (int e = 0; e < 3; ++e)
+                                cp.push_back({
+                                    0.5f*(ps[e][0] +
+                                          ps[(e+1)%3][0]),
+                                    0.5f*(ps[e][1] +
+                                          ps[(e+1)%3][1]),
+                                    0.5f*(ps[e][2] +
+                                          ps[(e+1)%3][2]) });
+                        };
+                        for (const Pend& p9 : pend)
+                        {
+                            const float* pa =
+                                    &out->verts[3*p9.a];
+                            const float* pb =
+                                    &out->verts[3*p9.b];
+                            const float* pc1 =
+                                    &out->verts[3*p9.c1];
+                            const float* pc2 =
+                                    &out->verts[3*p9.c2];
+                            push_tri(pa, pb, pc1);   // old 1
+                            push_tri(pb, pa, pc2);   // old 2
+                            push_tri(pa, p9.p, pc1);
+                            push_tri(p9.p, pb, pc1);
+                            push_tri(pb, p9.p, pc2);
+                            push_tri(p9.p, pa, pc2);
+                        }
+                        std::vector<float> cr;
+                        pre_eval(cp, cr);
+                        std::vector<char> keep(pend.size(), 0);
+                        uint64_t nsplit = 0;
+                        for (size_t q = 0; q < pend.size();
+                             ++q)
+                        {
+                            float oldw = 0, neww = 0;
+                            for (int s2 = 0; s2 < 8; ++s2)
+                                oldw = std::max(oldw,
+                                    cr[24*q + s2]);
+                            for (int s2 = 8; s2 < 24; ++s2)
+                                neww = std::max(neww,
+                                    cr[24*q + s2]);
+                            const float bar9 = std::max(
+                                0.008f * sp,
+                                std::min(oldw, 0.05f * sp));
+                            if (neww < bar9)
+                            { keep[q] = 1; ++nsplit; }
+                        }
+                        /*  apply  */
+                        if (nsplit)
+                        {
+                            std::vector<char> dead(pn, 0);
+                            std::vector<uint32_t> add;
+                            for (size_t q = 0;
+                                 q < pend.size(); ++q)
+                            {
+                                if (!keep[q])
+                                    continue;
+                                const Pend& p9 = pend[q];
+                                dead[p9.t1] = 1;
+                                dead[p9.t2] = 1;
+                                const uint32_t nv = uint32_t(
+                                    out->verts.size() / 3);
+                                out->verts.push_back(p9.p[0]);
+                                out->verts.push_back(p9.p[1]);
+                                out->verts.push_back(p9.p[2]);
+                                const uint32_t qv[4][3] = {
+                                    { p9.a, nv, p9.c1 },
+                                    { nv, p9.b, p9.c1 },
+                                    { p9.b, nv, p9.c2 },
+                                    { nv, p9.a, p9.c2 } };
+                                for (int f4 = 0; f4 < 4; ++f4)
+                                    for (int e = 0; e < 3;
+                                         ++e)
+                                        add.push_back(
+                                            qv[f4][e]);
+                            }
+                            std::vector<uint32_t> nt;
+                            nt.reserve(out->tris.size() +
+                                       add.size());
+                            for (uint32_t t = 0; t < pn; ++t)
+                                if (!dead[t])
+                                    for (int e = 0; e < 3;
+                                         ++e)
+                                        nt.push_back(
+                                            out->tris[3*t+e]);
+                            nt.insert(nt.end(), add.begin(),
+                                      add.end());
+                            out->tris.swap(nt);
+                            if (getenv(
+                                "STIBIUM_DMESH_CHIP_DEBUG"))
+                                fprintf(stderr, "STITCH "
+                                    "tip-extensions: %zu ends, "
+                                    "%llu rail vertices "
+                                    "minted\n", exts.size(),
+                                    (unsigned long long)
+                                            nsplit);
+                        }
+                    }
+                    /*  record extensions for the main-phase
+                     *  polylines  */
+                    for (const auto& E : exts)
+                        chain_ext[(uint64_t(E.chain) << 32) ^
+                                  E.endkey] = E.pts;
+                }
+            }
+            /*  splice recorded extensions onto a chain's
+             *  assembled polyline (per component end)  */
+            const auto extend_poly = [&](Poly& P, uint32_t cid) {
+                if (chain_ext.empty() || P.p.size() < 2)
+                    return;
+                Poly N;
+                size_t c0 = 0;
+                for (size_t i = 1; i <= P.p.size(); ++i)
+                {
+                    if (i < P.p.size() &&
+                        P.comp[i] == P.comp[c0])
+                        continue;
+                    const size_t i1 = i - 1;
+                    const int comp = P.comp[c0];
+                    const auto keyof = [&](size_t idx) {
+                        return (uint64_t(cid) << 32) ^
+                               coord_hash(P.p[idx][0],
+                                          P.p[idx][1],
+                                          P.p[idx][2]);
+                    };
+                    std::vector<std::array<float,3>> run;
+                    const auto eh = chain_ext.find(keyof(c0));
+                    if (eh != chain_ext.end())
+                        for (auto it = eh->second.rbegin();
+                             it != eh->second.rend(); ++it)
+                            run.push_back(*it);
+                    for (size_t q = c0; q <= i1; ++q)
+                        run.push_back(P.p[q]);
+                    if (i1 != c0)
+                    {
+                        const auto et =
+                                chain_ext.find(keyof(i1));
+                        if (et != chain_ext.end())
+                            for (const auto& p : et->second)
+                                run.push_back(p);
+                    }
+                    for (const auto& p : run)
+                    {
+                        if (!N.p.empty() &&
+                            N.comp.back() == comp)
+                        {
+                            const float dx = p[0]-N.p.back()[0],
+                                    dy = p[1]-N.p.back()[1],
+                                    dz = p[2]-N.p.back()[2];
+                            N.s.push_back(N.s.back() +
+                                sqrtf(dx*dx + dy*dy + dz*dz));
+                        }
+                        else
+                            N.s.push_back(N.s.empty() ? 0
+                                          : N.s.back());
+                        N.p.push_back(p);
+                        N.comp.push_back(comp);
+                    }
+                    c0 = i;
+                }
+                P = std::move(N);
+            };
             const size_t ntri0 = out->tris.size() / 3;
             const size_t nv0 = out->verts.size() / 3;
             const auto ek = [](uint32_t a, uint32_t b) {
@@ -9303,8 +9865,10 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             for (int phase = 0; phase < 2; ++phase)
             for (const auto& [ca, cb] : prs)
             {
-                const Poly A = assemble(bych[ca]);
-                const Poly B = assemble(bych[cb]);
+                Poly A = assemble(bych[ca]);
+                Poly B = assemble(bych[cb]);
+                extend_poly(A, ca);
+                extend_poly(B, cb);
                 if (A.p.size() < 2 || B.p.size() < 2)
                     continue;
                 /*  stations at A vertices  */
@@ -10555,6 +11119,14 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                  q < tface.size() && ok; ++q)
                             {
                                 size_t wi = coff[q];
+                                /*  all samples cut-exempt: the
+                                 *  facet is pure closure, passes
+                                 *  trivially  */
+                                if (wi >= coff[q + 1])
+                                {
+                                    twr[q] = 0;
+                                    continue;
+                                }
                                 for (size_t s2 = coff[q];
                                      s2 < coff[q+1]; ++s2)
                                     if (cr[s2] > cr[wi])
