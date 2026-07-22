@@ -206,17 +206,42 @@ void ExportMeshWorker::async()
      *  huntable).  Ledgered follow-up: aliasing-aware density
      *  triggers at canonical pitch.  =0 reverts to the old
      *  bbox-derived lattice.  */
+    /*  DEMOTED BACK TO OPT-IN same day (the flagship referee):
+     *  canonical-at-phase-0 zeiss = 4 GEOMETRIC OPEN EDGES
+     *  (watertight law violation), retreat fired and could not
+     *  heal, 25.7 min / nm 412 / FACE 0.033 vs 0.026.  The
+     *  determinism thesis stands - jars are faithful under the
+     *  knob, use it deliberately - but the default cannot ship
+     *  a law violation.  Re-promotion path: aliasing-aware
+     *  density + the open-edge autopsy + the phase/tiling story
+     *  (CANON_PHASE sweep on the extended jar: 0.5 halves worst
+     *  depth vs 0; and the octree's dyadic intermediate levels
+     *  re-tile under the asymmetric snap - Nate's off-center
+     *  instinct, unmeasured).  */
     static const char* cg_env = getenv("STIBIUM_DMESH_CANON_GRID");
-    const bool canon_grid = !cg_env || atoi(cg_env) != 0;
+    const bool canon_grid = cg_env && atoi(cg_env) != 0;
+    /*  CANON_PHASE (Nate, 2026-07-22, "canonical grid
+     *  misalignment"): the canonical anchor makes phase a
+     *  one-constant DIAL - still deterministic and
+     *  bbox-independent, but shifted by a fixed fraction of a
+     *  pitch so rational model geometry need not sit EXACTLY on
+     *  lattice planes (the f==0 graze / ulp-tie degenerate
+     *  regime).  0 = aligned (screws-bullseye phase); 0.5 =
+     *  half-cell; irrational fractions dodge every rational
+     *  coincidence.  The house phase is a referee-table
+     *  decision, not a philosophy.  */
+    static const char* cp_env = getenv("STIBIUM_DMESH_CANON_PHASE");
+    const double canon_phase = cp_env ? atof(cp_env) : 0.0;
     if (canon_grid)
     {
         const double res = double(_resolution);
-        bnd.xmin = float(std::floor(double(bnd.xmin) * res) / res);
-        bnd.ymin = float(std::floor(double(bnd.ymin) * res) / res);
-        bnd.zmin = float(std::floor(double(bnd.zmin) * res) / res);
-        bnd.xmax = float(std::ceil(double(bnd.xmax) * res) / res);
-        bnd.ymax = float(std::ceil(double(bnd.ymax) * res) / res);
-        bnd.zmax = float(std::ceil(double(bnd.zmax) * res) / res);
+        const double off = canon_phase / res;
+        bnd.xmin = float(std::floor(double(bnd.xmin) * res) / res - off);
+        bnd.ymin = float(std::floor(double(bnd.ymin) * res) / res - off);
+        bnd.zmin = float(std::floor(double(bnd.zmin) * res) / res - off);
+        bnd.xmax = float(std::ceil(double(bnd.xmax) * res) / res - off);
+        bnd.ymax = float(std::ceil(double(bnd.ymax) * res) / res - off);
+        bnd.zmax = float(std::ceil(double(bnd.zmax) * res) / res - off);
     }
     Region r = {};
     if (canon_grid)
