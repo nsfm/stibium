@@ -14,9 +14,7 @@
 build
 build-*
 __pycache__/
-
-# Derived mesh-import caches (regenerable)
 .stibium-cache/
-
-# CTest scratch (if ctest ever runs outside build/)
 Testing/
+doc/research/
+.claude/

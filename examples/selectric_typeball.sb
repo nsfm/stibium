@@ -1,0 +1,251 @@
+{
+    "nodes": [
+        {
+            "datums": [
+                {
+                    "expr": "16.7",
+                    "name": "R",
+                    "type": "float",
+                    "uid": 0
+                },
+                {
+                    "expr": "1.0",
+                    "name": "relief",
+                    "type": "float",
+                    "uid": 1
+                },
+                {
+                    "expr": "1.55",
+                    "name": "draft",
+                    "type": "float",
+                    "uid": 2
+                },
+                {
+                    "expr": "2.1",
+                    "name": "cap",
+                    "type": "float",
+                    "uid": 3
+                },
+                {
+                    "expr": "5.0",
+                    "name": "dome",
+                    "type": "float",
+                    "uid": 4
+                },
+                {
+                    "expr": "11.4",
+                    "name": "z_top",
+                    "type": "float",
+                    "uid": 5
+                },
+                {
+                    "expr": "-10.0",
+                    "name": "z_bot",
+                    "type": "float",
+                    "uid": 6
+                },
+                {
+                    "expr": "4.35",
+                    "name": "bore",
+                    "type": "float",
+                    "uid": 7
+                },
+                {
+                    "expr": "22",
+                    "name": "teeth",
+                    "type": "int",
+                    "uid": 8
+                },
+                {
+                    "expr": "11",
+                    "name": "cols",
+                    "type": "int",
+                    "uid": 9
+                },
+                {
+                    "expr": "4",
+                    "name": "bands",
+                    "type": "int",
+                    "uid": 10
+                },
+                {
+                    "expr": "\u0012",
+                    "name": "shape",
+                    "type": "_fabtypes.Shape",
+                    "uid": 11
+                }
+            ],
+            "inspector": [
+                0,
+                0
+            ],
+            "name": "typeball",
+            "script": [
+                "",
+                "import fab",
+                "import math",
+                "import fab.shapes as s",
+                "",
+                "title('Selectric Typeball')",
+                "",
+                "# ---- parameters (editable in the GUI) --------------------------------",
+                "input('R', float)      # ball body radius (mm); real element ~33.4mm dia",
+                "input('relief', float)  # character height above the ball surface",
+                "input('draft', float)  # draft: root cross-section = draft x face size",
+                "input('cap', float)     # letter cap height at the striking face (mm)",
+                "input('dome', float)    # face rounding radius (smaller = more domed)",
+                "input('z_top', float)  # ball cut flat above here (~24mm-dia top flat)",
+                "input('z_bot', float) # ball truncated flat below here",
+                "input('bore', float)   # central mounting-socket bore radius (~8.7mm dia)",
+                "input('teeth', int)      # triangular rotate-detent teeth, one per column",
+                "input('cols', int) # rotate positions populated per hemisphere (<=11)",
+                "input('bands', int)  # tilt bands populated (<=4)",
+                "",
+                "# ---- Real IBM Selectric layout (I/O \"correspondence\" element) --------",
+                "# 88 chars = 4 tilt bands x 22 rotate columns. The 22 columns are two",
+                "# hemispheres of 11: an unshifted (lowercase) half and a shifted (upper)",
+                "# half sitting 180 deg apart -- SHIFT literally rotates the ball a half",
+                "# turn. Bands, top->bottom, are centred at +32.8 / +16.4 / 0 / -16.4 deg",
+                "# (a 16.4 deg tilt step). Digits ride the top band, the wide M/W sit on",
+                "# the equator, and every descender (g j p q y) hangs off the bottom band.",
+                "# Grid: Ortega & Palya (1982), Behav. Res. Meth. & Instr. 14(2), Fig. 1;",
+                "# geometry cross-checked against quadibloc.com and selectricrescue.org.",
+                "BAND_LAT = [32.8, 16.4, 0.0, -16.4]            # top -> bottom",
+                "UNSHIFT = [                                     # each row is 11 rotate positions",
+                "    \"90652z4873[\",    # +32.8  digits + z",
+                "    \"bhkentlcdux\",    # +16.4",
+                "    \"wsi'.!oarvm\",    # 0      equator: w..m (the wide letters)",
+                "    \"-yqp=j/,;fg\",    # -16.4  descenders y q p j g",
+                "]",
+                "SHIFT = [",
+                "    \"()¢%@Z$*&#]\",  # +32.8  symbol row (font gaps remapped by SUBS)",
+                "    \"BHKENTLCDUX\",       # +16.4",
+                "    'WSI\".•OARVM',  # 0",
+                "    \"-YQP+J?,:FG\",       # -16.4",
+                "]",
+                "# Font-supported glyphs; anything else is remapped by SUBS or skipped.",
+                "AVAIL = set(\"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\"",
+                "            \"0123456789,.'\" + '\"' + \":;!-)(+/?#\")",
+                "SUBS = {'[': '(', ']': ')', '=': '+',           # brackets, equals-sign",
+                "        '¢': 'c',                           # cent",
+                "        '%': '#', '@': 'a', '$': 'S', '*': '#', '&': '8',  # font-gap symbols",
+                "        '•': '.'}                           # raised dot -> period",
+                "",
+                "DCOL = 360.0 / 22.0",
+                "",
+                "def glyph_solid(ch):",
+                "    # DRAFT. Each character is a frustum: the letter-size striking face on top,",
+                "    # widening to a larger root where it meets the ball. taper_xy_z does this as",
+                "    # a coordinate remap (a uniform scale that grows toward the root), referenced",
+                "    # exactly to the surface so it never extrapolates into slivers. It is a valid,",
+                "    # releasable draft -- every wall, outer edge and counter alike, slopes inward",
+                "    # going up, with no undercut.",
+                "    #",
+                "    # (loft_xy_z between a big and a letter-size glyph is the more principled",
+                "    # \"interpolate two forms\" draft and closes counters at a constant angle --",
+                "    # but it BLENDS fields, and the stock vector font's glyphs are not clean",
+                "    # distance fields, so the triangle-built letters (A/W/M/R...) throw slivers.",
+                "    # Robust once the font ships true-distance glyphs; taper is the clean choice.)",
+                "    g2 = s.text(ch, 0.0, 0.0, height=cap, align='CC')",
+                "    if g2 is None:",
+                "        return None",
+                "    z_surf, z_face = R, R + relief",
+                "    prism = s.extrude_z(g2, z_surf, z_face)",
+                "    tap = s.taper_xy_z(prism, 0.0, 0.0, z_surf, z_face, draft, 1.0)",
+                "    # Domed face: intersect with a large cylinder (axis along local X) so the",
+                "    # striking face is subtly convex in Y -- it beats ink into the platen bar.",
+                "    face = s.cylinder_x(-60.0, 60.0, 0.0, z_face - dome, dome)",
+                "    glyph = tap & face",
+                "    # A straight, letter-size plug buried into the ball closes the hairline gap",
+                "    # under the drafted (overhanging) base without re-introducing slivers.",
+                "    plug = s.extrude_z(g2, R - 0.7, z_surf + 0.05)",
+                "    return glyph | plug",
+                "",
+                "def place(ch, lat, lon):",
+                "    if ch not in AVAIL:",
+                "        ch = SUBS.get(ch)",
+                "    if ch is None or ch == ' ':",
+                "        return None",
+                "    g = glyph_solid(ch)",
+                "    if g is None:",
+                "        return None",
+                "    g = s.rotate_x(g, 90.0 - lat)   # north pole -> band latitude",
+                "    return s.rotate_z(g, lon)       # -> rotate-column longitude",
+                "",
+                "def index_teeth(n):",
+                "    # n rotate-detent teeth CUT INTO the ball's lower skirt, one beneath each",
+                "    # column. The cutter is a 22-point STAR (triangular points, V-valleys) plus a",
+                "    # solid central disk; intersecting it with the sphere keeps the star's points",
+                "    # as triangular teeth clipped to the sphere surface (so they never protrude",
+                "    # past the silhouette) while the star's valleys become the detent notches cut",
+                "    # into the skirt. On the real element the teeth are cut in, not added on.",
+                "    n = max(1, int(n))",
+                "    rim = math.sqrt(max(R * R - z_bot * z_bot, 1.0))  # radius of the bottom rim",
+                "    tw, th = 1.55, 2.4                         # tooth half-width and height",
+                "    rc = rim - 2.0                             # seat teeth just inboard of the rim",
+                "    # Positive down-pointing triangular teeth. Seating them inboard keeps the",
+                "    # whole tooth inside the envelope; the sphere intersection is then only a",
+                "    # light safety trim, so the teeth stay bold instead of being clipped to slivers.",
+                "    tooth = s.pyramid(rc - tw, rc + tw, -tw, tw, z_bot + 0.4, z_bot - th)",
+                "    teeth = s.iterate_polar(tooth, 0.0, 0.0, n)",
+                "    return teeth & s.sphere(0.0, 0.0, 0.0, R)",
+                "",
+                "# Ball body: sphere truncated flat top and bottom, detent teeth added, and a",
+                "# central mounting-socket bore sunk into the flat top.",
+                "out = s.sphere(0.0, 0.0, 0.0, R) & s.cube(-2*R, 2*R, -2*R, 2*R, z_bot, z_top)",
+                "out = out | index_teeth(teeth)",
+                "out = out & ~s.cylinder(0.0, 0.0, 1.0, z_top + 1.0, bore)",
+                "",
+                "nb = max(1, min(int(bands), 4))",
+                "nc = max(1, min(int(cols), 11))",
+                "for bi in range(nb):",
+                "    lat = BAND_LAT[bi]",
+                "    for ci in range(nc):",
+                "        lon = ci * DCOL",
+                "        for tbl, off in ((UNSHIFT, 0.0), (SHIFT, 180.0)):",
+                "            g = place(tbl[bi][ci], lat, lon + off)",
+                "            if g is not None:",
+                "                out = out | g",
+                "",
+                "output('shape', out)",
+                ""
+            ],
+            "uid": 0
+        },
+        {
+            "datums": [
+                {
+                    "expr": "\u0011[__0.__11]",
+                    "name": "shape",
+                    "type": "_fabtypes.Shape",
+                    "uid": 0
+                },
+                {
+                    "expr": "\u0012",
+                    "name": "out",
+                    "type": "_fabtypes.Shape",
+                    "uid": 1
+                }
+            ],
+            "inspector": [
+                315,
+                133
+            ],
+            "name": "m0",
+            "script": [
+                "import fab",
+                "",
+                "title('Mesh (.3mf, .stl)')",
+                "",
+                "input('shape', fab.types.Shape)",
+                "output('out', shape)",
+                "",
+                "sb.export.mesh(shape)",
+                ""
+            ],
+            "uid": 1
+        }
+    ],
+    "protocol": 7,
+    "type": "sb"
+}
