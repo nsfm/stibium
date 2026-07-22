@@ -42,16 +42,6 @@ back up and keeps going. Since the fork:
 - Smooth (log-sum-exp) and quadratic blends, chamfers and fillets,
   exact-distance primitives, gyroid lattices, bends and twirls.
 
-**Headless and scriptable**
-
-- The `.sb` format is deterministic, diffable JSON; saves are
-  byte-stable.
-- Headless verbs close the loop without a display: `--validate`
-  (exit code), `--render` (see the model), `--analyze` (volume, center
-  of mass, tight bounds as JSON), `--export`, `--resave`,
-  `--describe-nodes` (the node library as JSON).
-- Headless verbs mean CI for your CAD models.
-
 **Quality of life**
 
 - Cross-section preview, analytics overlay, recent files, export
