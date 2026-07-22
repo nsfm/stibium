@@ -8871,7 +8871,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             st_dump = fopen(dp, "w");
         uint64_t st_pairs = 0, st_lic = 0, st_spans = 0,
                  st_ribbons = 0, st_rm = 0, st_add = 0,
-                 st_face = 0;
+                 st_face = 0, st_ann = 0, st_annp = 0;
         /*  fallback census: 0 edge-excess, 1 boundary-shape,
          *  2 transitions, 3 pre-existing diagonal, 4 certify  */
         uint64_t st_fb[5] = { 0, 0, 0, 0, 0 };
@@ -9187,6 +9187,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 }
             std::vector<char> rmflag(ntri0, 0);
             std::vector<uint32_t> stitched;
+            std::unordered_set<uint32_t> lockids;
             /*  vertex handle -> output id, for the tet-ring
              *  sheet pairing at pinch fans  */
             std::unordered_map<const void*, uint32_t> vhrev;
@@ -9282,6 +9283,24 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                             ? fabsf(f) / gl : 1e30f;
                 }
             };
+            /*  Phase 0: the wall ribbons (roof removal + rail-
+             *  to-rail fill).  Phase 1, ANNULUS REPAIR (round 6,
+             *  Nate's "chaotic tris radiating onto the flats"):
+             *  the fan census refuted the density-mismatch
+             *  theory - all 5307 rail-join facets are SHORT
+             *  (max edge 0.45 sp) - and located the real
+             *  defects: a small population of rail-hugging
+             *  extraction facets certified 0.02-0.115 sp off
+             *  surface (bad triangulation choices at the
+             *  corridor edge, clustered on tilted ribbons).
+             *  Phase 1 removes exactly the MEASURED-bad facets
+             *  (worst sample > the face bar) touching phase-0
+             *  ribbon vertices and refills them with the same
+             *  rim-walk machinery at face-bar certification.  A
+             *  separate phase so an unfixable annulus patch
+             *  falls back alone - it can never cost a wall
+             *  ribbon.  */
+            for (int phase = 0; phase < 2; ++phase)
             for (const auto& [ca, cb] : prs)
             {
                 const Poly A = assemble(bych[ca]);
@@ -9304,7 +9323,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                  *  separation profile - sub-floor stations are
                  *  invisible in S rows (the mirror round's
                  *  instrument)  */
-                if (st_dump)
+                if (st_dump && phase == 0)
                 {
                     float smin = 1e30f, smax = -1e30f;
                     int inband = 0;
@@ -9359,13 +9378,13 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                 {
                     lic[k] = cand[k] && !bad[k];
                     any_lic |= lic[k] != 0;
-                    if (st_dump && cand[k])
+                    if (st_dump && cand[k] && phase == 0)
                         fprintf(st_dump, "S %.6g %.6g %.6g "
                                 "%.6g %d\n", A.p[k][0], A.p[k][1],
                                 A.p[k][2], sepv[k] / sp,
                                 int(lic[k]));
                 }
-                if (any_lic)
+                if (any_lic && phase == 0)
                     ++st_lic;
                 /*  maximal licensed spans (>= 2 stations), on a
                  *  work stack: a failed span is re-tried with the
@@ -9383,7 +9402,8 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                         ++j;
                     if (j > k)
                     {
-                        ++st_spans;
+                        if (phase == 0)
+                            ++st_spans;
                         swork.push_back({ k, j });
                     }
                     k = j + 1;
@@ -9422,7 +9442,11 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                             }
                         }
                         bmin -= atol; bmax += atol;
-                        const float infl = 1.5f * bar;
+                        /*  phase 1 reaches one annulus row past
+                         *  the rails (fan facets measured up to
+                         *  0.45 sp)  */
+                        const float infl = phase == 1
+                                ? 0.75f * sp : 1.5f * bar;
                         for (int d = 0; d < 3; ++d)
                         { lo[d] -= infl; hi[d] += infl; }
                         /*  vertex classification in the box:
@@ -9484,6 +9508,135 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                          *  join the boundary loop  */
                         std::unordered_set<uint32_t> rset;
                         std::unordered_set<uint32_t> seen;
+                        if (phase == 1)
+                        {
+                            /*  annulus repair: candidates = live
+                             *  in-window facets touching a
+                             *  phase-0 ribbon vertex; keep only
+                             *  those the oracle MEASURES bad
+                             *  (worst sample >= face bar) - the
+                             *  41-facet 0.02-0.115 sp population
+                             *  the fan census located  */
+                            std::vector<uint32_t> ann;
+                            for (const auto& [v, c] : cls)
+                            {
+                                if (!lockids.count(v))
+                                    continue;
+                                for (const uint32_t t : vtris[v])
+                                {
+                                    if (rmflag[t] ||
+                                        !seen.insert(t).second)
+                                        continue;
+                                    int nwin = 0;
+                                    for (int e = 0; e < 3; ++e)
+                                    {
+                                        const auto f = cls.find(
+                                            out->tris[3*t + e]);
+                                        if (f != cls.end() &&
+                                            (f->second & 8))
+                                            ++nwin;
+                                    }
+                                    if (nwin == 3)
+                                        ann.push_back(t);
+                                }
+                            }
+                            std::sort(ann.begin(), ann.end());
+                            if (!ann.empty())
+                            {
+                                std::vector<std::array<float,3>>
+                                        apts;
+                                for (const uint32_t t : ann)
+                                {
+                                    const float* a2 =
+                                        &out->verts[
+                                        3*out->tris[3*t]];
+                                    const float* b2 =
+                                        &out->verts[
+                                        3*out->tris[3*t+1]];
+                                    const float* c2 =
+                                        &out->verts[
+                                        3*out->tris[3*t+2]];
+                                    apts.push_back({
+                                        (a2[0]+b2[0]+c2[0])/3,
+                                        (a2[1]+b2[1]+c2[1])/3,
+                                        (a2[2]+b2[2]+c2[2])/3 });
+                                    for (int e = 0; e < 3; ++e)
+                                    {
+                                        const float* u2 =
+                                            e == 0 ? a2
+                                            : e == 1 ? b2 : c2;
+                                        const float* w2 =
+                                            e == 0 ? b2
+                                            : e == 1 ? c2 : a2;
+                                        apts.push_back({
+                                            0.5f*(u2[0]+w2[0]),
+                                            0.5f*(u2[1]+w2[1]),
+                                            0.5f*(u2[2]+w2[2])});
+                                    }
+                                }
+                                std::vector<float> ar;
+                                lic_eval(apts, ar);
+                                for (size_t q = 0;
+                                     q < ann.size(); ++q)
+                                {
+                                    float worst = 0;
+                                    int wi = 0;
+                                    for (int s2 = 0; s2 < 4;
+                                         ++s2)
+                                        if (ar[4*q + s2] > worst)
+                                        {
+                                            worst = ar[4*q + s2];
+                                            wi = s2;
+                                        }
+                                    if (worst < face_bar)
+                                        continue;
+                                    const uint32_t t = ann[q];
+                                    rset.insert(t);
+                                    /*  a lone bad facet is a
+                                     *  3-loop hole with exactly
+                                     *  one refill - itself.
+                                     *  Dilate across the WORST
+                                     *  midedge so the hole is a
+                                     *  re-diagonalizable 4-loop
+                                     *  (the certified edge
+                                     *  flip).  */
+                                    if (wi < 1)
+                                        continue;
+                                    const int e = wi - 1;
+                                    const uint64_t bk = ek(
+                                        out->tris[3*t + e],
+                                        out->tris[3*t +
+                                                  (e+1)%3]);
+                                    const auto it2 =
+                                            emap.find(bk);
+                                    if (it2 == emap.end())
+                                        continue;
+                                    for (const uint32_t t2 :
+                                         it2->second)
+                                    {
+                                        if (t2 >= ntri0 ||
+                                            t2 == t ||
+                                            rmflag[t2])
+                                            continue;
+                                        int nwin = 0;
+                                        for (int e2 = 0; e2 < 3;
+                                             ++e2)
+                                        {
+                                            const auto f =
+                                                cls.find(
+                                                out->tris[
+                                                3*t2 + e2]);
+                                            if (f != cls.end() &&
+                                                (f->second & 8))
+                                                ++nwin;
+                                        }
+                                        if (nwin == 3)
+                                            rset.insert(t2);
+                                    }
+                                }
+                            }
+                        }
+                        else
                         for (const auto& [v, c] : cls)
                         {
                             if (!(c & 7))
@@ -10249,7 +10402,9 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                         std::vector<float> twr;
                         if (ok && !cand_tris.empty())
                         {
-                            tface.resize(cand_tris.size() / 3, 0);
+                            tface.resize(cand_tris.size() / 3,
+                                         char(phase ? 2 : 0));
+                            if (phase == 0)
                             for (size_t q = 0;
                                  q < cand_tris.size(); q += 3)
                                 for (int e = 0; e < 3; ++e)
@@ -10408,6 +10563,7 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                     cand_tris.end());
                                 for (const uint32_t v2 : lv2)
                                 {
+                                    lockids.insert(v2);
                                     out->stitch_lock.push_back(
                                         out->verts[3*v2]);
                                     out->stitch_lock.push_back(
@@ -10428,7 +10584,9 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                     emap[ek(cand_tris[q+e],
                                         cand_tris[q+(e+1)%3])]
                                         .push_back(id);
-                                if (tface[q / 3])
+                                if (tface[q / 3] == 2)
+                                    ++st_ann;
+                                else if (tface[q / 3])
                                     ++st_face;
                                 if (st_dump)
                                 {
@@ -10451,7 +10609,10 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                 }
                             }
                             st_add += cand_tris.size() / 3;
-                            ++st_ribbons;
+                            if (phase == 1)
+                                ++st_annp;
+                            else
+                                ++st_ribbons;
                         }
                         else
                         {
@@ -10497,6 +10658,83 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     }
                 }
             }
+            /*  F census (round 6): the join facets between the
+             *  ribbon rails and the surrounding faces - LIVE
+             *  extraction tris touching a ribbon vertex.  The
+             *  radiating-fan anatomy instrument: position,
+             *  longest edge, certified worst deviation.  */
+            if (st_dump && !lockids.empty())
+            {
+                std::vector<uint32_t> fans;
+                for (uint32_t t = 0; t < ntri0; ++t)
+                {
+                    if (rmflag[t])
+                        continue;
+                    int nl = 0;
+                    for (int e = 0; e < 3; ++e)
+                        if (lockids.count(out->tris[3*t + e]))
+                            ++nl;
+                    if (nl >= 1)
+                        fans.push_back(t);
+                }
+                std::vector<std::array<float,3>> fpts;
+                for (const uint32_t t : fans)
+                {
+                    const float* a2 = &out->verts[
+                            3*out->tris[3*t]];
+                    const float* b2 = &out->verts[
+                            3*out->tris[3*t+1]];
+                    const float* c2 = &out->verts[
+                            3*out->tris[3*t+2]];
+                    fpts.push_back({
+                        (a2[0]+b2[0]+c2[0])/3,
+                        (a2[1]+b2[1]+c2[1])/3,
+                        (a2[2]+b2[2]+c2[2])/3 });
+                    for (int e = 0; e < 3; ++e)
+                    {
+                        const float* u2 = e == 0 ? a2
+                                : e == 1 ? b2 : c2;
+                        const float* w2 = e == 0 ? b2
+                                : e == 1 ? c2 : a2;
+                        fpts.push_back({
+                            0.5f*(u2[0]+w2[0]),
+                            0.5f*(u2[1]+w2[1]),
+                            0.5f*(u2[2]+w2[2]) });
+                    }
+                }
+                std::vector<float> fr;
+                if (!fpts.empty())
+                    lic_eval(fpts, fr);
+                for (size_t q = 0; q < fans.size(); ++q)
+                {
+                    const uint32_t t = fans[q];
+                    float worst = 0;
+                    for (int s2 = 0; s2 < 4; ++s2)
+                        worst = std::max(worst, fr[4*q + s2]);
+                    const float* a2 = &out->verts[
+                            3*out->tris[3*t]];
+                    const float* b2 = &out->verts[
+                            3*out->tris[3*t+1]];
+                    const float* c2 = &out->verts[
+                            3*out->tris[3*t+2]];
+                    float el = 0;
+                    const float* ps[3] = { a2, b2, c2 };
+                    for (int e = 0; e < 3; ++e)
+                    {
+                        const float* u2 = ps[e];
+                        const float* w2 = ps[(e+1)%3];
+                        const float dx = u2[0]-w2[0],
+                                    dy = u2[1]-w2[1],
+                                    dz = u2[2]-w2[2];
+                        el = std::max(el, dx*dx + dy*dy
+                                          + dz*dz);
+                    }
+                    fprintf(st_dump, "F %.6g %.6g %.6g %.6g "
+                            "%.6g\n", fpts[4*q][0], fpts[4*q][1],
+                            fpts[4*q][2], sqrtf(el),
+                            worst / sp);
+                }
+            }
             /*  compact removed + append stitched  */
             if (st_rm || !stitched.empty())
             {
@@ -10517,7 +10755,8 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             fprintf(stderr, "STITCH: %llu twin pairs, %llu "
                     "licensed, %llu spans, %llu ribbons stitched, "
                     "%llu tris removed, %llu emitted (%llu "
-                    "face-touching), fallbacks "
+                    "face-touching, %llu annulus in %llu "
+                    "patches), fallbacks "
                     "edge %llu shape %llu trans %llu diag %llu "
                     "cert %llu\n",
                     (unsigned long long)st_pairs,
@@ -10527,6 +10766,8 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                     (unsigned long long)st_rm,
                     (unsigned long long)st_add,
                     (unsigned long long)st_face,
+                    (unsigned long long)st_ann,
+                    (unsigned long long)st_annp,
                     (unsigned long long)st_fb[0],
                     (unsigned long long)st_fb[1],
                     (unsigned long long)st_fb[2],
