@@ -229,7 +229,76 @@ void ExportMeshWorker::async()
      *  decision, not a philosophy.  */
     static const char* cp_env = getenv("STIBIUM_DMESH_CANON_PHASE");
     const double canon_phase = cp_env ? atof(cp_env) : 0.0;
-    if (canon_grid)
+    /*  CANON_ROOT (round 12, Nate's off-center/dyadic instinct
+     *  measured): CANON_GRID canonicalizes the FINE lattice, but
+     *  the octree's intermediate structure still derives from
+     *  the root box (subdivision halves index ranges), so
+     *  density-band tiling, drilldown leaf seating, and retreat
+     *  demotion units differ between jar and flagship even at
+     *  identical fine pitch.  Snap each axis OUTWARD to a
+     *  WORLD-ANCHORED power-of-two voxel count (origin at a
+     *  multiple of the axis's own dyadic cell, plus the phase
+     *  dial), so every subdivision level's boundaries are
+     *  global constants - the containing cells of one
+     *  conceptual world octree.  Leaf boxes then seat
+     *  bit-identically across models.  Implies canonical pitch.
+     *  STIBIUM_DMESH_CANON_ROOT=1 opts in (supersedes
+     *  CANON_GRID); the empty dyadic padding culls at the first
+     *  interval eval per subtree.  */
+    static const char* cr_env = getenv("STIBIUM_DMESH_CANON_ROOT");
+    const bool canon_root = cr_env && atoi(cr_env) != 0;
+    uint32_t root_cnt[3] = { 0, 0, 0 };
+    if (canon_root)
+    {
+        const double res = double(_resolution);
+        const double h = 1.0 / res;
+        const double ph = canon_phase * h;
+        double lo[3] = { bnd.xmin, bnd.ymin, bnd.zmin };
+        double hi[3] = { bnd.xmax, bnd.ymax, bnd.zmax };
+        /*  ONE common world-anchored dyadic cell size for all
+         *  axes, each axis spanning exactly TWO anchored cells
+         *  (a straddling model can never fit one): the root is a
+         *  CUBE with power-of-two counts, so the descent reaches
+         *  the SAME 4x4x4 leaf shape at the same world positions
+         *  in every model - leaf boxes seat bit-identically.  */
+        uint64_t S = 4;
+        for (;;)
+        {
+            const double cell = double(S) * h;
+            bool fits = true;
+            for (int a = 0; a < 3; ++a)
+            {
+                const int64_t k0 = int64_t(std::floor(
+                        (lo[a] - ph) / cell));
+                const int64_t k1 = int64_t(std::ceil(
+                        (hi[a] - ph) / cell + 1e-12));
+                if (k1 - k0 > 2)
+                    fits = false;
+            }
+            if (fits || S >= (uint64_t(1) << 28))
+                break;
+            S <<= 1;
+        }
+        {
+            const double cell = double(S) * h;
+            for (int a = 0; a < 3; ++a)
+            {
+                const int64_t k0 = int64_t(std::floor(
+                        (lo[a] - ph) / cell));
+                lo[a] = double(k0) * cell + ph;
+                hi[a] = double(k0 + 2) * cell + ph;
+                root_cnt[a] = uint32_t(2 * S);
+            }
+        }
+        bnd.xmin = float(lo[0]); bnd.ymin = float(lo[1]);
+        bnd.zmin = float(lo[2]);
+        bnd.xmax = float(hi[0]); bnd.ymax = float(hi[1]);
+        bnd.zmax = float(hi[2]);
+        fprintf(stderr, "export: canon-root [%g,%g,%g]-[%g,%g,%g]"
+                " %ux%ux%u\n", lo[0], lo[1], lo[2], hi[0], hi[1],
+                hi[2], root_cnt[0], root_cnt[1], root_cnt[2]);
+    }
+    else if (canon_grid)
     {
         const double res = double(_resolution);
         const double off = canon_phase / res;
@@ -241,7 +310,13 @@ void ExportMeshWorker::async()
         bnd.zmax = float(std::ceil(double(bnd.zmax) * res) / res - off);
     }
     Region r = {};
-    if (canon_grid)
+    if (canon_root)
+    {
+        r.ni = root_cnt[0];
+        r.nj = root_cnt[1];
+        r.nk = root_cnt[2];
+    }
+    else if (canon_grid)
     {
         r.ni = uint32_t(std::lround(
                 double(bnd.xmax - bnd.xmin) * _resolution));
