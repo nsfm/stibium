@@ -196,16 +196,18 @@ void ExportMeshWorker::async()
      *  meshes the same in any neighborhood, and grid-aligned
      *  mechanical models always get the aligned phase.
      *  STIBIUM_DMESH_CANON_GRID=0 reverts.  */
-    /*  Default OFF this round: canonical phase measurably HEALS
-     *  the screws family (worst 0.533 -> 0.177) and caps family
-     *  B's extremes (0.478 -> 0.196) but spreads its shallow
-     *  population (111 -> 281 rows; FACE 0.003 -> 0.273%) -
-     *  phase luck is per-feature and there is no universally
-     *  friendly phase.  The default flip is Nate's promotion
-     *  call, with the follow-up (aliasing-aware density triggers
-     *  at canonical pitch) ledgered.  */
+    /*  DEFAULT ON (Nate's promotion call, 2026-07-22: "the
+     *  determinism is necessary - this one has plagued us").
+     *  Canonical phase heals the deep tails (screws family
+     *  worst 0.533 -> 0.177, family B 0.478 -> 0.196) and makes
+     *  every jar faithful by construction; the cost is a
+     *  ONE-TIME phase re-roll per model (per-feature winners
+     *  and losers - the losers are now DETERMINISTIC and
+     *  huntable).  Ledgered follow-up: aliasing-aware density
+     *  triggers at canonical pitch.  =0 reverts to the old
+     *  bbox-derived lattice.  */
     static const char* cg_env = getenv("STIBIUM_DMESH_CANON_GRID");
-    const bool canon_grid = cg_env && atoi(cg_env) != 0;
+    const bool canon_grid = !cg_env || atoi(cg_env) != 0;
     if (canon_grid)
     {
         const double res = double(_resolution);
