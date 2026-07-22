@@ -160,15 +160,83 @@ bool ExportMeshWorker::runHeadless(const QString& fname, float res,
 
 void ExportMeshWorker::async()
 {
+    /*  Debug instrument (the isolation-lies hunt, 2026-07-22):
+     *  STIBIUM_DMESH_BBOX="x0,y0,z0,x1,y1,z1" overrides the model
+     *  bounds so a jar can be rendered at another model's lattice
+     *  pitch and phase - the octree grid derives entirely from
+     *  bounds x resolution, so the SAME geometry meshes
+     *  differently in a different neighborhood's box.  */
+    auto bnd = bounds;
+    if (const char* bb = getenv("STIBIUM_DMESH_BBOX"))
+    {
+        float b[6];
+        if (sscanf(bb, "%f,%f,%f,%f,%f,%f",
+                   b, b+1, b+2, b+3, b+4, b+5) == 6)
+        {
+            bnd.xmin = b[0]; bnd.ymin = b[1];
+            bnd.zmin = b[2];
+            bnd.xmax = b[3]; bnd.ymax = b[4];
+            bnd.zmax = b[5];
+            fprintf(stderr, "export: bbox override [%g,%g,%g]-"
+                    "[%g,%g,%g]\n", b[0], b[1], b[2], b[3],
+                    b[4], b[5]);
+        }
+    }
+    /*  CANONICAL LATTICE (the isolation-lies conviction,
+     *  2026-07-22): the grid used to derive ENTIRELY from the
+     *  model bounds - voxel counts truncated from span x res, so
+     *  the pitch was almost-but-not 1/res, and the phase was the
+     *  bbox corner.  Adding ANY neighbor geometry moved both,
+     *  and identical geometry meshed differently in context
+     *  (screws jar: perfect in isolation, 41 chips / -18% law
+     *  under the extended jar's box with NO other change).  Snap
+     *  the bounds OUTWARD to exact 1/res multiples anchored at
+     *  world zero: pitch is exactly 1/res everywhere and the
+     *  interior lattice is bbox-INDEPENDENT - the same part
+     *  meshes the same in any neighborhood, and grid-aligned
+     *  mechanical models always get the aligned phase.
+     *  STIBIUM_DMESH_CANON_GRID=0 reverts.  */
+    /*  Default OFF this round: canonical phase measurably HEALS
+     *  the screws family (worst 0.533 -> 0.177) and caps family
+     *  B's extremes (0.478 -> 0.196) but spreads its shallow
+     *  population (111 -> 281 rows; FACE 0.003 -> 0.273%) -
+     *  phase luck is per-feature and there is no universally
+     *  friendly phase.  The default flip is Nate's promotion
+     *  call, with the follow-up (aliasing-aware density triggers
+     *  at canonical pitch) ledgered.  */
+    static const char* cg_env = getenv("STIBIUM_DMESH_CANON_GRID");
+    const bool canon_grid = cg_env && atoi(cg_env) != 0;
+    if (canon_grid)
+    {
+        const double res = double(_resolution);
+        bnd.xmin = float(std::floor(double(bnd.xmin) * res) / res);
+        bnd.ymin = float(std::floor(double(bnd.ymin) * res) / res);
+        bnd.zmin = float(std::floor(double(bnd.zmin) * res) / res);
+        bnd.xmax = float(std::ceil(double(bnd.xmax) * res) / res);
+        bnd.ymax = float(std::ceil(double(bnd.ymax) * res) / res);
+        bnd.zmax = float(std::ceil(double(bnd.zmax) * res) / res);
+    }
     Region r = {};
-    r.ni = uint32_t((bounds.xmax - bounds.xmin) * _resolution);
-    r.nj = uint32_t((bounds.ymax - bounds.ymin) * _resolution);
-    r.nk = uint32_t((bounds.zmax - bounds.zmin) * _resolution);
+    if (canon_grid)
+    {
+        r.ni = uint32_t(std::lround(
+                double(bnd.xmax - bnd.xmin) * _resolution));
+        r.nj = uint32_t(std::lround(
+                double(bnd.ymax - bnd.ymin) * _resolution));
+        r.nk = uint32_t(std::lround(
+                double(bnd.zmax - bnd.zmin) * _resolution));
+    }
+    else
+    {
+        r.ni = uint32_t((bnd.xmax - bnd.xmin) * _resolution);
+        r.nj = uint32_t((bnd.ymax - bnd.ymin) * _resolution);
+        r.nk = uint32_t((bnd.zmax - bnd.zmin) * _resolution);
+    }
     r.voxels = uint64_t(r.ni) * r.nj * r.nk;
 
     build_arrays(
-            &r, bounds.xmin, bounds.ymin, bounds.zmin,
-                bounds.xmax, bounds.ymax, bounds.zmax);
+            &r, bnd.xmin, bnd.ymin, bnd.zmin,
+                bnd.xmax, bnd.ymax, bnd.zmax);
 
     // The mesher produces an indexed mesh directly (unique vertices +
     // three indices per triangle), so no welding pass is needed.
