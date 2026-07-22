@@ -7,6 +7,7 @@
 #include "fab/mesh/mesh_import.h"
 #include "fab/tree/analytics.h"
 #include "fab/tree/grid.h"
+#include "fab/mesh/glyph_import.h"
 
 using namespace boost::python;
 
@@ -101,6 +102,87 @@ static tuple import_mesh_py(std::string path, float voxels_per_unit,
                                      res.sha256, res.from_cache);
 }
 
+/*  Backend for fab.shapes.glyph (see py/fab/shapes.py). Bakes one TTF glyph
+ *  into an OP_GRID-backed Shape. Returns (Shape, from_cache). */
+static tuple bake_glyph_py(std::string font_path, int codepoint,
+                           float cap, float thickness, float voxels_per_mm)
+{
+    grid_registry_trim();
+    const auto res = fab_mesh::bake_glyph_grid(
+            font_path, codepoint, cap, thickness, voxels_per_mm);
+    if (!res.grid_id)
+    {
+        PyErr_SetString(PyExc_RuntimeError,
+                ("glyph: " + res.error).c_str());
+        throw_error_already_set();
+    }
+    Shape s("g" + std::to_string(res.grid_id),
+            Bounds(res.bounds[0], res.bounds[1], res.bounds[2],
+                   res.bounds[3], res.bounds[4], res.bounds[5]));
+    return boost::python::make_tuple(s, res.from_cache);
+}
+
+/*  Advance width (mm) of a glyph at cap height, for fab.shapes.text_font. */
+static float glyph_advance_py(std::string font_path, int codepoint, float cap)
+{
+    return fab_mesh::glyph_advance(font_path, codepoint, cap);
+}
+
+/*  Backend for fab.shapes.redistance: rebuild a Shape as a true-distance
+ *  OP_GRID. Returns (Shape, from_cache). The shape must be 3D-bounded. */
+static tuple redistance_py(const Shape& s, float res, std::string key)
+{
+    grid_registry_trim();
+    const Bounds& b = s.bounds;
+    if (std::isinf(b.xmin) || std::isinf(b.xmax) || std::isinf(b.ymin) ||
+        std::isinf(b.ymax) || std::isinf(b.zmin) || std::isinf(b.zmax))
+    {
+        PyErr_SetString(PyExc_RuntimeError,
+                "redistance: shape has unbounded extents (extrude 2D first)");
+        throw_error_already_set();
+    }
+    const auto r = fab_mesh::redistance_grid(s.tree.get(),
+            b.xmin, b.ymin, b.zmin, b.xmax, b.ymax, b.zmax, res, key);
+    if (!r.grid_id)
+    {
+        PyErr_SetString(PyExc_RuntimeError,
+                ("redistance: " + r.error).c_str());
+        throw_error_already_set();
+    }
+    Shape out("g" + std::to_string(r.grid_id),
+              Bounds(r.bounds[0], r.bounds[1], r.bounds[2],
+                     r.bounds[3], r.bounds[4], r.bounds[5]));
+    return boost::python::make_tuple(out, r.from_cache);
+}
+
+/*  Backend for the Antimony font: bake a 2D Shape into an extruded grid via
+ *  marching-squares contour + exact distance. Returns (Shape, from_cache). */
+static tuple bake_shape_glyph_py(const Shape& s, float thickness,
+                                 float res, std::string key)
+{
+    grid_registry_trim();
+    const Bounds& b = s.bounds;
+    if (std::isinf(b.xmin) || std::isinf(b.xmax) ||
+        std::isinf(b.ymin) || std::isinf(b.ymax))
+    {
+        PyErr_SetString(PyExc_RuntimeError,
+                "text_font: 2D shape has unbounded x/y extents");
+        throw_error_already_set();
+    }
+    const auto r = fab_mesh::bake_shape_glyph(s.tree.get(),
+            b.xmin, b.ymin, b.xmax, b.ymax, thickness, res, key);
+    if (!r.grid_id)
+    {
+        PyErr_SetString(PyExc_RuntimeError,
+                ("text_font (antimony): " + r.error).c_str());
+        throw_error_already_set();
+    }
+    Shape out("g" + std::to_string(r.grid_id),
+              Bounds(r.bounds[0], r.bounds[1], r.bounds[2],
+                     r.bounds[3], r.bounds[4], r.bounds[5]));
+    return boost::python::make_tuple(out, r.from_cache);
+}
+
 void fab::onParseError(const fab::ParseError &e)
 {
     (void)e;
@@ -164,6 +246,17 @@ BOOST_PYTHON_MODULE(_fabtypes)
     def("_import_mesh", &import_mesh_py,
         "Backend for fab.shapes.import_mesh; "
         "returns (Shape, stibium_stamp, sha256, from_cache)");
+    def("_bake_glyph", &bake_glyph_py,
+        "Backend for fab.shapes.glyph; bakes a TTF glyph into an "
+        "OP_GRID Shape. returns (Shape, from_cache)");
+    def("_glyph_advance", &glyph_advance_py,
+        "Advance width (mm) of a TTF glyph at the given cap height");
+    def("_redistance", &redistance_py,
+        "Rebuild a Shape as a true-distance OP_GRID (Felzenszwalb EDT). "
+        "returns (Shape, from_cache)");
+    def("_bake_shape_glyph", &bake_shape_glyph_py,
+        "Bake a 2D Shape into an extruded OP_GRID via marching-squares "
+        "contour + exact distance. returns (Shape, from_cache)");
 
     register_exception_translator<fab::ParseError>(fab::onParseError);
     register_exception_translator<fab::ShapeError>(fab::onShapeError);

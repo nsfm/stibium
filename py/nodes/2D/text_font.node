@@ -1,0 +1,19 @@
+import fab
+
+title('Text (font)')
+
+input('font', str, 'Antimony')
+input('text', str, 'Text')
+input('x', float, 0)
+input('y', float, 0)
+input('cap', float, 5)
+input('thickness', float, 1)
+input('res', float, 30)
+
+output('shape', fab.shapes.move(
+    fab.shapes.text_font(font, text, cap, thickness, res), x, y))
+
+# UI
+sb.ui.wireframe([(x, y, 0), (x, y + cap, 0)])
+sb.ui.point(x, y, 0)
+sb.ui.point(x, y + cap, 0, drag=(None, cap, None))
