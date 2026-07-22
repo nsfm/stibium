@@ -127,16 +127,23 @@ if (NOT CGAL_FOUND AND STIBIUM_FETCH_CGAL)
     message(STATUS
         "Stibium: system CGAL >= 6.0 not found - fetching header-only CGAL 6.0.1")
     include(FetchContent)
+    # Download + extract ONLY. CGAL's top-level CMakeLists is its own build
+    # system (it errors on add_subdirectory as a dependency), so SOURCE_SUBDIR
+    # points at a nonexistent dir to suppress FetchContent's add_subdirectory;
+    # we then consume the release through its shipped CGALConfig.cmake below.
     FetchContent_Declare(CGAL
         URL https://github.com/CGAL/cgal/releases/download/v6.0.1/CGAL-6.0.1-library.tar.xz
-        # TODO: pin URL_HASH SHA256=<hash> once chosen, for verified/reproducible fetches
+        URL_HASH SHA256=c752737f91d1af71fa96038f0e37945ce82a5f1fffb6200172cfcdd77755a356
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        SOURCE_SUBDIR do-not-configure
     )
     FetchContent_MakeAvailable(CGAL)
+    find_package(CGAL 6.0 QUIET PATHS "${cgal_SOURCE_DIR}" NO_DEFAULT_PATH)
 endif()
 
 set(Boost_LIBRARIES ${_stibium_boost_libs})
 
-# CGAL::CGAL exists whether it came from find_package or FetchContent.
+# CGAL::CGAL exists whether it came from the system or the fetched release.
 if (TARGET CGAL::CGAL)
     target_compile_definitions(SbFab PRIVATE STIBIUM_HAS_CGAL)
     target_link_libraries(SbFab CGAL::CGAL)
