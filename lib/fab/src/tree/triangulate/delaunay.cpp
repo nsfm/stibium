@@ -5228,6 +5228,7 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
     static const char* sg_env = getenv("STIBIUM_DMESH_SEEDGATE");
     const bool seedgate = !sg_env || atoi(sg_env) != 0;
     std::vector<std::vector<uint32_t>> pair_seeds(npairs);
+    const auto tgate0 = std::chrono::steady_clock::now();
     if (seedgate)
     {
         std::vector<TapePair> sorted(pairs);
@@ -5264,6 +5265,8 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
         }
     }
 
+    const double t_gate = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - tgate0).count();
     /*  Seed-verdict forensics (the crowded-junction hunt):
      *  STIBIUM_DMESH_SEED_PROBE="x,y,z,r" prints every seed
      *  verdict within r of the point, per pair.  */
@@ -5302,6 +5305,105 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
                     pi2, why, q.x, q.y, q.z, aux);
     };
     std::vector<uint8_t> consumed(seeds.size(), 0);
+    /*  PARALLEL CORRECT PRECOMPUTE (perf campaign 2026-07-22):
+     *  the sub-timers convicted correct() - 21 of the tracer's
+     *  31 s on bino, 193K seed-Newtons in 7-point serial evals.
+     *  correct() is PURE per (pair, seed position): it reads
+     *  nothing from the traced state, so its results can be
+     *  computed ahead in parallel and the acceptance loop
+     *  replayed serially on the cache - the outcome (dup
+     *  verdicts, consumption order, chain census) is
+     *  bit-identical to the serial run by construction, because
+     *  every downstream decision sees exactly the values it
+     *  would have computed itself.  The march stays serial (8 s
+     *  bino - chain-parallel is a different, order-sensitive
+     *  campaign).  STIBIUM_DMESH_TRACE_MT=0 restores the serial
+     *  path.  */
+    struct CorrCache
+    {
+        uint8_t ok;
+        float p[3];
+        CreaseTracer::Probe pr;
+    };
+    std::vector<std::vector<CorrCache>> ccache;
+    double t_pre = 0;
+    {
+        static const char* tmt_env =
+                getenv("STIBIUM_DMESH_TRACE_MT");
+        const bool tmt = !(tmt_env && atoi(tmt_env) == 0);
+        size_t total = 0;
+        for (const auto& v : pair_seeds)
+            total += v.size();
+        if (tmt && seedgate && total > 256 && mesh_threads() > 1)
+        {
+            const auto tp0 = std::chrono::steady_clock::now();
+            ccache.resize(npairs);
+            std::vector<std::pair<uint32_t, uint32_t>> work;
+            work.reserve(total);
+            for (unsigned pi = 0; pi < npairs; ++pi)
+            {
+                ccache[pi].resize(pair_seeds[pi].size());
+                for (uint32_t k = 0;
+                     k < uint32_t(pair_seeds[pi].size()); ++k)
+                    work.push_back({ pi, k });
+            }
+            const size_t nt = std::min<size_t>(
+                    size_t(mesh_threads()),
+                    std::max<size_t>(1, total / 1024));
+            std::atomic<size_t> next{ 0 };
+            std::vector<std::thread> pool;
+            for (size_t t = 0; t < nt; ++t)
+                pool.emplace_back([&]() {
+                    TapeCtx* tctx = tape_ctx_new(deck);
+                    CreaseTracer trl = tr;
+                    trl.ctx = tctx;
+                    for (;;)
+                    {
+                        const size_t w = next.fetch_add(64);
+                        if (w >= work.size() || *halt)
+                            break;
+                        const size_t e =
+                                std::min(work.size(), w + 64);
+                        for (size_t q = w; q < e; ++q)
+                        {
+                            const uint32_t pi = work[q].first;
+                            const uint32_t k = work[q].second;
+                            trl.tp = pairs[pi];
+                            CorrCache& cc = ccache[pi][k];
+                            const DSurfPoint& sd =
+                                    seeds[pair_seeds[pi][k]];
+                            cc.p[0] = sd.x;
+                            cc.p[1] = sd.y;
+                            cc.p[2] = sd.z;
+                            cc.ok = trl.correct(cc.p, &cc.pr)
+                                    ? 1 : 0;
+                        }
+                    }
+                    tape_ctx_free(tctx);
+                });
+            for (auto& th : pool)
+                th.join();
+            t_pre = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - tp0)
+                            .count();
+        }
+    }
+    /*  Tracer anatomy (perf campaign 2026-07-22): the tracer is
+     *  now the LEADING phase on bino (~33 s x 2 attempts vs CGAL
+     *  insert 25 s) - sub-timers under STIBIUM_DMESH_TIME=2 name
+     *  the hot organ before anyone theorizes.  Accumulated, not
+     *  marked: the loop interleaves all four.  */
+    double t_correct = 0, t_march = 0, t_dup = 0, t_consume = 0;
+    uint64_t n_correct = 0, n_march = 0;
+    const bool ttime = [] {
+        const char* e = getenv("STIBIUM_DMESH_TIME");
+        return e && atoi(e) >= 2;
+    }();
+    const auto tnow = [] {
+        return std::chrono::duration<double>(
+                std::chrono::steady_clock::now()
+                        .time_since_epoch()).count();
+    };
     for (unsigned pi = 0; pi < npairs; ++pi)
     {
         const TapePair& tp = pairs[pi];
@@ -5323,7 +5425,25 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
             const DSurfPoint& seed = seeds[s];
             float p0[3] = { seed.x, seed.y, seed.z };
             CreaseTracer::Probe pr;
-            if (!tr.correct(p0, &pr))
+            const double tc0 = ttime ? tnow() : 0;
+            bool cok;
+            if (!ccache.empty())
+            {
+                const CorrCache& cc = ccache[pi][si];
+                cok = cc.ok != 0;
+                p0[0] = cc.p[0];
+                p0[1] = cc.p[1];
+                p0[2] = cc.p[2];
+                pr = cc.pr;
+            }
+            else
+                cok = tr.correct(p0, &pr);
+            if (ttime)
+            {
+                t_correct += tnow() - tc0;
+                ++n_correct;
+            }
+            if (!cok)
             {
                 sprobe("correct-fail", seed, pi, 0);
                 continue;
@@ -5361,6 +5481,7 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
              *  gaps lost every seed (Nate's overlay read,
              *  2026-07-17: crowded bands under-polylined).  */
             {
+                const double td0 = ttime ? tnow() : 0;
                 bool dup = false, own = false;
                 const float dr2 = 0.1f * sp * 0.1f * sp;
                 const auto seg_d2 = [](const DSurfPoint& A,
@@ -5396,6 +5517,8 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
                             break;
                         }
                 }
+                if (ttime)
+                    t_dup += tnow() - td0;
                 if (dup)
                 {
                     /*  THE SEED-POACHING FIX (the 0.5 mm strip
@@ -5426,9 +5549,15 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
                 continue;                // tangency at the seed
 
             std::vector<DSurfPoint> fwd, bwd;
+            const double tm0 = ttime ? tnow() : 0;
             const bool loop = tr.march(p0, t0, +1, fwd, halt);
             if (!loop)
                 tr.march(p0, t0, -1, bwd, halt);
+            if (ttime)
+            {
+                t_march += tnow() - tm0;
+                ++n_march;
+            }
             std::vector<DSurfPoint> poly;
             poly.reserve(bwd.size() + 1 + fwd.size());
             for (auto it = bwd.rbegin(); it != bwd.rend(); ++it)
@@ -5449,6 +5578,7 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
              *  (Nate's eyeball read: "averaged, merged, or
              *  skipped").  */
             const float cr2 = 0.05f * sp * 0.05f * sp;
+            const double tk0 = ttime ? tnow() : 0;
             for (size_t s2 = 0; s2 < consumed.size(); ++s2)
             {
                 if (consumed[s2])
@@ -5475,6 +5605,8 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
                     }
                 }
             }
+            if (ttime)
+                t_consume += tnow() - tk0;
             consumed[s] = 1;
             if (poly.size() >= 3)
             {
@@ -5484,6 +5616,15 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
             }
         }
     }
+    if (ttime)
+        fprintf(stderr, "TIME2   trace: gate %.2fs, pre %.2fs, "
+                "correct %.2fs/%llu, march %.2fs/%llu, dup-guard "
+                "%.2fs, consume-sweep %.2fs (%zu polys, %zu "
+                "seeds)\n",
+                t_gate, t_pre, t_correct,
+                (unsigned long long)n_correct,
+                t_march, (unsigned long long)n_march,
+                t_dup, t_consume, polys.size(), consumed.size());
     if (polys.empty())
     {
         tape_ctx_free(ctx);
@@ -7051,6 +7192,285 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
         chain_used.insert(b);
     }
 
+    /*  QEF-COLLAPSE SAMPLE THINNING (perf experiment, 2026-07-22;
+     *  env STIBIUM_DMESH_QCOLLAPSE=<bar in sp>, DEFAULT OFF - the
+     *  libfive steal, war-doc brief): flat/near-planar sheets feed
+     *  one bisected surface vertex per lattice column into the DT
+     *  where one merged vertex per 2x2x2 cell group would do.
+     *  Upstream thinning shrinks the DT itself - the entire r1
+     *  speed+memory game - unlike any post-extraction decimation.
+     *
+     *  Gates, in order (the brief's five, mapped to this pipeline):
+     *  (1) density sets the SCALE, not a veto: the bucket is 2
+     *      LOCAL pitches (2 * sp / dense factor), grouped per
+     *      density level so no group spans a density seam.  A
+     *      blanket veto on dense boxes would make the pass a
+     *      no-op on real models - autodense's live trigger
+     *      flags ~all leaves there (1653/1663 bino, 6927/7703
+     *      zeiss; the documented overshoot) - and the promoted
+     *      lattice's redundant coplanar verts are exactly the
+     *      cost being attacked;
+     *  (2) the group must be pure bulk surface: plain bisected
+     *      crossings only (features, traced chain points, tseeds,
+     *      contact-chain rails, step-densify rungs, and anything
+     *      within one bucket of them, block the bucket - law
+     *      support keeps its density);
+     *  (3) plane-fit residual over the group < bar*sp (libfive
+     *      merges exactly-planar at 1e-8; we merge NEAR-planar -
+     *      the bar is the dial, sweep 0.01/0.03/0.1);
+     *  (4) the merged vertex (centroid, Newton-projected onto
+     *      f=0) must read |f|/|grad| < bar*sp at the oracle and
+     *      stay inside its bucket - no phantom off-surface reps;
+     *  (5) corridor points never group (the constrained-crease
+     *      band already drops them; a corridor-adjacent bucket is
+     *      blocked via the chain-point dilation of gate 2).
+     *  Topology safety (libfive's Ju triple) is structural here:
+     *  the DT does not crack at density steps, and any inside/
+     *  outside tet edge a dropped witness leaves unresolved is
+     *  re-bisected by the refinement loop - the REFINE insert
+     *  count is the honest referee of over-collapse.  */
+    static const char* qc_env = getenv("STIBIUM_DMESH_QCOLLAPSE");
+    const float qc_bar = qc_env ? float(atof(qc_env)) : 0.f;
+    std::unordered_set<uint32_t> qc_drop;
+    std::unordered_map<uint32_t, std::array<float, 3>> qc_move;
+    if (qc_bar > 0)
+    {
+        static const char* qcw_env =
+                getenv("STIBIUM_DMESH_QCOLLAPSE_W");
+        const float qcw = qcw_env ? float(atof(qcw_env)) : 2.f;
+        /*  O(1) local-density lookup (box_dense_factor is an
+         *  O(boxes) scan - 7.7K boxes x 300K points on zeiss is
+         *  a non-starter): dense boxes are leaf-aligned uniform
+         *  cubes (the tracer's band map uses the same fact), so
+         *  a leaf-grid hash keyed off boxes[0].lo answers in one
+         *  probe.  */
+        std::unordered_map<uint64_t, int> leaf_lvl;
+        float ledge = 0, lor[3] = { 0, 0, 0 };
+        if (!soup.dense_boxes.empty())
+        {
+            const auto& b0 = soup.dense_boxes[0];
+            ledge = b0.hi[0] - b0.lo[0];
+            lor[0] = b0.lo[0]; lor[1] = b0.lo[1];
+            lor[2] = b0.lo[2];
+            if (ledge > 0)
+                for (const auto& b : soup.dense_boxes)
+                {
+                    const uint64_t k =
+                        (uint64_t(int64_t(std::floor(
+                            (b.lo[0]-lor[0])/ledge + 0.5f))
+                            & 0x1FFFFF) << 42) |
+                        (uint64_t(int64_t(std::floor(
+                            (b.lo[1]-lor[1])/ledge + 0.5f))
+                            & 0x1FFFFF) << 21) |
+                        (uint64_t(int64_t(std::floor(
+                            (b.lo[2]-lor[2])/ledge + 0.5f))
+                            & 0x1FFFFF));
+                    int& lv = leaf_lvl[k];
+                    lv = std::max(lv, b.level);
+                }
+        }
+        const auto local_lvl = [&](float x, float y, float z) {
+            if (ledge <= 0)
+                return 0;
+            const uint64_t k =
+                (uint64_t(int64_t(std::floor((x-lor[0])/ledge))
+                    & 0x1FFFFF) << 42) |
+                (uint64_t(int64_t(std::floor((y-lor[1])/ledge))
+                    & 0x1FFFFF) << 21) |
+                (uint64_t(int64_t(std::floor((z-lor[2])/ledge))
+                    & 0x1FFFFF));
+            const auto it = leaf_lvl.find(k);
+            return it == leaf_lvl.end() ? 0 : it->second;
+        };
+        constexpr int QLV = 4;         // levels 0..3
+        const auto bwidth = [&](int lvl) {
+            return qcw * soup.spacing / float(1 << lvl);
+        };
+        const auto bpack = [](int64_t ix, int64_t iy, int64_t iz) {
+            return (uint64_t(ix & 0x1FFFFF) << 42) |
+                   (uint64_t(iy & 0x1FFFFF) << 21) |
+                    uint64_t(iz & 0x1FFFFF);
+        };
+        const auto bkey = [&](int lvl, float x, float y, float z) {
+            const float bw = bwidth(lvl);
+            return bpack(int64_t(std::floor(x / bw)),
+                         int64_t(std::floor(y / bw)),
+                         int64_t(std::floor(z / bw)));
+        };
+        /*  Gate 2 blockers: every non-bulk point poisons its own
+         *  bucket AT EVERY LEVEL; the group test dilates by one
+         *  bucket ring.  */
+        std::unordered_set<uint64_t> blocked[QLV];
+        const auto block_at = [&](float x, float y, float z) {
+            for (int l = 0; l < QLV; ++l)
+                blocked[l].insert(bkey(l, x, y, z));
+        };
+        const size_t bulk_end = soup.surface.size() -
+                size_t(soup.traced) - size_t(soup.feature_points);
+        for (size_t si = bulk_end; si < soup.surface.size(); ++si)
+        {
+            const DSurfPoint& s = soup.surface[si];
+            block_at(s.x, s.y, s.z);
+        }
+        for (const auto& t : soup.tseeds)
+            block_at(t.x, t.y, t.z);
+        for (const auto& ch : soup.contact_chains)
+            for (const auto& p : ch)
+                block_at(p[0], p[1], p[2]);
+        for (const auto& m : dens_pts)
+            block_at(m[0], m[1], m[2]);
+        /*  Grouping per density level (corridor members skipped:
+         *  they are dropped downstream anyway and must not seed
+         *  a rep).  */
+        std::unordered_map<uint64_t, std::vector<uint32_t>>
+                groups[QLV];
+        for (size_t si = 0; si < bulk_end; ++si)
+        {
+            if (!col_drop.empty() && col_drop.count(uint32_t(si)))
+                continue;
+            if (!col_move.empty() && col_move.count(uint32_t(si)))
+                continue;
+            if (chain_used.count(uint32_t(si)))
+                continue;
+            const DSurfPoint& s = soup.surface[si];
+            if (!cseg.empty() && in_corridor(s.x, s.y, s.z))
+                continue;
+            const int lvl = std::min(QLV - 1,
+                                     local_lvl(s.x, s.y, s.z));
+            groups[lvl][bkey(lvl, s.x, s.y, s.z)]
+                    .push_back(uint32_t(si));
+        }
+        uint64_t qc_groups = 0, qc_resid = 0, qc_oracle = 0;
+        std::vector<float> gx, gy, gz, gh, gc;
+        std::vector<std::vector<uint32_t>*> gmem;
+        for (int lvl = 0; lvl < QLV; ++lvl)
+        for (auto& [key, mem] : groups[lvl])
+        {
+            if (mem.size() < 3)
+                continue;
+            const float bw = bwidth(lvl);
+            /*  Gate 2 dilation: any neighbour bucket blocked =
+             *  this bucket stays dense (T-junction guard at law
+             *  and feature boundaries).  */
+            const DSurfPoint& s0 = soup.surface[mem[0]];
+            const int64_t ix = int64_t(std::floor(s0.x / bw)),
+                          iy = int64_t(std::floor(s0.y / bw)),
+                          iz = int64_t(std::floor(s0.z / bw));
+            bool near_block = false;
+            for (int dz = -1; dz <= 1 && !near_block; ++dz)
+                for (int dy = -1; dy <= 1 && !near_block; ++dy)
+                    for (int dx = -1; dx <= 1; ++dx)
+                        if (blocked[lvl].count(
+                                bpack(ix + dx, iy + dy, iz + dz)))
+                        {
+                            near_block = true;
+                            break;
+                        }
+            if (near_block)
+                continue;
+            ++qc_groups;
+            /*  Gate 3: plane fit (centroid + covariance).  */
+            Eigen::Vector3f cen(0, 0, 0);
+            for (const uint32_t m : mem)
+                cen += Eigen::Vector3f(soup.surface[m].x,
+                                       soup.surface[m].y,
+                                       soup.surface[m].z);
+            cen /= float(mem.size());
+            Eigen::Matrix3f cov = Eigen::Matrix3f::Zero();
+            for (const uint32_t m : mem)
+            {
+                const Eigen::Vector3f d(
+                        soup.surface[m].x - cen[0],
+                        soup.surface[m].y - cen[1],
+                        soup.surface[m].z - cen[2]);
+                cov += d * d.transpose();
+            }
+            Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> es(cov);
+            const Eigen::Vector3f n = es.eigenvectors().col(0);
+            float resid = 0;
+            for (const uint32_t m : mem)
+            {
+                const Eigen::Vector3f d(
+                        soup.surface[m].x - cen[0],
+                        soup.surface[m].y - cen[1],
+                        soup.surface[m].z - cen[2]);
+                resid = std::max(resid, fabsf(n.dot(d)));
+            }
+            if (resid >= qc_bar * soup.spacing)
+            {
+                ++qc_resid;
+                continue;
+            }
+            gmem.push_back(&mem);
+            gx.push_back(cen[0]);
+            gy.push_back(cen[1]);
+            gz.push_back(cen[2]);
+            gh.push_back(0.01f * soup.spacing);
+            gc.push_back(0.5f * bw);
+        }
+        if (!gx.empty())
+        {
+            /*  Gate 4: project the centroids onto f = 0 and let
+             *  the oracle referee each merged vertex.  */
+            std::vector<float> ox = gx, oy = gy, oz = gz;
+            project_points_impl(deck, ctx, gx, gy, gz, gh, gc);
+            std::vector<float> qx, qy, qz, qv;
+            qx.reserve(gx.size() * 7);
+            for (size_t i = 0; i < gx.size(); ++i)
+            {
+                for (int q = 0; q < 7; ++q)
+                {
+                    qx.push_back(gx[i]);
+                    qy.push_back(gy[i]);
+                    qz.push_back(gz[i]);
+                }
+                const size_t o = qx.size() - 7;
+                const float h = gh[i];
+                qx[o+1] += h;  qx[o+2] -= h;
+                qy[o+3] += h;  qy[o+4] -= h;
+                qz[o+5] += h;  qz[o+6] -= h;
+            }
+            eval_points_mt(deck, ctx, qx, qy, qz, qv);
+            for (size_t i = 0; i < gx.size(); ++i)
+            {
+                const float f = qv[i*7];
+                const float ggx = qv[i*7+1] - qv[i*7+2];
+                const float ggy = qv[i*7+3] - qv[i*7+4];
+                const float ggz = qv[i*7+5] - qv[i*7+6];
+                const float h2 = 2 * gh[i];
+                const float gmag = sqrtf(ggx*ggx + ggy*ggy +
+                                         ggz*ggz) / h2;
+                const float dx2 = gx[i]-ox[i], dy2 = gy[i]-oy[i],
+                            dz2 = gz[i]-oz[i];
+                const float bw2 = 2.f * gc[i];   // bucket width
+                const bool inb = dx2*dx2 + dy2*dy2 + dz2*dz2 <
+                                 bw2 * bw2;
+                if (!(gmag > 0) || !std::isfinite(f) ||
+                    fabsf(f) / gmag >= qc_bar * soup.spacing ||
+                    !inb)
+                {
+                    ++qc_oracle;
+                    continue;
+                }
+                const auto& mem = *gmem[i];
+                qc_move[mem[0]] = { gx[i], gy[i], gz[i] };
+                for (size_t m = 1; m < mem.size(); ++m)
+                    qc_drop.insert(mem[m]);
+            }
+        }
+        if (getenv("STIBIUM_DMESH_TIME") ||
+            getenv("STIBIUM_DMESH_CHIP_DEBUG"))
+            fprintf(stderr, "QCOLLAPSE: %zu groups merged of %llu "
+                    "eligible (%llu resid-refused, %llu oracle-"
+                    "refused), %zu pts dropped, bar %.3f sp, "
+                    "bucket %.1f sp\n",
+                    qc_move.size(),
+                    (unsigned long long)qc_groups,
+                    (unsigned long long)qc_resid,
+                    (unsigned long long)qc_oracle,
+                    qc_drop.size(), qc_bar, qcw);
+    }
+
     /*  Stage B: triangulate everything (spatial-sort batch insert),
      *  then refine: any tet edge joining an inside vertex directly
      *  to an outside vertex gets a bisected surface point, until no
@@ -7145,6 +7565,11 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
          *  crease is the single collapsed edge.  */
         if (!col_drop.empty() && col_drop.count(uint32_t(si)))
             continue;
+        /*  QEF-collapse: a merged group's dropped members never
+         *  enter; the representative carries the bucket (moved to
+         *  the projected centroid below).  */
+        if (!qc_drop.empty() && qc_drop.count(uint32_t(si)))
+            continue;
         /*  Surface points inside the crease band are redundant
          *  with the constrained polyline and pair into pinch
          *  slivers - drop them, EXCEPT the chain members
@@ -7185,6 +7610,16 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
             {
                 sorder.push_back({ TPoint(mit->second[0],
                         mit->second[1], mit->second[2]), si });
+                continue;
+            }
+        }
+        if (!qc_move.empty())
+        {
+            auto qit = qc_move.find(uint32_t(si));
+            if (qit != qc_move.end())
+            {
+                sorder.push_back({ TPoint(qit->second[0],
+                        qit->second[1], qit->second[2]), si });
                 continue;
             }
         }
@@ -15143,33 +15578,193 @@ bool delaunay_mesh(const Deck* deck, Region r, volatile int* halt,
                     const DSurfPoint& p = soup.surface[ix];
                     pts.push_back({ p.x, p.y, p.z, float(c) });
                 }
+            /*  Spatial hash at the strip radius (perf campaign
+             *  2026-07-22): the all-pairs scan was O(n^2) over
+             *  every chain point - MINUTES of the zeiss attempt-0
+             *  silence, charged to no phase mark.  Bucket at
+             *  strip_r and compare 27 neighbours: identical pair
+             *  set (any pair under strip_r shares or adjoins a
+             *  bucket), and promote[] takes the max per key, so
+             *  visit order cannot matter.  Box lookup goes
+             *  through a leaf-grid map instead of scanning every
+             *  dense box per pair (boxes are leaf-aligned uniform
+             *  cubes - the tracer band map's fact).  */
+            const auto t_strips0 = std::chrono::steady_clock::now();
+            std::unordered_map<uint64_t, std::vector<uint32_t>>
+                    sgrid;
+            const auto skey = [&](float x, float y, float z) {
+                const int64_t ix = int64_t(floorf(x / strip_r));
+                const int64_t iy = int64_t(floorf(y / strip_r));
+                const int64_t iz = int64_t(floorf(z / strip_r));
+                return (uint64_t(ix & 0x1FFFFF) << 42) |
+                       (uint64_t(iy & 0x1FFFFF) << 21) |
+                        uint64_t(iz & 0x1FFFFF);
+            };
+            sgrid.reserve(pts.size());
             for (size_t i = 0; i < pts.size(); ++i)
-                for (size_t j = i + 1; j < pts.size(); ++j)
-                {
-                    if (pts[i][3] == pts[j][3])
-                        continue;
-                    const float dx = pts[i][0] - pts[j][0];
-                    const float dy = pts[i][1] - pts[j][1];
-                    const float dz = pts[i][2] - pts[j][2];
-                    const float d2 = dx*dx + dy*dy + dz*dz;
-                    if (d2 >= strip_r * strip_r)
-                        continue;
-                    const int lvl = d2 >= gap2 * gap2 ? 2 : 3;
-                    const float mx = 0.5f * (pts[i][0] +
-                                             pts[j][0]);
-                    const float my = 0.5f * (pts[i][1] +
-                                             pts[j][1]);
-                    const float mz = 0.5f * (pts[i][2] +
-                                             pts[j][2]);
+                sgrid[skey(pts[i][0], pts[i][1], pts[i][2])]
+                        .push_back(uint32_t(i));
+            const auto ipack = [](int64_t ix, int64_t iy,
+                                  int64_t iz) {
+                return (uint64_t(ix & 0x1FFFFF) << 42) |
+                       (uint64_t(iy & 0x1FFFFF) << 21) |
+                        uint64_t(iz & 0x1FFFFF);
+            };
+            /*  Faithful box index: boxes are not all one size
+             *  (flood vs core leaves), so each box registers in
+             *  EVERY min-edge grid cell it overlaps and the
+             *  lookup replays the original inclusive containment
+             *  test against the cell's list - the promoted set
+             *  is identical to the all-pairs scan's, by
+             *  construction.  */
+            std::unordered_map<uint64_t,
+                    std::vector<const DSoup::DDenseBox*>> bgrid;
+            float bedge = 0, borg[3] = { 0, 0, 0 };
+            if (!soup.dense_boxes.empty())
+            {
+                bedge = 1e30f;
+                for (const auto& db : soup.dense_boxes)
+                    bedge = std::min(bedge,
+                                     db.hi[0] - db.lo[0]);
+                borg[0] = soup.dense_boxes[0].lo[0];
+                borg[1] = soup.dense_boxes[0].lo[1];
+                borg[2] = soup.dense_boxes[0].lo[2];
+                if (bedge > 0 && bedge < 1e29f)
                     for (const auto& db : soup.dense_boxes)
-                        if (mx >= db.lo[0] && mx <= db.hi[0] &&
-                            my >= db.lo[1] && my <= db.hi[1] &&
-                            mz >= db.lo[2] && mz <= db.hi[2])
+                    {
+                        int64_t c0[3], c1[3];
+                        for (int a = 0; a < 3; ++a)
                         {
-                            int& lv = promote[db.key];
-                            lv = std::max(lv, lvl);
+                            c0[a] = int64_t(std::floor(
+                                (db.lo[a]-borg[a]) / bedge));
+                            c1[a] = int64_t(std::floor(
+                                (db.hi[a]-borg[a]) / bedge));
                         }
+                        for (int64_t zz = c0[2]; zz <= c1[2]; ++zz)
+                         for (int64_t yy = c0[1]; yy <= c1[1]; ++yy)
+                          for (int64_t xx = c0[0]; xx <= c1[0];
+                               ++xx)
+                            bgrid[ipack(xx, yy, zz)]
+                                    .push_back(&db);
+                    }
+                else
+                    bedge = 0;
+            }
+            const auto boxes_at = [&](float x, float y, float z)
+                    -> const std::vector<
+                            const DSoup::DDenseBox*>* {
+                if (!(bedge > 0))
+                    return nullptr;
+                const auto it = bgrid.find(ipack(
+                        int64_t(std::floor((x-borg[0])/bedge)),
+                        int64_t(std::floor((y-borg[1])/bedge)),
+                        int64_t(std::floor((z-borg[2])/bedge))));
+                return it == bgrid.end() ? nullptr : &it->second;
+            };
+            for (size_t i = 0; i < pts.size(); ++i)
+            {
+                const int64_t bx = int64_t(floorf(pts[i][0] /
+                                                  strip_r));
+                const int64_t by = int64_t(floorf(pts[i][1] /
+                                                  strip_r));
+                const int64_t bz = int64_t(floorf(pts[i][2] /
+                                                  strip_r));
+                for (int dz = -1; dz <= 1; ++dz)
+                 for (int dy = -1; dy <= 1; ++dy)
+                  for (int dx = -1; dx <= 1; ++dx)
+                  {
+                    const uint64_t k =
+                        (uint64_t((bx+dx) & 0x1FFFFF) << 42) |
+                        (uint64_t((by+dy) & 0x1FFFFF) << 21) |
+                         uint64_t((bz+dz) & 0x1FFFFF);
+                    const auto it = sgrid.find(k);
+                    if (it == sgrid.end())
+                        continue;
+                    for (const uint32_t j : it->second)
+                    {
+                        if (j <= i || pts[i][3] == pts[j][3])
+                            continue;
+                        const float ddx = pts[i][0] - pts[j][0];
+                        const float ddy = pts[i][1] - pts[j][1];
+                        const float ddz = pts[i][2] - pts[j][2];
+                        const float d2 = ddx*ddx + ddy*ddy +
+                                         ddz*ddz;
+                        if (d2 >= strip_r * strip_r)
+                            continue;
+                        const int lvl = d2 >= gap2 * gap2 ? 2 : 3;
+                        const float mx = 0.5f * (pts[i][0] +
+                                                 pts[j][0]);
+                        const float my = 0.5f * (pts[i][1] +
+                                                 pts[j][1]);
+                        const float mz = 0.5f * (pts[i][2] +
+                                                 pts[j][2]);
+                        const auto* cand2 = boxes_at(mx, my, mz);
+                        if (cand2)
+                            for (const auto* db : *cand2)
+                                if (mx >= db->lo[0] &&
+                                    mx <= db->hi[0] &&
+                                    my >= db->lo[1] &&
+                                    my <= db->hi[1] &&
+                                    mz >= db->lo[2] &&
+                                    mz <= db->hi[2])
+                                {
+                                    int& lv = promote[db->key];
+                                    lv = std::max(lv, lvl);
+                                }
+                    }
+                  }
+            }
+            /*  No-op promotion filter (perf campaign 2026-07-22):
+             *  on real models the live-trigger blanket already
+             *  holds ~every leaf at level 2, and a strips
+             *  promotion TO level 2 asks for a density the leaf
+             *  already has - the whole attempt-1 re-run (sample +
+             *  full re-trace: ~37 s bino, minutes on zeiss)
+             *  rebuilds an identical soup.  Drop promotions that
+             *  do not RAISE the leaf's level; skip the re-run
+             *  when none survive.  Lossless by construction:
+             *  delaunay_sample takes max(existing, promoted), so
+             *  a subsumed promote map cannot change the soup.
+             *  STIBIUM_DMESH_STRIPS_RERUN=1 restores the
+             *  unconditional re-run.  */
+            static const char* srr_env =
+                    getenv("STIBIUM_DMESH_STRIPS_RERUN");
+            if (!(srr_env && atoi(srr_env) != 0) &&
+                !promote.empty())
+            {
+                std::unordered_map<uint64_t, int> have;
+                for (const auto& db : soup.dense_boxes)
+                {
+                    int& lv = have[db.key];
+                    lv = std::max(lv, db.level);
                 }
+                size_t noop = 0;
+                for (auto it = promote.begin();
+                     it != promote.end();)
+                {
+                    const auto h = have.find(it->first);
+                    if (h != have.end() &&
+                        h->second >= it->second)
+                    {
+                        it = promote.erase(it);
+                        ++noop;
+                    }
+                    else
+                        ++it;
+                }
+                if (noop && (getenv("STIBIUM_DMESH_TIME") ||
+                             getenv("STIBIUM_DMESH_CHIP_DEBUG")))
+                    fprintf(stderr, "STRIPS: %zu no-op promotions "
+                            "dropped (already at level), %zu "
+                            "remain\n", noop, promote.size());
+            }
+            if (getenv("STIBIUM_DMESH_TIME"))
+                fprintf(stderr, "TIME2   strips detect          "
+                        "%8.2f s  (%zu chain pts)\n",
+                        std::chrono::duration<double>(
+                            std::chrono::steady_clock::now()
+                                - t_strips0).count(),
+                        pts.size());
             if (!promote.empty())
             {
                 if (getenv("STIBIUM_DMESH_TIME") ||
