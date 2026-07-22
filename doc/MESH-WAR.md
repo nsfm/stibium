@@ -119,21 +119,35 @@ removed; the hole rim (one live facet per rim edge) is chained by
 an orientation-parity wedge walk, ear-clipped to exact-rail runs,
 and zippered - every rim edge ends with exactly 2 facets.  THE
 ORACLE LICENSE is the identity story: |f|/|grad| < 0.01 sp at 3
-lateral fractions per station AND at every emitted triangle's
-centroid + edge midpoints; no license = no stitch = baseline,
+lateral fractions per station AND at every emitted triangle
+(adaptive barycentric lattice scaled to the longest edge - size
+cannot dodge the oracle); no license = no stitch = baseline,
 deterministically (failed spans excise the wounded station and
-retry the halves).  Extract r1: seam1 off-law 53 -> 19 (area
--70%), |depth| std 0.0091 -> 0.0050; seam2 17 -> 5; the 26-row
-deep-air class (0.027-0.030) is GONE except SIX rows at the two
-pre-existing nm pinch stations (all-removed pinch fans leave two
-parity-legal sheet pairings - needs the tet ring; those stations
-excise cleanly to baseline).  FULL BINO one-variable A/B: FACE
-0.069% = 0.069%, nm 310 = 310, repairs 7467 = 7467, FACE_DUMP
-cluster diff ZERO - the stitch engages model-wide (8 pairs, 20
-ribbons) with zero collateral, because it runs DOWNSTREAM of
-extraction and repair: no lattice phase to be unlucky about, the
-exact failure that demoted STEPDENSE.  res-7 + ladder + cyl +
-screws: 0 candidate pairs, knob inert, referees unchanged.
+retry the halves).  ROUND 2 (Nate's eye report: 90%-ribboned
+gaps + bonus tris on the flats) closed both mechanisms: (1) the
+gaps were the two pre-existing nm PINCH stations - the winding-
+parity wedge walk could not pick between the two ring-adjacent
+sheet candidates at an all-removed pinch fan; replaced with the
+TET-RING sheet-mate rule (manifold-pass doctrine: the two facets
+bounding the same inside cell run are one sheet) - exact at any
+fan size, and the stitch now HEALS the pinches (extract nm
+2 -> 0); (2) the flat-surface riders were big ears whose sparse
+4-sample certification missed the interior bulge - adaptive
+sampling caught them, and face-touching emission (ears/fans off
+the pure rail-to-rail ribbon) gets a tighter 0.008 sp bar (the
+clean-seam texture band; STITCHFACE retunes).  Extract r1:
+seam1 off-law 53 -> 3, worst air 0.030 -> 0.006, |depth| std
+0.0091 -> 0.0014 (= reference-clean seam2's texture); seam2
+17 -> 5; ONE contiguous ribbon per seam, deep (>0.015) airs 0,
+nm 2 -> 0.  FULL BINO one-variable A/B: FACE 0.069% = 0.069%,
+nm 310 = 310, repairs 7467 = 7467, FACE_DUMP cluster diff ZERO -
+the stitch engages model-wide (8 pairs licensed) with zero
+collateral, because it runs DOWNSTREAM of extraction and repair:
+no lattice phase to be unlucky about, the exact failure that
+demoted STEPDENSE.  Rail-pure emission is exact (worst ratio
+1.6e-5 sp on the bino).  res-7 extract + ladder r1/r2 + cyl
+r1/r2 + screws: 0 candidate pairs, knob inert, referees
+unchanged row-for-row.
 
 Nate's ladder models (examples/detail_spacing_test.sb + _cyl.sb -
 PERMANENT BENCH: groove pairs at gaps 8/4/2/1/0.5 sp, flat and
