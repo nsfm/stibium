@@ -196,17 +196,9 @@ void ExportMeshWorker::async()
      *  meshes the same in any neighborhood, and grid-aligned
      *  mechanical models always get the aligned phase.
      *  STIBIUM_DMESH_CANON_GRID=0 reverts.  */
-    /*  DEFAULT ON (Nate's promotion call, 2026-07-22: "the
-     *  determinism is necessary - this one has plagued us").
-     *  Canonical phase heals the deep tails (screws family
-     *  worst 0.533 -> 0.177, family B 0.478 -> 0.196) and makes
-     *  every jar faithful by construction; the cost is a
-     *  ONE-TIME phase re-roll per model (per-feature winners
-     *  and losers - the losers are now DETERMINISTIC and
-     *  huntable).  Ledgered follow-up: aliasing-aware density
-     *  triggers at canonical pitch.  =0 reverts to the old
-     *  bbox-derived lattice.  */
-    /*  DEMOTED BACK TO OPT-IN same day (the flagship referee):
+    /*  Promoted to default 2026-07-22 (Nate: "the determinism
+     *  is necessary"), DEMOTED BACK TO OPT-IN same day (the
+     *  flagship referee):
      *  canonical-at-phase-0 zeiss = 4 GEOMETRIC OPEN EDGES
      *  (watertight law violation), retreat fired and could not
      *  heal, 25.7 min / nm 412 / FACE 0.033 vs 0.026.  The
