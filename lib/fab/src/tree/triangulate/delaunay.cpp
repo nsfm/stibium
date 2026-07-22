@@ -9274,9 +9274,14 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                 continue;
                             for (int d = 0; d < 3; ++d)
                                 dir[d] /= dl;
+                            /*  fine steps: the crease curves
+                             *  into the junction, and stride-
+                             *  sized chords cut the corner
+                             *  (measured: -0.034 sp chips at
+                             *  the calibration junction)  */
                             const float step = std::min(
                                 std::max(dl, 0.05f * sp),
-                                0.15f * sp);
+                                0.08f * sp);
                             /*  target: nearest CROSSING chain
                              *  foot, forward  */
                             float tgt[3]; float tbest = 1e30f;
@@ -9389,10 +9394,19 @@ bool mesh_impl(const Deck* deck, const DSoup& soup,
                                     break;
                                 std::vector<std::array<float,3>>
                                         vp2 = { { nx[0], ny[0],
-                                                  nz[0] } };
+                                                  nz[0] },
+                                        { 0.5f*(cur[0]+nx[0]),
+                                          0.5f*(cur[1]+ny[0]),
+                                          0.5f*(cur[2]+nz[0]) } };
                                 std::vector<float> vr2;
                                 pre_eval(vp2, vr2);
-                                if (!(vr2[0] < 2e-3f * sp))
+                                /*  the point AND the segment
+                                 *  midpoint must be on-surface -
+                                 *  a chord over the curving
+                                 *  crease stops the march
+                                 *  instead of minting it  */
+                                if (!(vr2[0] < 2e-3f * sp) ||
+                                    !(vr2[1] < 4e-3f * sp))
                                     break;
                                 pts.push_back({ nx[0], ny[0],
                                                 nz[0] });
