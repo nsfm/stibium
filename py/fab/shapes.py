@@ -3259,6 +3259,158 @@ def iterate_scaled(part, n, factor, dx=0, dy=0, x0=0, y0=0):
 ################################################################################
 # Mesh import
 
+def _font_dirs():
+    import os
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return [os.path.join(base, 'fonts'), os.path.join(base, '..', 'fonts')]
+
+
+def _resolve_font(font):
+    """ Resolves a font name/path to a TrueType file path. Returns None for the
+        built-in Antimony font (empty name or 'Antimony'). Resolution order:
+        an explicit .ttf/.ttc path (absolute or project-relative), a bundled
+        font by display name, then an installed system family via fontconfig.
+    """
+    import os
+    import _fabtypes
+    name = (font or '').strip()
+    if name.lower() in ('', 'antimony'):
+        return None
+    if name.lower().endswith(('.ttf', '.ttc', '.otf')):
+        p = name
+        if not os.path.isabs(p):
+            proj = _fabtypes.project_dir()
+            if proj:
+                p = os.path.join(proj, name)
+        if os.path.exists(p):
+            return p
+    for d in _font_dirs():
+        for ext in ('.ttf', '.TTF', '.ttc'):
+            p = os.path.join(d, name + ext)
+            if os.path.exists(p):
+                return p
+    try:
+        import subprocess
+        r = subprocess.run(['fc-match', '-f', '%{file}', name],
+                           capture_output=True, text=True, timeout=5)
+        p = r.stdout.strip()
+        if p and os.path.exists(p) and p.lower().endswith(('.ttf', '.ttc')):
+            return p
+    except Exception:
+        pass
+    raise RuntimeError(
+        "font %r not found (use 'Antimony', a bundled name, an installed "
+        "family name, or a .ttf path)" % font)
+
+
+def list_fonts():
+    """ Available font display names for the Text (font) node and agents:
+        'Antimony' first, then bundled faces, then installed system families.
+        (The selector UI shows this list; bundled/Antimony sort to the top.)
+    """
+    import os
+    names = ['Antimony']
+    for d in _font_dirs():
+        if os.path.isdir(d):
+            for f in sorted(os.listdir(d)):
+                if f.lower().endswith(('.ttf', '.ttc')):
+                    n = os.path.splitext(f)[0]
+                    if n not in names:
+                        names.append(n)
+    try:
+        import subprocess
+        r = subprocess.run(['fc-list', ':', 'family'],
+                           capture_output=True, text=True, timeout=5)
+        fams = set()
+        for line in r.stdout.splitlines():
+            fam = line.split(',')[0].strip()
+            if fam:
+                fams.add(fam)
+        names += [f for f in sorted(fams) if f not in names]
+    except Exception:
+        pass
+    return names
+
+
+def glyph(font, char, cap=1.0, thickness=0.2, res=30.0):
+    """ Bakes one glyph of a TrueType font into a signed-distance grid.
+
+        The glyph outline is converted to an exact 2D distance field (with
+        winding-number sign, so counters classify correctly) and extruded to a
+        solid: `cap` is the capital-letter height in mm (1 = 1mm, matching the
+        legacy text() node), the solid runs 0..`thickness` in z, and `res` is
+        the sample density in voxels/mm. Relative font paths resolve against
+        the project directory. The result is a true distance field, so it
+        composes cleanly with loft/offset/shell/fillet.
+    """
+    import _fabtypes
+    path = _resolve_font(font)
+    if path is None:
+        raise RuntimeError("glyph(): the Antimony font is baked per-string; "
+                           "use text_font('Antimony', ...)")
+    cp = ord(char) if isinstance(char, str) else int(char)
+    shape, _cached = _fabtypes._bake_glyph(
+            path, cp, float(cap), float(thickness), float(res))
+    return shape
+
+
+def redistance(shape, res=20.0):
+    """ Rebuilds a Shape as a true euclidean distance field sampled on a grid
+        (an OP_GRID oracle). Fixes offset/shell/blend on non-exact fields, and
+        freezes an expensive subtree into an O(1) grid lookup whose cost is
+        independent of its complexity. The shape must be 3D-bounded (extrude 2D
+        first). The baked grid is cached under ~/.stibium.
+    """
+    import hashlib
+    import _fabtypes
+    key = ("redist:" +
+           hashlib.sha256(shape.math.encode('utf-8', 'replace')).hexdigest() +
+           ":%g" % res)
+    out, _cached = _fabtypes._redistance(shape, float(res), key)
+    return out
+
+
+def text_font(font, string, cap=1.0, thickness=0.2, res=30.0, tracking=0.0):
+    """ Lays out a string as baked 3D grid-glyphs (left edge at x=0, baseline
+        at y=0), advancing each glyph by the font's real metrics plus optional
+        `tracking` (extra mm between glyphs). This is the grid-font counterpart
+        to text(); the legacy hand-font text() is untouched. Each glyph is a
+        true distance field, so the whole string composes with loft/offset/etc.
+
+        The font name may be 'Antimony' (or empty) for Matt Keeter's built-in
+        typeface, a bundled font name, an installed system family, or a .ttf
+        path. Every glyph is a true distance field, so the whole string
+        composes with loft/offset/etc.
+    """
+    import hashlib
+    import _fabtypes
+    path = _resolve_font(font)
+    # Flagship default: Matt's Antimony font. Bake the laid-out glyphs via a
+    # marching-squares contour of his fields (smooth walls, exact distance).
+    if path is None:
+        flat = text(string, 0.0, 0.0, cap)
+        if flat is None:
+            return None
+        key = ("anti:" +
+               hashlib.sha256(flat.math.encode('utf-8', 'replace')).hexdigest() +
+               ":%g:%g" % (thickness, res))
+        out, _c = _fabtypes._bake_shape_glyph(
+                flat, float(thickness), float(res), key)
+        return out
+    out = None
+    x = 0.0
+    for ch in string:
+        cp = ord(ch)
+        adv = _fabtypes._glyph_advance(path, cp, float(cap))
+        if not ch.isspace():
+            shape, _c = _fabtypes._bake_glyph(
+                    path, cp, float(cap), float(thickness), float(res))
+            g = move(shape, x, 0.0)
+            out = g if out is None else union(out, g)
+        x += adv + tracking
+    return out
+
+
 def import_mesh(filename, voxels_per_unit=2.0, sha256=''):
     """ Imports an STL mesh as a solid distance field.
 

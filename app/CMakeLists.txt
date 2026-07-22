@@ -161,12 +161,16 @@ else()
         COMMAND ${CMAKE_COMMAND} -E rm -rf
             ${CMAKE_CURRENT_BINARY_DIR}/sb/nodes
             ${CMAKE_CURRENT_BINARY_DIR}/sb/fab
+            ${CMAKE_CURRENT_BINARY_DIR}/sb/fonts
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/py/nodes
             ${CMAKE_CURRENT_BINARY_DIR}/sb/nodes
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/py/fab
             ${CMAKE_CURRENT_BINARY_DIR}/sb/fab
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/py/fonts
+            ${CMAKE_CURRENT_BINARY_DIR}/sb/fonts
         COMMAND ${CMAKE_COMMAND} -E touch
             ${CMAKE_CURRENT_BINARY_DIR}/sb_py.stamp
         DEPENDS ${SB_PY_SOURCES})
@@ -179,6 +183,8 @@ else()
     install(DIRECTORY ../py/nodes
             DESTINATION ${CMAKE_INSTALL_PREFIX}/share/stibium)
     install(DIRECTORY ../py/fab
+            DESTINATION ${CMAKE_INSTALL_PREFIX}/share/stibium)
+    install(DIRECTORY ../py/fonts
             DESTINATION ${CMAKE_INSTALL_PREFIX}/share/stibium)
 endif()
 
