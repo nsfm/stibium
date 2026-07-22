@@ -5388,6 +5388,32 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
                             .count();
         }
     }
+    /*  Seed grid for the consume sweep (perf campaign
+     *  2026-07-22): the sweep asked every unconsumed seed
+     *  against every new polyline segment - O(seeds x segs),
+     *  17 s per zeiss attempt.  Seeds never move, so a
+     *  one-lattice-pitch grid answers "which seeds are near
+     *  this segment" in O(cells overlapped).  The predicate
+     *  (seed within 0.05 sp of any segment) is a pure set
+     *  test - segment-major order sets exactly the same
+     *  consumed flags.  */
+    std::unordered_map<uint64_t, std::vector<uint32_t>> seed_grid;
+    const float sg_cell = sp;
+    {
+        const auto sgkey = [&](float x, float y, float z) {
+            const int64_t ix = int64_t(floorf(x / sg_cell));
+            const int64_t iy = int64_t(floorf(y / sg_cell));
+            const int64_t iz = int64_t(floorf(z / sg_cell));
+            return (uint64_t(ix & 0x1FFFFF) << 42) |
+                   (uint64_t(iy & 0x1FFFFF) << 21) |
+                    uint64_t(iz & 0x1FFFFF);
+        };
+        seed_grid.reserve(seeds.size());
+        for (size_t s2 = 0; s2 < seeds.size(); ++s2)
+            seed_grid[sgkey(seeds[s2].x, seeds[s2].y,
+                            seeds[s2].z)]
+                    .push_back(uint32_t(s2));
+    }
     /*  Tracer anatomy (perf campaign 2026-07-22): the tracer is
      *  now the LEADING phase on bino (~33 s x 2 attempts vs CGAL
      *  insert 25 s) - sub-timers under STIBIUM_DMESH_TIME=2 name
@@ -5577,33 +5603,58 @@ bool delaunay_trace(const Deck* deck, Region r, DSoup* soup,
              *  ate entire neighbouring rings in crowded bands
              *  (Nate's eyeball read: "averaged, merged, or
              *  skipped").  */
-            const float cr2 = 0.05f * sp * 0.05f * sp;
+            const float cr = 0.05f * sp;
+            const float cr2 = cr * cr;
             const double tk0 = ttime ? tnow() : 0;
-            for (size_t s2 = 0; s2 < consumed.size(); ++s2)
+            for (size_t qi = 0; qi + 1 < poly.size(); ++qi)
             {
-                if (consumed[s2])
-                    continue;
-                const DSurfPoint& F = seeds[s2];
-                for (size_t qi = 0; qi + 1 < poly.size(); ++qi)
-                {
-                    const DSurfPoint& A = poly[qi];
-                    const DSurfPoint& B = poly[qi + 1];
-                    const float bx = B.x - A.x, by = B.y - A.y,
-                                bz = B.z - A.z;
-                    const float px = F.x - A.x, py = F.y - A.y,
-                                pz = F.z - A.z;
-                    const float bb = bx*bx + by*by + bz*bz;
-                    float t = bb > 0
-                            ? (px*bx + py*by + pz*bz) / bb : 0;
-                    t = t < 0 ? 0 : t > 1 ? 1 : t;
-                    const float dx = px - t*bx, dy = py - t*by,
-                                dz = pz - t*bz;
-                    if (dx*dx + dy*dy + dz*dz < cr2)
+                const DSurfPoint& A = poly[qi];
+                const DSurfPoint& B = poly[qi + 1];
+                const float lo0 = std::min(A.x, B.x) - cr,
+                            hi0 = std::max(A.x, B.x) + cr,
+                            lo1 = std::min(A.y, B.y) - cr,
+                            hi1 = std::max(A.y, B.y) + cr,
+                            lo2 = std::min(A.z, B.z) - cr,
+                            hi2 = std::max(A.z, B.z) + cr;
+                const int64_t c0x = int64_t(floorf(lo0/sg_cell)),
+                              c1x = int64_t(floorf(hi0/sg_cell)),
+                              c0y = int64_t(floorf(lo1/sg_cell)),
+                              c1y = int64_t(floorf(hi1/sg_cell)),
+                              c0z = int64_t(floorf(lo2/sg_cell)),
+                              c1z = int64_t(floorf(hi2/sg_cell));
+                const float bx = B.x - A.x, by = B.y - A.y,
+                            bz = B.z - A.z;
+                const float bb = bx*bx + by*by + bz*bz;
+                for (int64_t zz = c0z; zz <= c1z; ++zz)
+                 for (int64_t yy = c0y; yy <= c1y; ++yy)
+                  for (int64_t xx = c0x; xx <= c1x; ++xx)
+                  {
+                    const uint64_t k =
+                        (uint64_t(xx & 0x1FFFFF) << 42) |
+                        (uint64_t(yy & 0x1FFFFF) << 21) |
+                         uint64_t(zz & 0x1FFFFF);
+                    const auto it = seed_grid.find(k);
+                    if (it == seed_grid.end())
+                        continue;
+                    for (const uint32_t s2 : it->second)
                     {
-                        consumed[s2] = 1;
-                        break;
+                        if (consumed[s2])
+                            continue;
+                        const DSurfPoint& F = seeds[s2];
+                        const float px = F.x - A.x,
+                                    py = F.y - A.y,
+                                    pz = F.z - A.z;
+                        float t = bb > 0
+                                ? (px*bx + py*by + pz*bz) / bb
+                                : 0;
+                        t = t < 0 ? 0 : t > 1 ? 1 : t;
+                        const float dx = px - t*bx,
+                                    dy = py - t*by,
+                                    dz = pz - t*bz;
+                        if (dx*dx + dy*dy + dz*dz < cr2)
+                            consumed[s2] = 1;
                     }
-                }
+                  }
             }
             if (ttime)
                 t_consume += tnow() - tk0;
