@@ -113,6 +113,21 @@ struct Collector
     std::unordered_map<uint64_t, int> want_dense;
     uint64_t phantom_rejected = 0;   // QEF corners the surface vetoed
 
+    /*  Twin-step seed mint (the 45-degree jar, 2026-07-21): a
+     *  cell whose crossings sample two SAME-FACING offset
+     *  surfaces (a sub-cell step riser diagonal to every lattice
+     *  axis - the fine lattice never pierces it) plane-fits its
+     *  QEF to the MID-PLANE: the residual IS the half-separation
+     *  and the seed lands on the wall BETWEEN the creases, where
+     *  correct() fails (measured: 208 correct-fails, zero law,
+     *  the smooth-chamfer ledge).  Mid-plane +- nr along the mean
+     *  normal lands ON the two step corners: mint both as
+     *  tracer-only seeds.  Same-facing (min_dot high) excludes
+     *  plates and grooves (anti-parallel).  Pass 1's mints must
+     *  survive the pass swap - pass 2's densified cells see one
+     *  face each and lose the signature.  */
+    std::vector<DSurfPoint> twin_seeds;
+
     /*  Weld rollback: sites where a previous attempt's weld seam
      *  minted an open edge - no welding within 1 cell of these.  */
     const std::vector<std::array<float, 3>>* noweld = nullptr;
@@ -3362,6 +3377,33 @@ void feature_points(Collector& c)
         const float nr = (A * (x - centroid) - b).norm() /
                 (sqrtf(float(fc.n)) * (fc.hi[0] - fc.lo[0]));
         flag_leaf(fc.leaf_key, nr);
+        /*  Twin-step seed mint (see Collector::twin_seeds): the
+         *  same-facing offset signature.  min_dot >= 0.7 keeps
+         *  plates and grooves out (their faces read anti-
+         *  parallel); the offset band is the sub-cell twin-rail
+         *  bar.  The tracer referees every mint - a wrong twin
+         *  hypothesis dies in correct(), delivering nothing.  */
+        {
+            const float cell9 = fc.hi[0] - fc.lo[0];
+            const float off9 = nr * cell9;
+            if (min_dot >= 0.7f && off9 > 5e-3f * c.spacing &&
+                off9 < 0.10f * c.spacing)
+            {
+                Eigen::Vector3f nm = Eigen::Vector3f::Zero();
+                for (uint8_t q = 0; q < fc.n; ++q)
+                    nm += normals[fc.pts[q]];
+                const float nl = nm.norm();
+                if (nl > 0.5f * float(fc.n))
+                {
+                    nm /= nl;
+                    for (int s9 = -1; s9 <= 1; s9 += 2)
+                        c.twin_seeds.push_back({
+                            x(0) + s9 * off9 * nm(0),
+                            x(1) + s9 * off9 * nm(1),
+                            x(2) + s9 * off9 * nm(2) });
+                }
+            }
+        }
         if (c.census)
         {
             int bucket = 17;
@@ -3392,7 +3434,16 @@ void feature_points(Collector& c)
             if (x(q) < fc.lo[q] - margin || x(q) > fc.hi[q] + margin)
                 ok = false;
         if (!ok)
+        {
+            if (c.census && c.census->dump)
+                fprintf(c.census->dump,
+                        "ESCAPE %.6g %.6g %.6g from cell "
+                        "%.6g %.6g %.6g\n", x(0), x(1), x(2),
+                        0.5f * (fc.lo[0] + fc.hi[0]),
+                        0.5f * (fc.lo[1] + fc.hi[1]),
+                        0.5f * (fc.lo[2] + fc.hi[2]));
             continue;
+        }
 
         cands.push_back({ &fc, { x(0), x(1), x(2) }, shallow });
     }
@@ -3531,6 +3582,10 @@ void feature_points(Collector& c)
                                        cands[i].x[1],
                                        cands[i].x[2] });
             ++added;
+            if (c.census && c.census->dump)
+                fprintf(c.census->dump, "FEATPT %.6g %.6g %.6g\n",
+                        cands[i].x[0], cands[i].x[1],
+                        cands[i].x[2]);
             for (uint8_t q = 0; q < fc.n; ++q)
                 suppress[fc.pts[q]] = 1;
         }
@@ -4593,11 +4648,25 @@ DSoup delaunay_sample(const Deck* deck, Region r, volatile int* halt,
         /*  Contact chains were traced on the pass-1 collector;
          *  the drill-down soup is the one that ships.  */
         c2.soup.contact_chains = std::move(c.soup.contact_chains);
+        /*  Twin-step mints from BOTH passes ship as tracer-only
+         *  seeds: pass 1's base cells carry the same-facing
+         *  offset signature that pass 2's densified cells lose
+         *  (each fine cell sees one face of a diagonal sub-cell
+         *  step).  The tracer verifies every mint.  */
+        c2.soup.tseeds.insert(c2.soup.tseeds.end(),
+                              c.twin_seeds.begin(),
+                              c.twin_seeds.end());
+        c2.soup.tseeds.insert(c2.soup.tseeds.end(),
+                              c2.twin_seeds.begin(),
+                              c2.twin_seeds.end());
         return std::move(c2.soup);
     }
 
     if (census.dump)
         fclose(census.dump);
+    c.soup.tseeds.insert(c.soup.tseeds.end(),
+                         c.twin_seeds.begin(),
+                         c.twin_seeds.end());
     return std::move(c.soup);
 }
 
