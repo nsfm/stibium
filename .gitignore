@@ -18,3 +18,4 @@ __pycache__/
 Testing/
 doc/research/
 .claude/
+golden_*.txt

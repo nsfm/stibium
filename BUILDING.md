@@ -8,6 +8,10 @@ Requirements
 - [Lemon](https://www.hwaci.com/sw/lemon/)
 - [Flex](https://github.com/westes/flex)
 - [ninja](https://ninja-build.org/) (recommended)
+- [CGAL](https://www.cgal.org/) — *optional but recommended*; enables the
+  constrained-Delaunay meshing path. Used header-only and auto-detected
+  (`find_package(CGAL QUIET)`); the build proceeds without it, but the
+  high-quality triangulation is disabled.
 
 --------------------------------------------------------------------------------
 
@@ -15,7 +19,7 @@ Arch Linux
 ----------
 ```
 sudo pacman -S --needed git base-devel cmake ninja qt6-base python \
-                        boost libpng lemon flex
+                        boost libpng lemon flex cgal
 
 git clone https://github.com/nsfm/stibium
 cd stibium
@@ -34,7 +38,7 @@ Debian / Ubuntu
 sudo apt install git build-essential cmake ninja-build \
                  qt6-base-dev libgl1-mesa-dev \
                  python3-dev libboost-python-dev \
-                 libpng-dev lemon flex
+                 libpng-dev lemon flex libcgal-dev
 
 git clone https://github.com/nsfm/stibium
 cd stibium
@@ -51,7 +55,7 @@ macOS
 -----
 With [homebrew](https://brew.sh/):
 ```
-brew install cmake ninja qt python boost-python3 libpng lemon flex
+brew install cmake ninja qt python boost-python3 libpng lemon flex cgal
 
 git clone https://github.com/nsfm/stibium
 cd stibium

@@ -1,0 +1,53 @@
+name: CI
+
+# Build Stibium on a clean Ubuntu runner and run the test suite. This does
+# double duty: it catches breakage on PRs *and* continuously proves the
+# dependency list in BUILDING.md still produces a working build from scratch.
+#
+# Release-artifact packaging (AppImage / Flatpak / macOS bundle) is
+# deliberately NOT here yet — that belongs with the first tagged release,
+# once packaging decisions are actually made. See TODO.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref so a rapid push sequence doesn't
+# pile up runners.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Ubuntu build + ctest
+    runs-on: ubuntu-latest
+
+    env:
+      # The app is Qt6; headless --validate tests need an offscreen platform
+      # plugin since the runner has no display.
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build \
+            qt6-base-dev libgl1-mesa-dev \
+            python3-dev libboost-python-dev \
+            libpng-dev lemon flex \
+            libcgal-dev
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure

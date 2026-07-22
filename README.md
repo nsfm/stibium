@@ -1,16 +1,11 @@
-# Stibium
+# Stibium - CAD from a parallel universe
 
-*Stibium* is a computer-aided design (CAD) tool from a parallel universe
-in which CAD software evolved from Lisp machines rather than drafting
-tables.
-
-Models are **functional representations**: pure math describing, for
+In Stibium, models are **functional representations**: pure math describing, for
 every point in space, how far inside or outside the shape it is. You
 build them in a **node graph**: boxes wired to boxes, every parameter
 live, every node a small Python script you can open and edit. There are
 no meshes until the moment you export one, so nothing ever gets
-approximated, degenerate, or non-manifold while you work. Zoom in
-forever; booleans always succeed; a thread is an equation.
+approximated, degenerate, or non-manifold while you work.
 
 It is a continuation of [Antimony](https://github.com/mkeeter/antimony)
 by [Matt Keeter](https://mattkeeter.com/projects/antimony), itself a
@@ -23,6 +18,7 @@ Antimony went into maintenance mode in 2016. Stibium picks the project
 back up and keeps going. Since the fork:
 
 **Geometry in, geometry out**
+
 - **Mesh import**: drop an STL (scan, vendor part, old export) into
   the graph and it becomes a solid distance field like everything
   else: subtract it, blend it, lattice it, re-export it. Sign comes
@@ -36,6 +32,7 @@ back up and keeps going. Since the fork:
   and rendering run on all cores.
 
 **A deeper modeling vocabulary**
+
 - O(1) **domain repetition**: infinite arrays, polar rings, mirrored
   tilings, and self-similar scale recursion at constant cost (the
   classic Array nodes union N copies and weep).
@@ -46,6 +43,7 @@ back up and keeps going. Since the fork:
   exact-distance primitives, gyroid lattices, bends and twirls.
 
 **Headless and scriptable**
+
 - The `.sb` format is deterministic, diffable JSON; saves are
   byte-stable.
 - Headless verbs close the loop without a display: `--validate`
@@ -55,6 +53,7 @@ back up and keeps going. Since the fork:
 - Headless verbs mean CI for your CAD models.
 
 **Quality of life**
+
 - Cross-section preview, analytics overlay, recent files, export
   dialogs that suggest sane resolutions and show real dimensions, a
   canvas that stays smooth on 300-node graphs, and a seven-year
@@ -86,12 +85,18 @@ For Antimony history and design rationale, see
 
 ## License
 
-Stibium's new work is released under the [GPLv3](LICENSE).
+Stibium's new work is released under the
+[GNU Affero General Public License v3.0 or later](LICENSE) (AGPL-3.0-or-later).
 
-Code inherited from Antimony remains under its original MIT License;
-see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+© 2022-2026 Nate Dube
 
-Copyright (c) 2013-2015 Matthew Keeter and other contributors (Antimony)
+Code inherited from Antimony remains under its original MIT License, and
+every third-party work Stibium redistributes (vendored libraries, bundled
+fonts) is accounted for in
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). Algorithmic lineage and
+debts are credited in [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
+
+© 2013-2022 Matthew Keeter and other contributors (Antimony)
 
 Antimony includes code from
 [kokopelli](https://github.com/mkeeter/kokopelli), which is

@@ -470,5 +470,6 @@ release; newest work at the top of each section.
 - Renamed to **Stibium** in all user-facing surfaces, with full
   Antimony/kokopelli lineage in the About box. Binary/install plumbing
   renames deferred to the first packaged release.
-- New work licensed GPLv3; inherited MIT preserved in
-  `THIRD_PARTY_LICENSES.md`.
+- New work licensed **AGPL-3.0-or-later**; inherited Antimony MIT and all
+  vendored third-party licenses accounted for in `THIRD_PARTY_LICENSES.md`,
+  with algorithmic lineage (libfive, fidget) credited in `ATTRIBUTIONS.md`.

@@ -1,0 +1,24 @@
+# Normalize line endings: store LF in the repo, check out native.
+# Protects history from a CRLF contributor rewriting whole files.
+* text=auto
+
+# Keep shell scripts and shaders LF even on Windows checkouts.
+*.sh    text eol=lf
+*.frag  text eol=lf
+*.vert  text eol=lf
+
+# Binary assets — never diff or line-ending-munge these.
+*.ttf   binary
+*.otf   binary
+*.png   binary
+*.stl   binary
+*.icns  binary
+
+# Vendored third-party code: excluded from GitHub's language statistics
+# (so the language bar shows Stibium's code, not Eigen's) and collapsed
+# in diffs. See THIRD_PARTY_LICENSES.md for what each is.
+app/vendor/**      linguist-vendored
+lib/fab/vendor/**  linguist-vendored
+
+# Bundled fonts are assets, not source — keep them out of the language stats.
+py/fonts/**        linguist-vendored
