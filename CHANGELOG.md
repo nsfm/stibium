@@ -430,7 +430,7 @@ release; newest work at the top of each section.
   jobs, and scripts can drive exports directly.
 - **Live reload**: the open .sb reloads automatically when it changes
   on disk (only while the session has no unsaved edits), so external
-  external tools can edit a model while it's open.
+  tools can edit a model while it's open.
 
 - **Qt6 port** (Qt 6.11 verified; per-monitor HiDPI, modern platform
   support). C++17 across targets.

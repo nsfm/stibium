@@ -190,7 +190,7 @@ protected:
     /*
      *  Watches the open file and reloads when it changes on disk
      *  (only while the session has no unsaved edits), so external
-     *  external tools can edit the model live.
+     *  tools can edit the model live.
      */
     QFileSystemWatcher* file_watcher=nullptr;
     bool ignore_next_file_change=false;

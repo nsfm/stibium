@@ -93,7 +93,7 @@ Packaging
 The legacy packaging under `deploy/` (macOS bundle script, Debian
 source packaging) predates Qt6 and the Stibium rename; it is retained
 for reference only and will be rebuilt (CI + AppImage/Flatpak + macOS
-bundle) at the first-release milestone — see TODO.md.
+bundle) at the first-release milestone.
 
 Windows
 -------

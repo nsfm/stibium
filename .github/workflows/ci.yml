@@ -6,7 +6,7 @@ name: CI
 #
 # Release-artifact packaging (AppImage / Flatpak / macOS bundle) is
 # deliberately NOT here yet — that belongs with the first tagged release,
-# once packaging decisions are actually made. See TODO.md.
+# once packaging decisions are actually made.
 
 on:
   push:
