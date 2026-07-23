@@ -107,8 +107,10 @@ endif()
 # predicates).  Without it, stage A still builds and delaunay_mesh
 # reports unavailable.
 #
-# delaunay.cpp uses Conforming_constrained_Delaunay_triangulation_3, new in
-# CGAL 6.0, so we require >= 6.0.  A system CGAL is preferred; if it's
+# delaunay.cpp uses Conforming_constrained_Delaunay_triangulation_3, which
+# first shipped in CGAL 6.1; the code is verified against 6.2, so we require
+# >= 6.2.  (6.1 has the feature too; raise the floor here to 6.1 only after
+# confirming the CDT_3 API matches.)  A system CGAL is preferred; if it's
 # missing or too old (e.g. Ubuntu 24.04 ships 5.6) we fetch the header-only
 # release at configure time so this major feature is never silently dropped.
 # CGAL is header-only but still needs Boost/GMP/MPFR from the system.
@@ -118,27 +120,27 @@ endif()
 # (CGAL's config runs its own find_package(Boost), which clobbers the
 # parent's component results - save and restore around the whole block.)
 option(STIBIUM_FETCH_CGAL
-    "Fetch header-only CGAL >= 6.0 when the system copy is missing or too old" ON)
+    "Fetch header-only CGAL >= 6.2 when the system copy is missing or too old" ON)
 
 set(_stibium_boost_libs ${Boost_LIBRARIES})
 
-find_package(CGAL 6.0 QUIET)
+find_package(CGAL 6.2 QUIET)
 if (NOT CGAL_FOUND AND STIBIUM_FETCH_CGAL)
     message(STATUS
-        "Stibium: system CGAL >= 6.0 not found - fetching header-only CGAL 6.0.1")
+        "Stibium: system CGAL >= 6.2 not found - fetching header-only CGAL 6.2")
     include(FetchContent)
     # Download + extract ONLY. CGAL's top-level CMakeLists is its own build
     # system (it errors on add_subdirectory as a dependency), so SOURCE_SUBDIR
     # points at a nonexistent dir to suppress FetchContent's add_subdirectory;
     # we then consume the release through its shipped CGALConfig.cmake below.
     FetchContent_Declare(CGAL
-        URL https://github.com/CGAL/cgal/releases/download/v6.0.1/CGAL-6.0.1-library.tar.xz
-        URL_HASH SHA256=c752737f91d1af71fa96038f0e37945ce82a5f1fffb6200172cfcdd77755a356
+        URL https://github.com/CGAL/cgal/releases/download/v6.2/CGAL-6.2-library.tar.xz
+        URL_HASH SHA256=f75d2b2486842fb47222c780c7241c262d392802d0811143c4e9b539972ee55b
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
         SOURCE_SUBDIR do-not-configure
     )
     FetchContent_MakeAvailable(CGAL)
-    find_package(CGAL 6.0 QUIET PATHS "${cgal_SOURCE_DIR}" NO_DEFAULT_PATH)
+    find_package(CGAL 6.2 QUIET PATHS "${cgal_SOURCE_DIR}" NO_DEFAULT_PATH)
 endif()
 
 set(Boost_LIBRARIES ${_stibium_boost_libs})
